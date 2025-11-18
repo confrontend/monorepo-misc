@@ -82,3 +82,6 @@ Desktop.ini
 # Local env/config
 *.local
 *.secret
+
+
+pdf-to-text/file.pdf
