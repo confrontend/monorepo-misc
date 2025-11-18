@@ -1,0 +1,12 @@
+{
+  "name": "random-scripts",
+  "version": "1.0.0",
+  "description": "Logs text content of all H4 tags from an HTML file",
+  "main": "script.js",
+  "scripts": {
+    "start": "node script.js"
+  },
+  "dependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

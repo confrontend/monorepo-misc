@@ -1,0 +1,25 @@
+| | |
+|-|-|
+| ee orem |
+| «HIRELESSHAYE | EBboothuwireiess | |
+| \ |
+| N |
+| [RT — |
+| Fo Bp rey EE DE ERE se a ees eee ER es eT Ly Sn ea do Sp |
+| Se mel os elt ie pe ee ee i REE |
+| ai |
+| sean Purchase a Spigen Crystal Flex Crystal Clear Google Pixel 8a case (ACCASJ001297) at regular price and receive the following for free: |
+| - 5 . | Romp pens iShieldr Glass Google Pel 8 (ACSCI2000231, MSRP $30.98) |
+| - Pasa x rare th psig an |
+| aa |
+| i — |
+| nsanons tr | Op S—— |
+| a vice traded in st have vlue of 80 o more record of device model & ME required |
+| bo |
+| LP in FE (a [P— so i i bates |
+| ae mierda boner |
+| IE ER AEE Trade worth $100, customer gets $50 bonus: total $150 |
+| ae |
+| SR — |
+| i - i i | Add SKU: PRTSNS000946 |
+| ah nnd |

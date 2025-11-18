@@ -1,0 +1,84 @@
+###############
+# Node.js
+###############
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.cache/
+.tmp/
+.env
+.env.*
+*.log
+
+###############
+# Python
+###############
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+*.dist-info/
+pip-wheel-metadata/
+venv/
+env/
+.venv/
+.venv*/
+.env/
+.env*/
+.mypy_cache/
+pytest_cache/
+.pytest_cache/
+
+###############
+# Common Build Artifacts
+###############
+*.manifest
+*.spec
+*.bak
+*.tmp
+*.swp
+
+###############
+# OS Files
+###############
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+###############
+# IDE / Editors
+###############
+# VSCode
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains / PyCharm / WebStorm
+.idea/
+*.iml
+
+# Sublime
+*.sublime-workspace
+*.sublime-project
+
+###############
+# Misc
+###############
+# Local env/config
+*.local
+*.secret

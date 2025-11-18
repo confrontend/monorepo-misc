@@ -1,0 +1,22 @@
+{
+  "name": "pdf-ocr-processor",
+  "version": "1.0.0",
+  "description": "Extract text from scanned PDF using pdf2pic and tesseract.js",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "pdf2pic": "",
+    "tesseract.js": ""
+  },
+  "keywords": [
+    "pdf",
+    "ocr",
+    "tesseract",
+    "pdf2pic",
+    "image-to-text"
+  ],
+  "author": "",
+  "license": "MIT"
+}
