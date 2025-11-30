@@ -60,12 +60,6 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-4">
       <h1 className="text-2xl font-semibold">Reddit Thread → JSON</h1>
-      <button
-        onClick={logoutPasskey}
-        className="text-sm text-gray-600 underline hover:text-black"
-      >
-        Logout
-      </button>
       <label className="block text-sm font-medium">
         Reddit URLs (one per line)
       </label>

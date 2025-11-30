@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-function isLocked() {
-  // Middleware sets this header; on client we can’t read response headers directly,
-  // so we infer lock by checking a small ping to a public path.
-  // Simpler approach: check cookie against localStorage and allow UI to decide.
-  return typeof window !== "undefined" && !getStoredPasskey();
-}
+import { useRouter, usePathname } from "next/navigation";
 
 function getStoredPasskey() {
   if (typeof window === "undefined") return null;
@@ -20,18 +14,17 @@ function getStoredPasskey() {
 }
 
 function setPasskeyEverywhere(key: string) {
-  // localStorage
   localStorage.setItem("site_passkey", key);
-  // cookie (readable by client; middleware will accept it)
   document.cookie = `site_passkey=${key}; Max-Age=${60 * 60 * 24 * 7}; Path=/; SameSite=Lax; Secure`;
 }
 
 export default function PasskeyGate({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [hasKey, setHasKey] = useState<boolean>(() => !!getStoredPasskey());
   const [value, setValue] = useState("");
 
   useEffect(() => {
-    // re-check on mount (in case of cookie-only)
     setHasKey(!!getStoredPasskey());
   }, []);
 
@@ -62,11 +55,14 @@ export default function PasskeyGate({ children }: { children: React.ReactNode })
             const key = value.trim();
             if (!key) return;
             setPasskeyEverywhere(key);
-            // Quick probe fetch to verify; if rejected, reset
             fetch("/api/health?probe=1", {
               headers: { "x-passkey": key },
             })
-              .then(() => setHasKey(true))
+              .then(() => {
+                setHasKey(true);
+                // Always redirect to dashboard after successful login
+                router.push("/");
+              })
               .catch(() => {
                 localStorage.removeItem("site_passkey");
                 document.cookie = "site_passkey=; Max-Age=0; Path=/";
