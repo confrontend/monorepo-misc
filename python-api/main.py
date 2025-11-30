@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 import os
 import re
 import json
@@ -8,6 +9,9 @@ import yt_dlp
 from pathlib import Path
 import logging
 import sys
+import xml.etree.ElementTree as ET
+import html
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -21,10 +25,9 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Allow your Next.js app to call this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,145 +39,218 @@ class VideoRequest(BaseModel):
 def clean_filename(name):
     return re.sub(r'[<>:"/\\|?*]', '_', name)
 
-def extract_text(json_path):
-    """Extract text from YouTube subtitle JSON with detailed logging"""
-    logger.info(f"Attempting to extract text from: {json_path}")
-    
+def extract_text(subtitle_path):
+    """Extract text from YouTube subtitle file (srv3/xml or json3 format)"""
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with open(subtitle_path, "r", encoding="utf-8") as f:
+            content = f.read()
         
-        logger.info(f"JSON file loaded successfully. Keys: {list(data.keys())}")
-        
-        # Try multiple extraction methods
+        if content.strip().startswith('<?xml') or content.strip().startswith('<'):
+            return extract_text_from_xml(content)
+        else:
+            return extract_text_from_json(content)
+            
+    except Exception as e:
+        logger.error(f"Error extracting text: {e}")
+        raise
+
+def extract_text_from_xml(xml_content):
+    """Extract text from XML subtitle format (srv3)"""
+    try:
+        root = ET.fromstring(xml_content)
         words = []
         
-        # Method 1: Standard json3 format with events
+        p_elements = list(root.iter('p'))
+        
+        for p_elem in p_elements:
+            text_content = ''.join(p_elem.itertext())
+            
+            if text_content:
+                text = html.unescape(text_content.strip())
+                text = ' '.join(text.split())
+                if text:
+                    words.append(text)
+        
+        return " ".join(words).strip()
+        
+    except Exception as e:
+        logger.error(f"Error parsing XML: {e}")
+        raise
+
+def extract_text_from_json(json_content):
+    """Extract text from JSON subtitle format (json3)"""
+    try:
+        data = json.loads(json_content)
+        words = []
+        
         if "events" in data:
-            logger.info(f"Found 'events' key with {len(data['events'])} events")
-            for i, event in enumerate(data.get("events", [])):
+            for event in data.get("events", []):
                 if "segs" in event:
                     for seg in event["segs"]:
                         t = seg.get("utf8", "").strip()
                         if t and t != "\n":
                             words.append(t)
-                elif "dDurationMs" in event and "segs" not in event:
-                    # Some events might be timing markers
-                    continue
             
             if words:
-                logger.info(f"Extracted {len(words)} text segments using Method 1 (events/segs)")
                 return " ".join(words).strip()
         
-        # Method 2: Try direct 'body' field (some subtitle formats)
-        if "body" in data:
-            logger.info("Found 'body' key, attempting extraction")
-            for item in data.get("body", []):
-                if isinstance(item, dict) and "body" in item:
-                    words.append(item["body"])
-            
-            if words:
-                logger.info(f"Extracted {len(words)} text segments using Method 2 (body)")
-                return " ".join(words).strip()
-        
-        # Method 3: Try 'text' field (simple format)
-        if "text" in data:
-            logger.info("Found direct 'text' key")
-            return data["text"]
-        
-        # If we get here, log the structure for debugging
-        logger.error(f"Could not extract text. JSON structure: {json.dumps(data, indent=2)[:500]}")
         raise ValueError("No recognized subtitle format found in JSON")
-        
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Error extracting text: {e}")
+        logger.error(f"JSON decode error: {e}")
         raise
 
 @app.get("/")
 def read_root():
     return {"status": "Python API is running"}
 
-@app.post("/api/youtube-subtitles")
-async def download_subtitles(request: VideoRequest):
-    logger.info(f"=== YouTube Subtitles Request ===")
-    logger.info(f"URL: {request.url}")
+async def generate_progress(url: str):
+    """Generate progress updates as JSON stream"""
+    output_dir = Path("temp_output")
+    output_dir.mkdir(exist_ok=True)
     
     try:
-        url = request.url
-        output_dir = Path("temp_output")
-        output_dir.mkdir(exist_ok=True)
-        logger.info(f"Output directory: {output_dir.absolute()}")
-        
-        ydl_opts = {
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitlesformat": "json3",
-            "subtitleslangs": ["en"],
-            "skip_download": True,
-            "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
-            "quiet": False,
-            "no_warnings": False,
+        # Check if it's a playlist
+        ydl_opts_info = {
+            "quiet": True,
+            "extract_flat": True,
         }
         
-        logger.info(f"yt-dlp options: {ydl_opts}")
+        is_playlist = False
+        video_urls = [url]
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info("Extracting video info...")
+        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            logger.info(f"Video title: {info.get('title', 'Unknown')}")
-            logger.info(f"Video ID: {info.get('id', 'Unknown')}")
-            logger.info(f"Available subtitles: {list(info.get('subtitles', {}).keys())}")
-            logger.info(f"Available automatic captions: {list(info.get('automatic_captions', {}).keys())}")
+            if info.get('_type') == 'playlist':
+                is_playlist = True
+                playlist_count = len(info.get('entries', []))
+                
+                yield json.dumps({
+                    "type": "progress",
+                    "message": f"📋 Found playlist with {playlist_count} videos",
+                    "current": 0,
+                    "total": playlist_count
+                }) + "\n"
+                
+                video_urls = []
+                for entry in info['entries']:
+                    if entry:
+                        video_urls.append(entry.get('url') or f"https://www.youtube.com/watch?v={entry['id']}")
+            else:
+                yield json.dumps({
+                    "type": "progress",
+                    "message": "🎥 Processing single video...",
+                    "current": 0,
+                    "total": 1
+                }) + "\n"
+        
+        # Process each video
+        all_subtitles = []
+        
+        for idx, video_url in enumerate(video_urls, 1):
+            yield json.dumps({
+                "type": "progress",
+                "message": f"⏳ Processing video {idx}/{len(video_urls)}...",
+                "current": idx - 1,
+                "total": len(video_urls)
+            }) + "\n"
             
-            logger.info("Downloading subtitles...")
-            ydl.download([url])
-            title = info["title"]
+            ydl_opts = {
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitlesformat": "srv3",
+                "subtitleslangs": ["en"],
+                "skip_download": True,
+                "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+            }
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    video_title = info.get('title', 'Unknown')
+                    
+                    yield json.dumps({
+                        "type": "progress",
+                        "message": f"📥 Downloading: {video_title[:50]}...",
+                        "current": idx - 0.5,
+                        "total": len(video_urls)
+                    }) + "\n"
+                    
+                    ydl.download([video_url])
+                
+                subtitle_files = (
+                    list(output_dir.glob("*.srv3")) + 
+                    list(output_dir.glob("*.json3")) +
+                    list(output_dir.glob("*.vtt")) +
+                    list(output_dir.glob("*.ttml"))
+                )
+                
+                if subtitle_files:
+                    subtitle_path = subtitle_files[0]
+                    text = extract_text(subtitle_path)
+                    
+                    subtitle_entry = f"\n\n{'='*80}\n📹 {video_title}\n{'='*80}\n\n{text}"
+                    all_subtitles.append(subtitle_entry)
+                    
+                    yield json.dumps({
+                        "type": "progress",
+                        "message": f"✅ Completed: {video_title[:50]}...",
+                        "current": idx,
+                        "total": len(video_urls)
+                    }) + "\n"
+                else:
+                    all_subtitles.append(f"\n\n{'='*80}\n📹 {video_title}\n{'='*80}\n\n[No subtitles available]")
+                
+            except Exception as e:
+                logger.error(f"Error processing video {idx}: {e}")
+                all_subtitles.append(f"\n\n{'='*80}\n📹 Video {idx}\n{'='*80}\n\n[Error: {str(e)}]")
+            
+            # Cleanup after each video
+            for file in output_dir.glob("*"):
+                file.unlink()
         
-        # Find and process the subtitle file
-        subtitle_files = list(output_dir.glob("*.json3"))
-        logger.info(f"Found {len(subtitle_files)} subtitle files: {[f.name for f in subtitle_files]}")
+        # Send final result
+        combined_text = "\n".join(all_subtitles).strip()
         
-        if not subtitle_files:
-            # List all files in directory for debugging
-            all_files = list(output_dir.glob("*"))
-            logger.error(f"No .json3 files found. All files in directory: {[f.name for f in all_files]}")
-            raise HTTPException(status_code=404, detail="No subtitles found")
+        if is_playlist:
+            title = f"Playlist: {len(video_urls)} videos"
+        else:
+            title = info.get('title', 'Unknown')
         
-        json_path = subtitle_files[0]
-        logger.info(f"Processing subtitle file: {json_path.name}")
-        logger.info(f"File size: {json_path.stat().st_size} bytes")
-        
-        text = extract_text(json_path)
-        logger.info(f"Successfully extracted {len(text)} characters of text")
-        
-        # Cleanup
-        logger.info("Cleaning up temporary files...")
-        for file in output_dir.glob("*"):
-            file.unlink()
-            logger.info(f"Deleted: {file.name}")
-        
-        return {
+        yield json.dumps({
+            "type": "complete",
             "success": True,
             "title": title,
-            "text": text,
-            "message": "Subtitles extracted successfully"
-        }
-    
-    except yt_dlp.utils.DownloadError as e:
-        logger.error(f"yt-dlp download error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
-    except HTTPException:
-        raise
+            "text": combined_text,
+            "video_count": len(video_urls),
+            "message": f"✨ Completed! Extracted subtitles from {len(video_urls)} video(s)"
+        }) + "\n"
+        
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error: {e}")
+        yield json.dumps({
+            "type": "error",
+            "message": str(e)
+        }) + "\n"
+
+@app.post("/api/youtube-subtitles")
+async def download_subtitles(request: VideoRequest):
+    return StreamingResponse(
+        generate_progress(request.url),
+        media_type="application/x-ndjson"
+    )
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"Starting server on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0", 
+        port=port,
+        reload=True
+    )

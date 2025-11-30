@@ -1,81 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PYTHON_API_URL = process.env.PYTHON_API_URL || "https://reliable-strength-production.up.railway.app";
+// Force dynamic prevents caching of streaming responses
+export const dynamic = 'force-dynamic';
+
+const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
-  console.log("=== YouTube Subtitles API Called ===");
-  
   try {
-    // Debug: Log raw request
-    console.log("Request URL:", req.url);
-    console.log("Request method:", req.method);
-    console.log("Python API URL:", PYTHON_API_URL);
-
-    // Parse body
     const body = await req.json();
-    console.log("Received body:", JSON.stringify(body, null, 2));
-
     const videoUrl = body.videoUrl || body.url;
-    console.log("Extracted video URL:", videoUrl);
 
     if (!videoUrl) {
-      console.error("ERROR: No video URL provided");
+      return NextResponse.json({ error: "Video URL is required" }, { status: 400 });
+    }
+
+    // 1. Call Python Backend
+    const pythonRes = await fetch(`${PYTHON_API_URL}/api/youtube-subtitles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: videoUrl }),
+      // Important: prevent Node from buffering the response
+      // @ts-ignore - 'duplex' is a valid node-fetch option but ts definition might be outdated
+      duplex: 'half' 
+    });
+
+    // 2. Handle connection errors
+    if (!pythonRes.ok) {
+      const errText = await pythonRes.text();
       return NextResponse.json(
-        { 
-          error: "Video URL is required", 
-          receivedBody: body,
-          debug: "videoUrl field is missing"
-        },
-        { status: 400 }
+        { error: `Python API error: ${errText}` },
+        { status: pythonRes.status }
       );
     }
 
-    // Prepare request to Python API
-    const pythonApiUrl = `${PYTHON_API_URL}/api/youtube-subtitles`;
-    const requestBody = { url: videoUrl };
-    
-    console.log("Calling Python API at:", pythonApiUrl);
-    console.log("Sending body:", JSON.stringify(requestBody, null, 2));
-
-    // Call Python API
-    const response = await fetch(pythonApiUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
+    // 3. CRITICAL: Pass the stream through directly. DO NOT usage .json() here.
+    return new Response(pythonRes.body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Transfer-Encoding": "chunked",
       },
-      body: JSON.stringify(requestBody),
     });
 
-    console.log("Python API response status:", response.status);
-    console.log("Python API response headers:", Object.fromEntries(response.headers));
-
-    // Parse response
-    const data = await response.json();
-    console.log("Python API response data:", JSON.stringify(data, null, 2));
-
-    if (!response.ok) {
-      console.error("Python API returned error:", data);
-      throw new Error(data.detail || data.error || "Failed to fetch subtitles");
-    }
-
-    console.log("SUCCESS: Subtitles fetched successfully");
-    return NextResponse.json(data);
-
   } catch (error: any) {
-    console.error("=== ERROR in YouTube Subtitles API ===");
-    console.error("Error type:", error.constructor.name);
-    console.error("Error message:", error.message);
-    console.error("Error stack:", error.stack);
-    
+    console.error("API Route Error:", error);
     return NextResponse.json(
-      { 
-        error: error.message || "Failed to fetch subtitles",
-        errorType: error.constructor.name,
-        debug: {
-          pythonApiUrl: PYTHON_API_URL,
-          timestamp: new Date().toISOString()
-        }
-      },
+      { error: error.message || "Internal Server Error" },
       { status: 500 }
     );
   }
