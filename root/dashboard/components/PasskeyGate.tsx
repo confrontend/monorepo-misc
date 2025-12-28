@@ -33,8 +33,8 @@ export default function PasskeyGate({ children }: { children: React.ReactNode })
   if (!locked) return <>{children}</>;
 
   return (
-    <div className="min-h-screen grid place-items-center bg-neutral-50">
-      <div className="w-full max-w-sm rounded-2xl border bg-white shadow p-6 space-y-4">
+    <div className="min-h-screen grid place-items-center bg-gray-700">
+      <div className="w-full max-w-sm rounded-2xl border bg-white text-gray-700 shadow p-6 space-y-4">
         <h1 className="text-lg font-semibold">Enter Passkey</h1>
         <input
           type="password"
@@ -72,8 +72,8 @@ export default function PasskeyGate({ children }: { children: React.ReactNode })
         >
           Continue
         </button>
-        <p className="text-xs text-neutral-500">
-          Your passkey is stored locally for a week and sent as a header on API calls.
+        <p className="text-xs text-shadow-neutral-50">
+          For personal use only. Do not share the passkey with anyone.
         </p>
       </div>
     </div>
