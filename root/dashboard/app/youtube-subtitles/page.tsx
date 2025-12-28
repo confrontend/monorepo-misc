@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
+import { useState } from "react";
+import Link from "next/link";
 
 // Define the shape of the incoming stream data
 type StreamEvent = {
-  type: 'progress' | 'complete' | 'error';
+  type: "progress" | "complete" | "error";
   message: string;
   current?: number;
   total?: number;
@@ -16,24 +16,35 @@ type StreamEvent = {
 };
 
 export default function YoutubeSubtitles() {
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState<{ msg: string; pct: number } | null>(null);
-  const [result, setResult] = useState<{ title: string; text: string; count: number } | null>(null);
-  const [error, setError] = useState('');
+  const [progress, setProgress] = useState<{ msg: string; pct: number } | null>(
+    null
+  );
+  const [result, setResult] = useState<{
+    title: string;
+    text: string;
+    count: number;
+  } | null>(null);
+  const [error, setError] = useState("");
+  const [abortController, setAbortController] =
+    useState<AbortController | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const controller = new AbortController(); // Create new controller
+    setAbortController(controller);
     setLoading(true);
-    setError('');
+    setError("");
     setResult(null);
-    setProgress({ msg: 'Connecting...', pct: 0 });
+    setProgress({ msg: "Connecting...", pct: 0 });
 
     try {
-      const response = await fetch('/api/youtube-subtitles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/youtube-subtitles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoUrl: url }),
+        signal: controller.signal,
       });
 
       if (!response.ok) throw new Error(await response.text());
@@ -42,15 +53,15 @@ export default function YoutubeSubtitles() {
       // --- STREAM READER LOGIC ---
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
@@ -58,30 +69,43 @@ export default function YoutubeSubtitles() {
           try {
             const data: StreamEvent = JSON.parse(line);
 
-            if (data.type === 'progress') {
-              const pct = data.total ? Math.round((data.current! / data.total) * 100) : 0;
+            if (data.type === "progress") {
+              const pct = data.total
+                ? Math.round((data.current! / data.total) * 100)
+                : 0;
               setProgress({ msg: data.message, pct });
-            } 
-            else if (data.type === 'complete') {
+            } else if (data.type === "complete") {
               setResult({
-                title: data.title || 'Unknown',
-                text: data.text || '',
-                count: data.video_count || 1
+                title: data.title || "Unknown",
+                text: data.text || "",
+                count: data.video_count || 1,
               });
               setLoading(false);
               setProgress(null);
-            } 
-            else if (data.type === 'error') {
+            } else if (data.type === "error") {
               throw new Error(data.message);
             }
-          } catch (e) {
-            console.warn("Error parsing stream chunk", e);
+          } catch (err: any) {
+            if (err.name === "AbortError") {
+              console.log("Fetch aborted");
+            } else {
+              setError(err.message || "An error occurred");
+            }
+          } finally {
+            setAbortController(null);
           }
         }
       }
-
     } catch (err: any) {
-      setError(err.message || 'An error occurred');
+      setError(err.message || "An error occurred");
+      setLoading(false);
+      setProgress(null);
+    }
+  };
+
+  const handleCancel = () => {
+    if (abortController) {
+      abortController.abort(); // Triggers the cancellation
       setLoading(false);
       setProgress(null);
     }
@@ -90,26 +114,31 @@ export default function YoutubeSubtitles() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       {/* --- ADDED BACK BUTTON --- */}
-      <Link href="/" className="text-blue-400 hover:text-blue-300 mb-6 inline-block transition-colors">
+      <Link
+        href="/"
+        className="text-blue-400 hover:text-blue-300 mb-6 inline-block transition-colors"
+      >
         ← Back to Dashboard
       </Link>
 
-      <h1 className="text-2xl font-bold mb-4 text-white">YouTube Subtitle Downloader</h1>
-      
+      <h1 className="text-2xl font-bold mb-4 text-white">
+        YouTube Subtitle Downloader
+      </h1>
+
       <form onSubmit={handleSubmit} className="mb-6 gap-2 flex flex-col">
-        <input 
-          type="text" 
+        <input
+          type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Enter YouTube Playlist or Video URL..."
           className="border border-gray-700 bg-gray-900 text-white p-3 rounded focus:ring-2 focus:ring-blue-500 outline-none"
           required
         />
-        <button 
+        <button
           disabled={loading}
           className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded disabled:bg-gray-600 disabled:cursor-not-allowed font-bold transition-colors"
         >
-          {loading ? 'Processing...' : 'Get Subtitles'}
+          {loading ? "Processing..." : "Get Subtitles"}
         </button>
       </form>
 
@@ -121,11 +150,17 @@ export default function YoutubeSubtitles() {
             <span>{progress.pct}%</span>
           </div>
           <div className="w-full bg-gray-700 h-2 rounded overflow-hidden">
-            <div 
-              className="bg-blue-500 h-full transition-all duration-300" 
+            <div
+              className="bg-blue-500 h-full transition-all duration-300"
               style={{ width: `${progress.pct}%` }}
             />
           </div>
+          <button
+            onClick={handleCancel}
+            className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded transition-colors"
+          >
+            Cancel Download
+          </button>
         </div>
       )}
 
@@ -139,12 +174,15 @@ export default function YoutubeSubtitles() {
         <div className="border border-gray-200 rounded-lg p-6 shadow-sm bg-white text-gray-900">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{result.title}</h2>
+              <h2 className="text-xl font-bold text-gray-900">
+                {result.title}
+              </h2>
               <p className="text-gray-500 text-sm mt-1">
-                Extracted from {result.count} video{result.count !== 1 ? 's' : ''}
+                Extracted from {result.count} video
+                {result.count !== 1 ? "s" : ""}
               </p>
             </div>
-            <button 
+            <button
               onClick={() => {
                 navigator.clipboard.writeText(result.text);
                 alert("Copied to clipboard!");
@@ -155,7 +193,6 @@ export default function YoutubeSubtitles() {
             </button>
           </div>
 
-          {/* --- FIXED TEXT VISIBILITY --- */}
           <div className="bg-gray-50 border border-gray-200 p-4 rounded h-96 overflow-auto">
             <pre className="text-gray-900 whitespace-pre-wrap font-sans text-sm leading-relaxed">
               {result.text}
