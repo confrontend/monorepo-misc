@@ -4,8 +4,21 @@ import AppCard from "@/components/AppCard";
 import { logoutPasskey } from "@/lib/authedFetch";
 
 const apps = [
-  { name: "Reddit Fetcher", description: "Fetch and display Reddit posts", href: "/reddit-fetcher" },
-  { name: "YouTube Subtitles", description: "Download YouTube subtitles", href: "/youtube-subtitles" },
+  {
+    name: "Reddit Fetcher",
+    description: "Fetch and display Reddit posts",
+    href: "/reddit-fetcher",
+  },
+  {
+    name: "YouTube Subtitles",
+    description: "Download YouTube subtitles",
+    href: "/youtube-subtitles",
+  },
+  {
+    name: "Site Extractor",
+    description: "Extract main text from multiple URLs",
+    href: "/site-extractor",
+  },
 ];
 
 export default function HomePage() {
