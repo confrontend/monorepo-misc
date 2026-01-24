@@ -1,29 +1,52 @@
-# YouTube Subtitles Dashboard
+# Dashboard
 
-A full-stack application that downloads and extracts subtitles from YouTube videos. Built with Next.js frontend and FastAPI Python backend.
+A multi-app platform for various web utilities. Built with Next.js frontend and FastAPI backend.
+
+## 📱 Available Apps
+
+- **YouTube Subtitles** - Extract subtitles from YouTube videos
+- **Reddit Fetcher** - Fetch and analyze Reddit data
+- **Site Extractor** - Extract and scrape website content
+- **Instagram Reel Downloader** - Download Instagram reels/videos from URLs
 
 ## 🏗️ Architecture
 
-### Frontend (Next.js)
+### Frontend
 - **Location**: `root/dashboard/`
-- **Framework**: Next.js 16 with React
+- **Framework**: Next.js 16 + React 19
+- **Styling**: TailwindCSS
 - **Port**: `http://localhost:3000`
-- **Features**: Dashboard UI with cards linking to different apps
 
-### Backend (Python API)
+### Backend API
 - **Location**: `python-api/`
 - **Framework**: FastAPI with yt-dlp
 - **Port**: `http://localhost:8000`
-- **Features**: YouTube subtitle extraction, supports multiple formats (srv3, json3, vtt)
 
 ## 🚀 Running Locally
 
 ### Prerequisites
 - Node.js 18+ and npm
 - Python 3.11+
+- **yt-dlp** (for video downloads)
 - Git
 
-### 1. Setup Backend (Python API)
+### 1. Install yt-dlp
+
+``````bash
+# Windows (via pip):
+pip install yt-dlp
+
+# Or via winget:
+winget install yt-dlp
+
+# Mac:
+brew install yt-dlp
+
+# Linux:
+sudo apt install yt-dlp
+``````
+
+### 2. Setup Backend (Python API)
 
 ``````bash
 # Navigate to python-api folder
@@ -47,7 +70,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 Backend will be available at `http://localhost:8000`
 
-### 2. Setup Frontend (Next.js)
+### 3. Setup Frontend (Next.js)
 
 ``````bash
 # Navigate to dashboard folder
@@ -65,119 +88,141 @@ npm run dev
 
 Frontend will be available at `http://localhost:3000`
 
-### 3. Access the Application
+### 4. Access the Application
 
 Open your browser and go to:
 - **Dashboard**: http://localhost:3000
 - **YouTube Subtitles**: http://localhost:3000/youtube-subtitles
+- **Instagram Reel Downloader**: http://localhost:3000/instagram-scraper
 - **Python API Docs**: http://localhost:8000/docs
 
 ## 📝 How It Works
 
-### Development Flow
-1. **User enters YouTube URL** in the frontend form
-2. **Next.js API route** (`/api/youtube-subtitles`) receives the request
-3. **Request is proxied** to local Python backend at `localhost:8000`
-4. **Python backend** uses `yt-dlp` to:
-   - Extract video metadata
-   - Download subtitle files (.srv3 format)
-   - Parse XML and extract text
-   - Clean up temporary files
-5. **Response returns** through Next.js to the frontend
-6. **Text displays** inline with copy-to-clipboard functionality
+### YouTube Subtitles
+1. User enters YouTube URL in the frontend
+2. Request is sent to the Python FastAPI backend via the Next.js proxy
+3. Backend uses **yt-dlp** to extract video metadata and download subtitles
+4. Subtitles are parsed from XML/JSON format and returned as text
+5. Frontend displays the extracted text with copy functionality
 
-### Production Setup
+### Instagram Reel Downloader Workflow
 
-**Backend (Railway)**
-- Python API deployed to: `https://reliable-strength-production.up.railway.app`
-- Auto-deploys on git push
-- Environment: Production (no auto-reload)
+**Step 1: Extract Top Reels from Instagram HTML**
 
-**Frontend (Your hosting)**
-- Set environment variable: `PYTHON_API_URL=https://reliable-strength-production.up.railway.app`
-- Next.js app connects to production Python API
+Use Perplexity Comet (or similar AI browser) with this prompt:
 
-**Configuration**
-``````bash
-# Development (.env.local)
-PYTHON_API_URL=http://localhost:8000
+```
+Top 10 reels table sorted by VIEWS DESC:
 
-# Production (hosting platform)
-PYTHON_API_URL=https://reliable-strength-production.up.railway.app
-``````
+| # | Views | URL |
+|---|-------|-----|
+| 1 | 1,026 | [https://instagram.com/rasool1mirzaei/reel/DSX](https://instagram.com/rasool1mirzaei/reel/DSX)... |
 
-## 🛠️ Development Tips
+Views from spans near SVG view icon. URLs from href="/rasool1mirzaei/reel/...". Table only.
+```
 
-### Auto-Reload
-Both servers support hot-reload:
-- **Python**: uvicorn's `--reload` flag watches for file changes
-- **Next.js**: Turbopack automatically reloads on save
+**Step 2: Download Videos**
+1. Copy the reel URLs from the table
+2. Paste into the Instagram Reel Downloader at http://localhost:3000/instagram-scraper
+3. Click "Extract URLs" then "Download All"
+4. Videos are downloaded sequentially to your device
 
-### Testing Playlists
-The app automatically detects playlist URLs and extracts only the first video to avoid long processing times.
+**Step 3: Aggregate Transcriptions**
+1. After transcribing videos (using Whisper AI or similar), save transcription files with the format:
+   - `instagram-reel-[ID] (transcribed on [DATE]).txt`
+   - Example: `instagram-reel-17868991110836 (transcribed on 17-Jan-2026 17-20-36).txt`
+2. In the Instagram Reel Downloader page, scroll to the "Aggregate Transcriptions" section
+3. Enter the folder path containing your transcription files
+4. Click "Aggregate Transcriptions"
+5. A single text file will be downloaded with all transcriptions organized by their ID
+6. Each transcription section includes:
+   - The video ID for easy matching with video files
+   - The original filename
+   - The full transcription content
+   - Clear separators between different transcriptions
 
-### Debugging
-- **Python logs**: Check terminal running uvicorn
-- **Next.js logs**: Check terminal running `npm run dev`
-- **API inspection**: Visit http://localhost:8000/docs for interactive API documentation
+**Step 4: Generate Competitor Analysis Slides**
+
+Use **Google NotebookLM** with the aggregated transcriptions file and the following prompt:
+
+```
+**Generate Social Media Competition Analysis Slides**
+
+**Input**: Top 10 posts table (URL + Metric like Views/Likes) + matching transcriptions/captions
+
+**Output**: 10-slide presentation analyzing competitor's content strategy
+
+### **Slide Template (1 slide per post):**
+
+**Slide X: #[RANK] - [METRIC]**
+[Post URL]
+[Metric: X views/likes - #Y ranking]
+
+📊 CONTENT SUMMARY
+"What was said": [2-3 sentence summary]
+"Why it performed": [3 success factors: hook/value/CTA]
+
+🎯 COMPETITIVE ANALYSIS
+✓ Strength #1: [specific tactic]
+✓ Strength #2: [production/angle]
+
+**Slides 1-10**: Follow ranking order (highest→lowest metric)
+
+### **Slide 11: Strategy Summary**
+📈 PERFORMANCE PATTERNS (Top 3 vs Bottom 3)
+1. [Pattern #1 across top posts]
+2. [Pattern #2 - format/topic] 
+3. [Pattern #3 - timing/CTA]
+
+🏆 VIRAL FORMULA: [Hook Type] + [Value Prop] + [CTA Style]
+
+### **Analysis Instructions:**
+- Extract **first 15s hook** → attention grabber
+- Identify **core value** → viewer takeaway  
+- Analyze **social proof CTA** → like/save/share
+- Score **emotional triggers** → fear/greed/curiosity
+
+**Visual Style**: Clean charts, metric bars, success indicators
+```
+
+This generates a focused, actionable competitor breakdown with viral content patterns!
+
 
 ## 📦 Tech Stack
 
-- **Frontend**: Next.js 16, React, TailwindCSS
-- **Backend**: FastAPI, yt-dlp, Python 3.11
-- **Deployment**: Railway (Backend), Your hosting (Frontend)
+**Frontend:**
+- Next.js 16
+- React 19
+- TypeScript
+- TailwindCSS
 
-## 🔧 Troubleshooting
+**Backend:**
+- FastAPI
+- yt-dlp
+- Python 3.11+
 
-**Problem**: "No subtitles found"
-- **Solution**: Video may not have English subtitles or auto-captions
-
-**Problem**: Playlist takes too long
-- **Solution**: App now automatically processes only first video from playlists
-
-**Problem**: Backend connection refused
-- **Solution**: Ensure Python API is running on port 8000 and `.env.local` points to correct URL
 
 ## 📄 Project Structure
 
-``````
-.
+```
 ├── python-api/
 │   ├── main.py              # FastAPI application
 │   ├── requirements.txt     # Python dependencies
-│   └── temp_output/         # Temporary subtitle files (auto-cleanup)
+│   └── scripts/             # Utility scripts
 ├── root/dashboard/
 │   ├── app/
 │   │   ├── page.tsx         # Dashboard homepage
-│   │   ├── youtube-subtitles/
-│   │   │   └── page.tsx     # YouTube subtitles UI
-│   │   └── api/
-│   │       └── youtube-subtitles/
-│   │           └── route.ts # API proxy to Python backend
-│   ├── .env.local           # Local environment variables
-│   └── package.json         # Node dependencies
+│   │   ├── youtube-subtitles/  # YouTube subtitles app
+│   │   ├── reddit-fetcher/     # Reddit data fetcher
+│   │   ├── site-extractor/     # Web scraper
+│   │   ├── instagram-scraper/  # Instagram reel downloader
+│   │   └── api/                # Next.js API routes
+│   │       ├── download-instagram-video/ # Instagram video API
+│   │       └── aggregate-transcriptions/ # Transcription aggregator API
+│   ├── components/          # Reusable React components
+│   ├── lib/                 # Utility functions
+│   ├── public/              # Static assets
+│   ├── package.json         # Node dependencies
+│   └── tsconfig.json        # TypeScript config
 └── README.md
-``````
-
-## 🎯 Next Steps
-
-- [ ] Add support for multiple videos from playlists
-- [ ] Implement progress tracking for long operations
-- [ ] Add support for other languages beyond English
-- [ ] Create download-as-file option
-- [ ] Add timestamp preservation from subtitles
-
----
-
-Built with ❤️ for faster YouTube research and content analysis.
-"@ | Out-File -FilePath README.md -Encoding utf8
 ```
-
-## Option 3: Use VS Code
-
-1. Open VS Code in your project root
-2. Press `Ctrl+N` to create a new file
-3. Paste the content
-4. Press `Ctrl+S` and name it `README.md`
-
-Would you like me to help you with any of these methods?

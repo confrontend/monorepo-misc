@@ -11,8 +11,12 @@
   },
   "dependencies": {
     "next": "^16.1.1",
+    "playwright": "^1.57.0",
+    "puppeteer": "^24.15.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "youtube-dl-exec": "^3.0.29",
+    "yt-dlp-wrap": "^2.3.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import PasskeyGate from "@/components/PasskeyGate";
 
 export const metadata: Metadata = {
-  title: "Reddit Thread → JSON",
+  title: "Tools Dashboard",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

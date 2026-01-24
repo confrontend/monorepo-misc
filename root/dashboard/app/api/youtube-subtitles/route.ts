@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const videoUrl = body.videoUrl || body.url;
+    const maxDownloads = body.maxDownloads;
 
     if (!videoUrl) {
       return NextResponse.json({ error: "Video URL is required" }, { status: 400 });
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     const pythonRes = await fetch(`${PYTHON_API_URL}/api/youtube-subtitles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: videoUrl }),
+      body: JSON.stringify({ url: videoUrl, max_downloads: maxDownloads }),
       // Important: prevent Node from buffering the response
       // @ts-ignore - 'duplex' is a valid node-fetch option but ts definition might be outdated
       duplex: 'half' 

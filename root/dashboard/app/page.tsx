@@ -19,6 +19,11 @@ const apps = [
     description: "Extract main text from multiple URLs",
     href: "/site-extractor",
   },
+  {
+    name: "Instagram Scraper",
+    description: "Extract top posts from Instagram profiles",
+    href: "/instagram-scraper",
+  },
 ];
 
 export default function HomePage() {
