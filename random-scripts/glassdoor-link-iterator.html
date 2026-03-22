@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Teck Interview Links</title>
+</head>
+<body>
+    <h1>Teck Resources Interview Pages (1-45)</h1>
+    <ul id="link-list">
+        </ul>
+
+    <script>
+        const container = document.getElementById('link-list');
+        const baseUrl = "https://www.glassdoor.ca/Interview/Teck-Resources-Limited-Interview-Questions-E8001";
+
+        for (let i = 1; i <= 45; i++) {
+            let li = document.createElement('li');
+            let a = document.createElement('a');
+            
+            // If it's page 1, no suffix. Otherwise, add _Pi
+            let fullUrl = i === 1 ? `${baseUrl}.htm` : `${baseUrl}_P${i}.htm`;
+            
+            a.href = fullUrl;
+            a.textContent = `Teck Interview Page ${i}`;
+            a.target = "_blank"; // Opens in a new tab
+            
+            li.appendChild(a);
+            container.appendChild(li);
+        }
+    </script>
+</body>
+</html>

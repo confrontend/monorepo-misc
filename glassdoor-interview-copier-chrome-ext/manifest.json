@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Glassdoor Interview Copier",
+  "version": "1.1",
+  "permissions": ["activeTab", "storage", "downloads"],
+  "host_permissions": ["https://www.glassdoor.ca/*"],
+  "content_scripts": [{
+    "matches": ["https://www.glassdoor.ca/Interview/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "128": "icon128.png"
+    }
+  },
+   "icons": {
+    "128": "icon128.png"
+  }
+}
