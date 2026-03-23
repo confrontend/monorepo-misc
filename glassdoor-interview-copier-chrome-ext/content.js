@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             text.toLowerCase().includes("system") ||
             text.toLowerCase().includes("experience"))
         ) {
-          questions.push(`Q${i + 1}: ${text.substring(0, 300)}`);
+          questions.push(`Q${i + 1}: ${text}`);
         }
       });
 

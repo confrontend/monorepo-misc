@@ -12,10 +12,10 @@
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "128": "icon128.png"
+      "128": "icon.png"
     }
   },
    "icons": {
-    "128": "icon128.png"
+    "128": "icon.png"
   }
 }
