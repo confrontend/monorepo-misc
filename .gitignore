@@ -89,3 +89,4 @@ youtube-subtitles/output
 open-ai/openapi-codegen-playground
 random-scripts/htmls
 random-scripts/output.txt
+random-scripts/split-long-text/chunks
