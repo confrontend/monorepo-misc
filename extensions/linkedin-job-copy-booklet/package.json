@@ -1,0 +1,15 @@
+{
+  "name": "linkedin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bookleet.js",
+  "scripts": {
+    "mini": "terser bookleet.js --compress --mangle --output bookleet.min.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "terser": "^5.47.1"
+  }
+}
