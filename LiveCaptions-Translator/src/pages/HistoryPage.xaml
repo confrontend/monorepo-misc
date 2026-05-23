@@ -11,54 +11,50 @@
     VerticalAlignment="Top"
     JournalEntry.KeepAlive="False"
     mc:Ignorable="d">
-    <Grid Margin="15"
-            VerticalAlignment="Top">
+
+    <Grid Margin="15">
+
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+        <!-- Header -->
+
         <Grid Grid.Row="0">
+
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition/>
             </Grid.ColumnDefinitions>
 
             <StackPanel
-                MaxHeight="34.94"
-                Margin="0,0,3,0"
-                HorizontalAlignment="Left"
-                Orientation="Horizontal">
+                Orientation="Horizontal"
+                HorizontalAlignment="Left">
+
                 <ui:Button
                     x:Name="PageDown"
                     Appearance="Transparent"
                     Click="PageDown_click"
-                    Icon="{ui:SymbolIcon chevronLeft12, Filled=False}"
-                    MouseOverBackground="#07000000"
-                    ToolTip="Previous "/>
+                    Icon="{ui:SymbolIcon chevronLeft12, Filled=False}"/>
 
                 <ui:TextBlock
                     x:Name="PageNumber"
-                    Margin="10,0,10,0"
+                    Margin="10,0"
                     VerticalAlignment="Center"
-                    FontSize="15"
                     Text="1/1"/>
 
                 <ui:Button
                     x:Name="PageUp"
                     Appearance="Transparent"
                     Click="PageUp_click"
-                    Icon="{ui:SymbolIcon chevronRight12, Filled=False}"
-                    MouseOverBackground="#07000000"
-                    ToolTip="Next Page"/>
+                    Icon="{ui:SymbolIcon chevronRight12, Filled=False}"/>
 
                 <ComboBox
                     x:Name="HistoryMaxRow"
-                    MinHeight="0"
                     Margin="5,0,0,0"
-                    Padding="10,4,10,7"
-                    VerticalAlignment="Stretch"
                     SelectedIndex="1">
+
                     <ComboBoxItem Content="20/page"
                             Tag="20"/>
                     <ComboBoxItem Content="30/page"
@@ -67,105 +63,84 @@
                             Tag="50"/>
                     <ComboBoxItem Content="100/page"
                             Tag="100"/>
+
                 </ComboBox>
 
                 <ui:AutoSuggestBox
                     x:Name="HistorySearchBox"
                     MinWidth="200"
-                    MaxWidth="200"
                     Margin="5,0,0,0"
                     PlaceholderText="Search"
                     QuerySubmitted="HistorySearchBox_QuerySubmitted"
                     TextChanged="HistorySearchBox_TextChanged"/>
+
             </StackPanel>
 
             <StackPanel
                 Grid.Column="1"
-                MaxHeight="34.94"
-                Margin="3,0,3,0"
-                HorizontalAlignment="Right"
-                Orientation="Horizontal">
+                Orientation="Horizontal"
+                HorizontalAlignment="Right">
+
                 <ui:Button
                     x:Name="Export"
-                    Margin="0,0,0,0"
-                    HorizontalAlignment="Right"
                     Appearance="Transparent"
                     Click="Export_click"
-                    Icon="{ui:SymbolIcon ArrowDown12, Filled=False}"
-                    MouseOverBackground="#07000000"
-                    ToolTip="Export"/>
+                    Icon="{ui:SymbolIcon ArrowDown12, Filled=False}"/>
+
                 <ui:Button
                     x:Name="Delete"
                     Margin="5,0,0,0"
-                    HorizontalAlignment="Right"
                     Appearance="Transparent"
                     Click="Delete_click"
-                    Icon="{ui:SymbolIcon Delete12, Filled=False}"
-                    MouseOverBackground="#07000000"
-                    ToolTip="Delete All"/>
+                    Icon="{ui:SymbolIcon Delete12, Filled=False}"/>
+
                 <ui:Button
                     x:Name="Refresh"
                     Margin="5,0,0,0"
-                    HorizontalAlignment="Right"
                     Appearance="Transparent"
                     Click="Refresh_click"
-                    Icon="{ui:SymbolIcon ArrowClockwise12, Filled=False}"
-                    MouseOverBackground="#07000000"
-                    ToolTip="Refresh"/>
+                    Icon="{ui:SymbolIcon ArrowClockwise12, Filled=False}"/>
+
             </StackPanel>
+
         </Grid>
+
+        <!-- History -->
 
         <DataGrid
             x:Name="HistoryDataGrid"
             Grid.Row="1"
             Margin="0,12,20,0"
-            VerticalAlignment="Stretch"
             AutoGenerateColumns="False"
             BorderThickness="0"
-            EnableRowVirtualization="True"
-            GridLinesVisibility="None"
             HeadersVisibility="None"
-            IsReadOnly="True"
-            VirtualizingPanel.IsVirtualizing="True"
-            VirtualizingPanel.VirtualizationMode="Recycling"
+            GridLinesVisibility="None"
             Background="Transparent"
-            RowBackground="Transparent">
+            RowBackground="Transparent"
+            IsReadOnly="True">
 
             <DataGrid.Resources>
-                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}"
-                        Color="Transparent"/>
-                <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}"
-                        Color="Transparent"/>
-                <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}"
-                        Color="Transparent"/>
 
                 <Style TargetType="DataGridRow">
                     <Setter Property="Margin"
-                            Value="0,0,0,16"/>
+                            Value="0,0,0,12"/>
                     <Setter Property="Background"
                             Value="Transparent"/>
-                    <Style.Triggers>
-                        <Trigger Property="IsSelected"
-                                Value="True">
-                            <Setter Property="Background"
-                                    Value="Transparent"/>
-                        </Trigger>
-                        <Trigger Property="IsMouseOver"
-                                Value="True">
-                            <Setter Property="Background"
-                                    Value="Transparent"/>
-                        </Trigger>
-                    </Style.Triggers>
                 </Style>
+
             </DataGrid.Resources>
 
             <DataGrid.Columns>
+
                 <DataGridTemplateColumn Width="*">
+
                     <DataGridTemplateColumn.CellTemplate>
+
                         <DataTemplate>
+
                             <Border
                                 x:Name="CellBorder"
-                                Padding="18,14,18,14"
+                                Padding="12"
                                 CornerRadius="8"
                                 Background="#0FFFFFFF"
                                 BorderBrush="#14FFFFFF"
@@ -173,65 +148,96 @@
                                 Cursor="Hand"
                                 MouseLeftButtonDown="Cell_MouseLeftButtonDown">
 
-                                <TextBlock
-                                    x:Name="CellTextBlock"
-                                    FontSize="18"
-                                    Foreground="#D8FFFFFF"
-                                    TextWrapping="Wrap"
-                                    LineHeight="28">
-                                    <Run Text="{Binding ContextText, Mode=OneWay}"/>
-                                    <Run Text="{Binding SourceText, Mode=OneWay}">
-                                        <Run.Style>
-                                            <Style TargetType="Run">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsLatest}"
+                                <Grid>
+
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- image -->
+
+                                    <Border
+                                        Width="60"
+                                        Height="60"
+                                        CornerRadius="6"
+                                        ClipToBounds="True">
+
+                                        <Image
+                                            Stretch="UniformToFill"
+                                            Source="https://picsum.photos/100"/>
+
+                                    </Border>
+
+                                    <!-- text -->
+
+                                    <TextBlock
+                                        x:Name="CellTextBlock"
+                                        Grid.Column="1"
+                                        Margin="12,0,0,0"
+                                        FontSize="12"
+                                        Height="36"
+                                        LineHeight="18"
+                                        TextWrapping="Wrap"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="#D8FFFFFF">
+
+                                        <Run Text="{Binding ContextText}"/>
+
+                                        <Run Text="{Binding SourceText}">
+                                            <Run.Style>
+                                                <Style TargetType="Run">
+                                                    <Style.Triggers>
+                                                        <DataTrigger
+                                                            Binding="{Binding IsLatest}"
                                                             Value="True">
-                                                        <Setter Property="FontWeight"
+
+                                                            <Setter
+                                                                Property="FontWeight"
                                                                 Value="Bold"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Run.Style>
-                                    </Run>
-                                </TextBlock>
+
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Run.Style>
+                                        </Run>
+
+                                    </TextBlock>
+
+                                </Grid>
+
                             </Border>
 
                             <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding IsLatest}"
-                                        Value="True">
-                                    <Setter TargetName="CellBorder"
-                                            Property="Background"
-                                            Value="#FFFFFFFF"/>
-                                    <Setter TargetName="CellBorder"
-                                            Property="BorderBrush"
-                                            Value="#FFFFFFFF"/>
-                                    <Setter TargetName="CellTextBlock"
-                                            Property="Foreground"
-                                            Value="#FF000000"/>
+
+                                <DataTrigger
+                                    Binding="{Binding IsLatest}"
+                                    Value="True">
+
+                                    <Setter
+                                        TargetName="CellBorder"
+                                        Property="Background"
+                                        Value="White"/>
+
+                                    <Setter
+                                        TargetName="CellTextBlock"
+                                        Property="Foreground"
+                                        Value="Black"/>
+
                                 </DataTrigger>
+
                             </DataTemplate.Triggers>
+
                         </DataTemplate>
+
                     </DataGridTemplateColumn.CellTemplate>
 
-                    <DataGridTemplateColumn.CellStyle>
-                        <Style TargetType="DataGridCell">
-                            <Setter Property="Background"
-                                    Value="Transparent"/>
-                            <Setter Property="BorderThickness"
-                                    Value="0"/>
-                            <Setter Property="Focusable"
-                                    Value="False"/>
-                            <Style.Triggers>
-                                <Trigger Property="IsSelected"
-                                        Value="True">
-                                    <Setter Property="Background"
-                                            Value="Transparent"/>
-                                </Trigger>
-                            </Style.Triggers>
-                        </Style>
-                    </DataGridTemplateColumn.CellStyle>
                 </DataGridTemplateColumn>
+
             </DataGrid.Columns>
+
         </DataGrid>
+
     </Grid>
+
 </Page>

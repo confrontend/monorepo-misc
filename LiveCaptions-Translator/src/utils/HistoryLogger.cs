@@ -129,7 +129,7 @@ namespace LiveCaptionsTranslator.utils
 
             // 2. Group the raw lines into solid chunks of up to x sentences
             var groupedHistory = new List<TranslationHistoryEntry>();
-            int chunkSize = 15;
+            int chunkSize = 5;
 
             for (int i = 0; i < rawEntries.Count; i += chunkSize)
             {

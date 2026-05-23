@@ -4,7 +4,9 @@ using System.Windows.Controls;
 using Microsoft.Win32;
 using Wpf.Ui.Appearance;
 using Wpf.Ui.Controls;
-
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using LiveCaptionsTranslator.models;
 using LiveCaptionsTranslator.utils;
 using TextBlock = System.Windows.Controls.TextBlock;
@@ -41,33 +43,167 @@ namespace LiveCaptionsTranslator
 
             HistoryMaxRow.SelectionChanged += maxRow_SelectionChanged;
         }
-
-    private async void Cell_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-{
-    if (sender is FrameworkElement element && element.DataContext is TranslationHistoryEntry entry)
-    {
-        try
+        private RenderTargetBitmap CreateTestImage()
         {
-            // 1. Combine the full text block for the system clipboard
-            string fullTextToCopy = (entry.ContextText + entry.SourceText).Trim();
-            Clipboard.SetText(fullTextToCopy);
-            
-            // 2. Create a shortened preview snippet for the on-screen toast
-            string toastPreview = fullTextToCopy.Length > 50 
-                ? fullTextToCopy.Substring(0, 50) + "..." 
-                : fullTextToCopy;
+            Grid grid = new Grid
+            {
+                Width = 150,
+                Height = 80,
+                Background = Brushes.LightBlue
+            };
 
-            // 3. Show the compact notification profile 
-            SnackbarHost.Show("Copied to clipboard.", toastPreview, SnackbarType.Info, 100);
+            TextBlock text = new TextBlock
+            {
+                Text = "TEST IMAGE",
+                FontSize = 20,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            grid.Children.Add(text);
+
+            grid.Measure(
+                new Size(
+                    grid.Width,
+                    grid.Height
+                )
+            );
+
+            grid.Arrange(
+                new Rect(
+                    0,
+                    0,
+                    grid.Width,
+                    grid.Height
+                )
+            );
+
+            RenderTargetBitmap bitmap =
+                new RenderTargetBitmap(
+                    (int)grid.Width,
+                    (int)grid.Height,
+                    96,
+                    96,
+                    PixelFormats.Pbgra32
+                );
+
+            bitmap.Render(grid);
+
+            return bitmap;
         }
-        catch
+
+        private void Cell_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            SnackbarHost.Show("Copy Failed.", string.Empty, SnackbarType.Error, 100);
+            try
+            {
+                if (sender is not Border border)
+                    return;
+
+                if (border.DataContext is not TranslationHistoryEntry entry)
+                    return;
+
+                string text =
+                    $"{entry.ContextText}\n\n{entry.SourceText}";
+
+                RenderTargetBitmap combined =
+                    CreateClipboardCard(text);
+
+                Clipboard.SetImage(combined);
+
+                SnackbarHost.Show(
+                    "Copied",
+                    "Image with text copied",
+                    SnackbarType.Success,
+                    1000
+                );
+            }
+            catch (Exception ex)
+            {
+                SnackbarHost.Show(
+                    "Error",
+                    ex.Message,
+                    SnackbarType.Error,
+                    3000
+                );
+            }
         }
-        
-        await Task.Delay(500);
-    }
-}
+
+        private RenderTargetBitmap CreateClipboardCard(string text)
+        {
+            Grid container = new Grid
+            {
+                Width = 800,
+                Height = 500,
+                Background = Brushes.White
+            };
+
+            container.RowDefinitions.Add(
+                new RowDefinition
+                {
+                    Height = new GridLength(250)
+                });
+
+            container.RowDefinitions.Add(
+                new RowDefinition()
+            );
+
+            // image area
+            Border image = new Border
+            {
+                Background = Brushes.LightBlue,
+                Margin = new Thickness(20)
+            };
+
+            TextBlock imageText = new TextBlock
+            {
+                Text = "SCREENSHOT",
+                FontSize = 24,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            image.Child = imageText;
+
+            Grid.SetRow(image, 0);
+
+            // text area
+            TextBlock content = new TextBlock
+            {
+                Margin = new Thickness(20),
+                Text = text,
+                FontSize = 18,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            Grid.SetRow(content, 1);
+
+            container.Children.Add(image);
+            container.Children.Add(content);
+
+            container.Measure(
+                new Size(
+                    container.Width,
+                    container.Height));
+
+            container.Arrange(
+                new Rect(
+                    0,
+                    0,
+                    container.Width,
+                    container.Height));
+
+            RenderTargetBitmap bitmap =
+                new RenderTargetBitmap(
+                    800,
+                    500,
+                    96,
+                    96,
+                    PixelFormats.Pbgra32);
+
+            bitmap.Render(container);
+
+            return bitmap;
+        }
         private async void OnTranslationLogged()
         {
             await LoadHistory();
@@ -196,6 +332,29 @@ namespace LiveCaptionsTranslator
                     await LoadHistory();
                 }
             }
+        }
+
+        private static T FindVisualChild<T>(DependencyObject parent)
+            where T : DependencyObject
+        {
+            if (parent == null)
+                return null;
+
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                DependencyObject child =
+                    VisualTreeHelper.GetChild(parent, i);
+
+                if (child is T typedChild)
+                    return typedChild;
+
+                T result = FindVisualChild<T>(child);
+
+                if (result != null)
+                    return result;
+            }
+
+            return null;
         }
 
         public async Task LoadHistory()

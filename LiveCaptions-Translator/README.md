@@ -1,4 +1,93 @@
-﻿<div align="center">
+﻿# LiveCaptions Translator
+
+A real-time, context-aware audio translation tool built on top of Windows LiveCaptions. This application captures live speech recognition streams and leverages modern translation APIs (including local LLMs) to provide instant subtitle tracks and historical logging.
+
+---
+
+## Prerequisites
+
+Before running the application, ensure your environment meets the following requirements:
+
+* 
+**Operating System**: Windows 11 (Version 24H2 or later recommended for optimal native LiveCaptions functionality).
+
+
+* 
+**Framework**: [.NET 8.0 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) installed on your machine.
+
+
+* 
+**Windows LiveCaptions**: Must be installed and configured on your system.
+
+---
+
+## Getting Started
+
+Follow these steps to configure your system, build, and run the project.
+
+### 1. Configure Windows LiveCaptions
+
+1. Open the native Windows **LiveCaptions** feature. Follow any on-screen prompts to download your preferred on-device language packs and speech recognition files.
+
+
+2. Click the **Settings (Gear)** icon inside Windows LiveCaptions.
+
+
+3. Navigate to **Position** and select **Overlaid on screen**.
+
+
+
+### 2. Clone and Build the Project
+
+Open your terminal or PowerShell instance, navigate to your development directory, and execute:
+
+```powershell
+# Clone the repository
+git clone https://github.com/SakiRinn/LiveCaptions-Translator.git
+cd LiveCaptions-Translator
+
+# Restore dependencies and build the application
+dotnet build
+
+```
+
+### 3. Run the Application
+
+You can launch the program via the .NET CLI:
+
+```powershell
+dotnet run
+
+```
+
+Alternatively, you can navigate to the output binary directory (e.g., `bin/Debug/net8.0-windows/`) and execute `LiveCaptionsTranslator.exe` directly.
+
+---
+
+## Configuration & First Run
+
+1. On launch, the application will automatically start the background loops to synchronize with your Windows system sound layer.
+
+
+2. Navigate to the **Setting** tab to select your translation provider.
+
+
+* 
+**No-Config Providers**: `Google` and `Google2` work out of the box with zero configuration.
+
+
+* 
+**Advanced Providers**: Supports local platforms like `Ollama` and `LMStudio`, as well as cloud-based options like `OpenAI` and `OpenRouter`.
+
+
+
+
+3. If you use an LLM engine or cloud endpoint, open **API Settings** to input your target models, base URLs, or custom translation prompts.
+
+
+4. To track translation strings chronologically, check out the **History** panel, which automatically aggregates conversation statements into readable blocks. Clicking any block copies its entire multi-sentence context straight to your clipboard.
+
+<div align="center">
 
 <img src="src/LiveCaptions-Translator.ico" width="128" height="128" alt="LiveCaptions-Translator Icon"/>
 

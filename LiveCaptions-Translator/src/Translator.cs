@@ -234,7 +234,10 @@ namespace LiveCaptionsTranslator
         {
             string translatedText;
             bool isChoke = Array.IndexOf(TextUtil.PUNC_EOS, text[^1]) != -1;
-
+            if (Setting.TargetLanguage == "en")
+            {
+                return (text, isChoke);
+            }
             try
             {
                 var sw = Setting.MainWindow.LatencyShow ? Stopwatch.StartNew() : null;
