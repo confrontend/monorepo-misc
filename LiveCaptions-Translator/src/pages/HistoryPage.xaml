@@ -15,13 +15,16 @@
     <Grid Margin="15">
 
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
 
-        <Grid Grid.Row="0">
+        <Grid
+            x:Name="HeaderGrid"
+            VerticalAlignment="Top"
+            Margin="0,0,40,0"
+            Visibility="Collapsed">
 
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -105,12 +108,20 @@
 
         </Grid>
 
+        <ui:Button
+            x:Name="HeaderToggleButton"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Appearance="Transparent"
+            Click="ToggleHeader_Click"
+            ToolTip="Toggle header"
+            Icon="{ui:SymbolIcon chevronDown12, Filled=False}"/>
+
         <!-- History -->
 
         <DataGrid
             x:Name="HistoryDataGrid"
-            Grid.Row="1"
-            Margin="0,12,20,0"
+            Margin="0,0,20,0"
             AutoGenerateColumns="False"
             BorderThickness="0"
             HeadersVisibility="None"
@@ -155,8 +166,8 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- image -->
-
+                                    <!-- thumbnail disabled -->
+                                    <!--
                                     <Border
                                         Width="60"
                                         Height="60"
@@ -168,6 +179,7 @@
                                             Source="https://picsum.photos/100"/>
 
                                     </Border>
+                                    -->
 
                                     <!-- text -->
 
@@ -175,9 +187,9 @@
                                         x:Name="CellTextBlock"
                                         Grid.Column="1"
                                         Margin="12,0,0,0"
-                                        FontSize="12"
-                                        Height="36"
-                                        LineHeight="18"
+                                        FontSize="24"
+                                        Height="72"
+                                        LineHeight="36"
                                         TextWrapping="Wrap"
                                         TextTrimming="CharacterEllipsis"
                                         Foreground="#D8FFFFFF">

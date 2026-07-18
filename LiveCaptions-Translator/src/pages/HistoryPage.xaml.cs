@@ -21,6 +21,7 @@ namespace LiveCaptionsTranslator
         private int searchPage = 1;
         private int maxPage = 1;
         private int maxRowPerPage = 30;
+        private bool isHeaderVisible = false;
 
         public string SearchText { get; set; } = string.Empty;
 
@@ -28,6 +29,8 @@ namespace LiveCaptionsTranslator
         {
             InitializeComponent();
             ApplicationThemeManager.ApplySystemTheme();
+            HeaderGrid.SizeChanged += HeaderGrid_SizeChanged;
+            UpdateHeaderToggleState();
 
             Loaded += async (s, e) =>
             {
@@ -43,6 +46,36 @@ namespace LiveCaptionsTranslator
 
             HistoryMaxRow.SelectionChanged += maxRow_SelectionChanged;
         }
+
+        private void HeaderGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            UpdateDataGridTopMargin();
+        }
+
+        private void UpdateHeaderToggleState()
+        {
+            HeaderGrid.Visibility = isHeaderVisible ? Visibility.Visible : Visibility.Collapsed;
+            UpdateDataGridTopMargin();
+
+            if (HeaderToggleButton.Icon is SymbolIcon icon)
+            {
+                icon.Symbol = isHeaderVisible ? SymbolRegular.ChevronUp12 : SymbolRegular.ChevronDown12;
+                icon.Filled = false;
+            }
+        }
+
+        private void UpdateDataGridTopMargin()
+        {
+            double topMargin = isHeaderVisible ? HeaderGrid.ActualHeight + 12 : 0;
+            HistoryDataGrid.Margin = new Thickness(0, topMargin, 20, 0);
+        }
+
+        private void ToggleHeader_Click(object sender, RoutedEventArgs e)
+        {
+            isHeaderVisible = !isHeaderVisible;
+            UpdateHeaderToggleState();
+        }
+
         private RenderTargetBitmap CreateTestImage()
         {
             Grid grid = new Grid
@@ -105,14 +138,15 @@ namespace LiveCaptionsTranslator
                 string text =
                     $"{entry.ContextText}\n\n{entry.SourceText}";
 
-                RenderTargetBitmap combined =
-                    CreateClipboardCard(text);
-
-                Clipboard.SetImage(combined);
+                // TEMP: Screenshot feature disabled - copy text only
+                // RenderTargetBitmap combined =
+                //     CreateClipboardCard(text);
+                // Clipboard.SetImage(combined);
+                Clipboard.SetText(text);
 
                 SnackbarHost.Show(
                     "Copied",
-                    "Image with text copied",
+                    "Text copied to clipboard",
                     SnackbarType.Success,
                     1000
                 );
@@ -137,47 +171,19 @@ namespace LiveCaptionsTranslator
                 Background = Brushes.White
             };
 
-            container.RowDefinitions.Add(
-                new RowDefinition
-                {
-                    Height = new GridLength(250)
-                });
+            container.RowDefinitions.Add(new RowDefinition());
 
-            container.RowDefinitions.Add(
-                new RowDefinition()
-            );
-
-            // image area
-            Border image = new Border
-            {
-                Background = Brushes.LightBlue,
-                Margin = new Thickness(20)
-            };
-
-            TextBlock imageText = new TextBlock
-            {
-                Text = "SCREENSHOT",
-                FontSize = 24,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            image.Child = imageText;
-
-            Grid.SetRow(image, 0);
-
-            // text area
+            // TEMP: Screenshot feature disabled
             TextBlock content = new TextBlock
             {
-                Margin = new Thickness(20),
+                Margin = new Thickness(20, 40, 20, 20),
                 Text = text,
                 FontSize = 18,
                 TextWrapping = TextWrapping.Wrap
             };
 
-            Grid.SetRow(content, 1);
+            Grid.SetRow(content, 0);
 
-            container.Children.Add(image);
             container.Children.Add(content);
 
             container.Measure(

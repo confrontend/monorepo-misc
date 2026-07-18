@@ -1,0 +1,18 @@
+{
+  "name": "job-lead-collection-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small local job-lead collection tool for manually collected Google results and Playwright job-page fetching.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "fetch": "node scripts/fetch-job-pages.js",
+    "filter": "node scripts/filter-canada-jobs.js",
+    "test:page-type": "node scripts/test-page-type.js"
+  },
+  "dependencies": {
+    "playwright": "^1.54.0"
+  }
+}

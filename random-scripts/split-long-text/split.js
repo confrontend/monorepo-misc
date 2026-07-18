@@ -3,9 +3,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const prefix = 'april-6-one-week-' // --------> Change this for output name customization
+const prefix = 'abb_' // --------> Change this for output name customization
 
-const [,, inFile = 'result.txt'] = process.argv;
+const [,, inFile = 'messagesCopy.json.txt'] = process.argv;
 const outDir = 'chunks';
 
 if (!fs.existsSync(outDir)) {
