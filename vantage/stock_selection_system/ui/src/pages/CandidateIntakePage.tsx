@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { addManualCandidate, fetchTradeIdeas, ingestLive, listCandidates } from "../api";
 import Badge from "../components/Badge";
+import { debugLog } from "../debug";
 import type { CandidateRow, FetchTradeIdeasResult } from "../types";
 
 interface Props { connected: boolean; onRefresh: () => void; }
@@ -43,15 +44,19 @@ export default function CandidateIntakePage({ connected, onRefresh }: Props) {
 
   async function validate(candidate: CandidateRow) {
     setBusy(candidate.ticker); setError(null); setStatuses((s) => ({ ...s, [candidate.candidate_id]: "Validating" }));
+    debugLog(`candidate validation started: ${candidate.ticker}`, {
+      candidate,
+      request: { tickers: [candidate.ticker], as_of_date: asOfDate, include_candidates: false },
+    });
     try {
       const response = await ingestLive([candidate.ticker], asOfDate, false);
       const item = response.price_and_earnings[0];
       const hasWarnings = (item?.warnings?.length ?? 0) > 0;
-      console.groupCollapsed(`[candidate validation] ${candidate.ticker}`);
-      console.log("write results", item?.wrote ?? {});
-      console.log("warnings", item?.warnings ?? []);
-      console.log("episodes", response.episodes?.[candidate.ticker] ?? []);
-      console.groupEnd();
+      debugLog(`candidate validation result: ${candidate.ticker}`, {
+        price_and_earnings: item,
+        episodes: response.episodes?.[candidate.ticker] ?? [],
+        candidates: response.candidates,
+      });
       setStatuses((s) => ({ ...s, [candidate.candidate_id]: hasWarnings ? "Insufficient data" : "Validated" }));
       setMessage(`${candidate.ticker} validation completed${hasWarnings ? " with missing data" : ""}.`);
       onRefresh();

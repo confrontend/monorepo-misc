@@ -83,8 +83,8 @@ if (!hasUvicorn) {
 
 const procs = [];
 
-function run(name, color, command, args, cwd, exitHint) {
-  const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+function run(name, color, command, args, cwd, exitHint, env = process.env) {
+  const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   procs.push(child);
   const startedAt = Date.now();
 
@@ -152,6 +152,7 @@ run(
   ["run", "dev", "--", "--host", "0.0.0.0", "--clearScreen", "false", "--logLevel", "info"],
   uiDir,
   "Run: npm install (from ui/)",
+  { ...process.env, VITE_DEBUG: "true" },
 );
 
 console.log(`Backend:  http://localhost:8000  (docs at /docs)  [using ${pythonCmd}]`);

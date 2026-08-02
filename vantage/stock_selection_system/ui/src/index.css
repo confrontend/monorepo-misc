@@ -290,6 +290,10 @@ label.checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; 
 .intake-card { gap: 14px; }
 .table-scroll { overflow-x: auto; }
 .candidate-table { min-width: 980px; }
+.incomplete-table { min-width: 1050px; }
+.tag-list { display: flex; gap: 4px; flex-wrap: wrap; }
+.missing-preview { display: flex; flex-direction: column; gap: 2px; max-width: 260px; font-size: 12px; }
+.missing-preview span:last-child { color: var(--color-accent-700); font-weight: 600; }
 
 .result-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .result-tile { text-align: center; padding: 8px 4px; background: var(--color-neutral-100); }

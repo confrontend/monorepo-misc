@@ -35,6 +35,6 @@ export default function App() {
     {screen === "dashboard" && <DashboardPage stats={stats} recentEpisodes={episodes.slice(0, 6)} onSelectEpisode={(id) => setDrawer({ type: "episode", episodeId: id })} onGoEpisodes={() => setScreen("episodes")} connected={connected} onRefresh={refresh} refreshing={false} />}
     {screen === "intake" && <CandidateIntakePage connected={connected} onRefresh={refresh} />}
     {screen === "episodes" && <EpisodesPage episodes={episodes} tickers={tickers} ticker={tickerFilter} decision={decisionFilter} onTicker={setTickerFilter} onDecision={setDecisionFilter} onSelect={(id) => setDrawer({ type: "episode", episodeId: id })} />}
-    {screen === "incomplete" && <IncompleteDataPage cases={cases} />}
+    {screen === "incomplete" && <IncompleteDataPage cases={cases} onSelect={(item) => setDrawer({ type: "incomplete", case: item })} />}
   </main><DetailDrawer drawer={drawer} onClose={() => setDrawer(null)} /></div>;
 }

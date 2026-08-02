@@ -13,17 +13,25 @@ import type {
   Stats,
   TradeIdeasFilters,
 } from "./types";
+import { debugError, debugLog } from "./debug";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const requestInit = {
     headers: { "Content-Type": "application/json" },
     ...init,
+  };
+  debugLog(`API request ${requestInit.method ?? "GET"} ${path}`, {
+    body: requestInit.body ? JSON.parse(String(requestInit.body)) : undefined,
   });
+  const res = await fetch(path, requestInit);
   if (!res.ok) {
     const body = await res.text();
+    debugError(`API error ${res.status} ${path}`, body);
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
-  return res.json() as Promise<T>;
+  const payload = await res.json() as T;
+  debugLog(`API response ${res.status} ${path}`, payload);
+  return payload;
 }
 
 export function getTickers(): Promise<string[]> {
