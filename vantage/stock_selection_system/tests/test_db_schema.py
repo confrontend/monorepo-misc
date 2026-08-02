@@ -11,6 +11,106 @@ def conn(tmp_path):
     return init_db(db_path)
 
 
+def test_init_db_migrates_existing_database_missing_new_columns(tmp_path):
+    # Regression test: init_db() must be safe to call against a database
+    # file created by an OLDER version of schema.sql -- `CREATE TABLE IF NOT
+    # EXISTS` alone is a no-op for a table that already exists, so columns
+    # added later (reviews.eligibility_date, insufficient_data_cases.
+    # trigger_source_table/trigger_source_row_id) and the widened
+    # unique_unresolved_audit_case index would otherwise be silently missing
+    # forever on an upgraded-in-place database.
+    db_path = str(tmp_path / "old.db")
+    old_conn = sqlite3.connect(db_path)
+    old_conn.execute("PRAGMA foreign_keys = ON;")
+    # A trimmed-down stand-in for the schema as it existed one review round
+    # ago -- i.e. AFTER resolved_from_audit_id/corrects_episode_id (round-1
+    # fixes) but BEFORE eligibility_date and trigger_source_table/row_id
+    # (this round's fix). reviews.resolved_from_audit_id has to be present
+    # here because schema.sql's unique_resolved_from_audit_id index
+    # references it -- init_db()'s first executescript() pass would fail
+    # outright on a table missing a column one of schema.sql's own
+    # index/trigger definitions depends on. (This migration path is a
+    # bridge from "the version immediately before this commit," not a full
+    # historical migration chain all the way back to day one.)
+    old_conn.executescript(
+        """
+        CREATE TABLE reviews (
+            episode_id TEXT PRIMARY KEY,
+            ticker TEXT,
+            episode_trigger TEXT,
+            resolved_from_audit_id INTEGER,
+            corrects_episode_id TEXT,
+            decision TEXT
+        );
+        CREATE TABLE insufficient_data_cases (
+            audit_id INTEGER PRIMARY KEY,
+            ticker TEXT,
+            as_of_date DATE,
+            episode_trigger TEXT,
+            eligibility_date DATE,
+            source_candidate_id INTEGER,
+            resolved BOOLEAN DEFAULT FALSE
+        );
+        CREATE UNIQUE INDEX unique_unresolved_audit_case
+        ON insufficient_data_cases (
+            ticker, COALESCE(source_candidate_id, -1), episode_trigger, eligibility_date
+        ) WHERE resolved = FALSE;
+        """
+    )
+    old_conn.execute(
+        "INSERT INTO reviews (episode_id, ticker, episode_trigger, decision) "
+        "VALUES ('pre-existing-ep', 'ATI', 'first_eligibility', 'Confirm')"
+    )
+    old_conn.execute(
+        "INSERT INTO insufficient_data_cases (ticker, as_of_date, episode_trigger, "
+        "eligibility_date, resolved) VALUES ('ATI', '2026-01-01', 'guidance_change', "
+        "'2026-01-12', FALSE)"
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    migrated = init_db(db_path)
+
+    # Existing data survived the migration untouched.
+    row = migrated.execute("SELECT * FROM reviews WHERE episode_id = 'pre-existing-ep'").fetchone()
+    assert row["ticker"] == "ATI"
+    assert row["decision"] == "Confirm"
+
+    # The new columns exist now (and are NULL for the pre-existing row,
+    # rather than the ALTER TABLE having failed or been skipped).
+    review_cols = {r["name"] for r in migrated.execute("PRAGMA table_info(reviews)")}
+    assert "eligibility_date" in review_cols
+    assert row["eligibility_date"] is None
+
+    case_cols = {r["name"] for r in migrated.execute("PRAGMA table_info(insufficient_data_cases)")}
+    assert "trigger_source_table" in case_cols
+    assert "trigger_source_row_id" in case_cols
+
+    # And the unique index now enforces the WIDENED (6-column) definition,
+    # not the stale 4-column one it was created with: two distinct same-day
+    # source rows for the same ticker/trigger/eligibility_date can coexist
+    # as separate unresolved cases.
+    migrated.execute(
+        "INSERT INTO insufficient_data_cases (ticker, as_of_date, episode_trigger, "
+        "eligibility_date, trigger_source_table, trigger_source_row_id, resolved) VALUES "
+        "('ATI', '2026-01-01', 'guidance_change', '2026-01-12', 'guidance_events', 1, FALSE)"
+    )
+    migrated.execute(
+        "INSERT INTO insufficient_data_cases (ticker, as_of_date, episode_trigger, "
+        "eligibility_date, trigger_source_table, trigger_source_row_id, resolved) VALUES "
+        "('ATI', '2026-01-01', 'guidance_change', '2026-01-12', 'guidance_events', 2, FALSE)"
+    )
+    migrated.commit()
+    cases = migrated.execute(
+        "SELECT * FROM insufficient_data_cases WHERE eligibility_date = '2026-01-12' "
+        "AND trigger_source_row_id IS NOT NULL"
+    ).fetchall()
+    assert len(cases) == 2
+
+    # Calling init_db() again (e.g. app restart) is a safe no-op.
+    init_db(db_path)
+
+
 def test_foreign_keys_enforced(conn):
     row = conn.execute("PRAGMA foreign_keys;").fetchone()
     assert row[0] == 1
@@ -206,6 +306,25 @@ def test_resolved_from_audit_id_allows_multiple_nulls(conn):
     _insert_review(conn, "ep-2")  # both NULL resolved_from_audit_id; must not conflict
     rows = conn.execute("SELECT COUNT(*) AS n FROM reviews").fetchone()
     assert rows["n"] == 2
+
+
+def test_consumed_triggers_unique_per_source_row(conn):
+    # Defense in depth alongside episodes._is_consumed(): the same source
+    # event row must never be recorded as consumed twice for a ticker, even
+    # if application logic somehow tried to (e.g. a race between two
+    # processes both scoring the same trigger).
+    conn.execute(
+        "INSERT INTO consumed_triggers (ticker, source_table, source_row_id, episode_trigger, "
+        "eligibility_date, episode_id) VALUES ('ATI', 'earnings_history', 1, 'earnings_release', "
+        "'2026-01-12', 'ep-1')"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO consumed_triggers (ticker, source_table, source_row_id, episode_trigger, "
+            "eligibility_date, episode_id) VALUES ('ATI', 'earnings_history', 1, 'earnings_release', "
+            "'2026-01-12', 'ep-2')"
+        )
 
 
 def test_insufficient_data_fields_one_row_per_missing_field(conn):

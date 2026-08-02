@@ -27,15 +27,25 @@ def upsert_candidate(
     technical_score: Optional[float] = None,
     fundamental_score: Optional[float] = None,
     expected_return: Optional[float] = None,
+    direction: Optional[str] = None,
+    raw_source_data: Optional[str] = None,
 ) -> int:
+    """`direction` (e.g. 'long'/'short') and `raw_source_data` (a
+    JSON-serialized string of the source's raw record, for traceability)
+    are optional, source-dependent metadata -- eligibility-only, like every
+    other column here; never read by scoring (src/scoring.py)."""
     conn.execute(
         "INSERT INTO candidates (date, ticker, source, source_rank, ai_score, technical_score, "
-        "fundamental_score, expected_return) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "fundamental_score, expected_return, direction, raw_source_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(date, ticker, source) DO UPDATE SET "
         "source_rank=excluded.source_rank, ai_score=excluded.ai_score, "
         "technical_score=excluded.technical_score, fundamental_score=excluded.fundamental_score, "
-        "expected_return=excluded.expected_return",
-        (_d(on_date), ticker, source, source_rank, ai_score, technical_score, fundamental_score, expected_return),
+        "expected_return=excluded.expected_return, direction=excluded.direction, "
+        "raw_source_data=excluded.raw_source_data",
+        (
+            _d(on_date), ticker, source, source_rank, ai_score, technical_score, fundamental_score,
+            expected_return, direction, raw_source_data,
+        ),
     )
     conn.commit()
     row = conn.execute(

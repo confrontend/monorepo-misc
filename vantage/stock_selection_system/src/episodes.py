@@ -77,95 +77,159 @@ class TriggerInfo:
     episode_trigger: str
     eligibility_date: date
     source_candidate_id: Optional[int] = None
+    source_table: str = ""
+    source_row_id: int = 0
 
 
 def _last_episode(conn: sqlite3.Connection, ticker: str) -> Optional[sqlite3.Row]:
     """Most recently SCORED episode (by decision_timestamp_utc) -- used by
-    force_rescore() to compare "would the label change." NOT the right cursor
-    for trigger detection; see _trigger_cursor_date()."""
+    force_rescore() to compare "would the label change." Unrelated to trigger
+    detection; see detect_episode_trigger()/_is_consumed()."""
     return conn.execute(
         "SELECT * FROM reviews WHERE ticker = ? ORDER BY decision_timestamp_utc DESC LIMIT 1",
         (ticker,),
     ).fetchone()
 
 
-def _trigger_cursor_date(conn: sqlite3.Connection, ticker: str) -> Optional[date]:
-    """The latest eligibility_date among all episodes already created for this
-    ticker -- i.e. "every Section 10 trigger event dated on or before this has
-    already been given its own episode." Deliberately MAX(eligibility_date)
-    across ALL reviews rows, not review_date/decision_timestamp_utc of the
-    most-recently-created one: since every episode is always scored using the
-    freshest available data as of as_of_date regardless of which event
-    triggered it, review_date carries no information about which trigger
-    events have been consumed -- multiple episodes created in the same
-    catch-up run can all share the same review_date. Using review_date as the
-    cursor let a second trigger event landing in the same processing gap get
-    silently skipped forever, since the cursor would jump straight to
-    as_of_date and pass over it."""
+def _is_consumed(conn: sqlite3.Connection, ticker: str, source_table: str, source_row_id: int) -> bool:
+    """Whether this specific source event row has already been turned into an
+    episode (or is pending resolution via a preserved insufficient_data_cases
+    trigger_source_table/trigger_source_row_id -- see record_insufficient_data_case).
+    This is per-EVENT-IDENTITY, not per-date: two distinct events dated on the
+    identical calendar day are two distinct rows here, so neither one being
+    consumed affects whether the other is still pending. This is what allows
+    same-day trigger events to each get their own episode, unlike a
+    date-only cursor."""
     row = conn.execute(
-        "SELECT MAX(eligibility_date) AS cursor_date FROM reviews WHERE ticker = ?", (ticker,)
+        "SELECT 1 FROM consumed_triggers WHERE ticker = ? AND source_table = ? AND source_row_id = ?",
+        (ticker, source_table, source_row_id),
     ).fetchone()
-    return _parse_date(row["cursor_date"]) if row else None
+    if row is not None:
+        return True
+    row = conn.execute(
+        "SELECT 1 FROM insufficient_data_cases WHERE ticker = ? AND trigger_source_table = ? "
+        "AND trigger_source_row_id = ? AND resolved = FALSE",
+        (ticker, source_table, source_row_id),
+    ).fetchone()
+    return row is not None
+
+
+def _first_eligibility_floor(conn: sqlite3.Connection, ticker: str) -> Optional[tuple[date, Optional[TriggerInfo]]]:
+    """Returns (floor_date, pending_first_eligibility_trigger_or_None). The
+    floor is the date this ticker first became an eligible candidate -- events
+    from OTHER trigger sources dated before that floor predate the system
+    ever tracking the stock and must not retroactively spawn an episode, so
+    only earnings/guidance/material events on or after this floor are
+    considered pending. Returns None if the ticker has never been (and still
+    isn't, as of the caller's as_of_date) an eligible candidate at all, in
+    which case no trigger of any kind applies yet."""
+    consumed_first = conn.execute(
+        "SELECT eligibility_date FROM consumed_triggers WHERE ticker = ? AND source_table = 'candidates' "
+        "ORDER BY eligibility_date ASC LIMIT 1",
+        (ticker,),
+    ).fetchone()
+    if consumed_first is not None:
+        return _parse_date(consumed_first["eligibility_date"]), None
+
+    # Not yet consumed -- may still be sitting in an open insufficient_data_cases
+    # row (preserves its own eligibility_date/source identity) or genuinely
+    # still pending detection.
+    open_case = conn.execute(
+        "SELECT eligibility_date FROM insufficient_data_cases WHERE ticker = ? AND "
+        "trigger_source_table = 'candidates' AND resolved = FALSE ORDER BY eligibility_date ASC LIMIT 1",
+        (ticker,),
+    ).fetchone()
+    if open_case is not None:
+        return _parse_date(open_case["eligibility_date"]), None
+
+    return None
 
 
 def detect_episode_trigger(conn: sqlite3.Connection, ticker: str, as_of_date: date) -> Optional[TriggerInfo]:
     """Checks, for a given ticker on a given date, whether any Section 10
-    trigger fired since the last-processed trigger event for that ticker.
-    Returns the earliest-dated qualifying trigger still pending, or None if
-    none fired (in which case the caller must NOT create a new reviews row).
-    Call this repeatedly (as run_episode() does) to work through multiple
-    pending triggers one at a time -- each processed trigger advances the
-    cursor, so the next call surfaces whichever trigger is next."""
-    cursor_date = _trigger_cursor_date(conn, ticker)
+    trigger event exists (dated on or before as_of_date, and on or after the
+    date this ticker first became an eligible candidate) that has not already
+    been consumed by a prior episode or a still-open insufficient_data_cases
+    case. Returns the earliest-dated (then most-stable-ordered) qualifying
+    trigger still pending, or None if none is pending (in which case the
+    caller must NOT create a new reviews row). Call this repeatedly (as
+    run_episode() does) to work through multiple pending triggers one at a
+    time -- each processed trigger is recorded in consumed_triggers, so the
+    next call surfaces whichever trigger is next.
 
-    if cursor_date is None:
-        candidate = conn.execute(
-            "SELECT candidate_id, date FROM candidates WHERE ticker = ? AND date <= ? "
-            "ORDER BY date ASC LIMIT 1",
-            (ticker, as_of_date.isoformat()),
-        ).fetchone()
-        if candidate is None:
-            return None
-        return TriggerInfo(
+    Unlike a date-based cursor, this scans every qualifying row up to
+    as_of_date and filters by per-row consumption, so two distinct trigger
+    events dated on the SAME calendar day (e.g. an earnings release and a
+    guidance change both on 2026-01-10) each surface as their own pending
+    trigger rather than the second being silently dropped once the first
+    advances a same-day cursor."""
+    pending: list[TriggerInfo] = []
+
+    candidate = conn.execute(
+        "SELECT candidate_id, date FROM candidates WHERE ticker = ? AND date <= ? "
+        "ORDER BY date ASC LIMIT 1",
+        (ticker, as_of_date.isoformat()),
+    ).fetchone()
+    if candidate is not None and not _is_consumed(conn, ticker, "candidates", candidate["candidate_id"]):
+        pending.append(TriggerInfo(
             episode_trigger="first_eligibility",
             eligibility_date=_parse_date(candidate["date"]),
             source_candidate_id=candidate["candidate_id"],
-        )
+            source_table="candidates",
+            source_row_id=candidate["candidate_id"],
+        ))
 
-    candidates_events: list[TriggerInfo] = []
+    floor = _first_eligibility_floor(conn, ticker)
+    if floor is None:
+        # Ticker has never been an eligible candidate as of as_of_date -- the
+        # only possible pending trigger is first_eligibility itself, already
+        # captured above (or nothing, if it isn't a candidate yet either).
+        pending.sort(key=lambda t: (t.eligibility_date, t.source_table, t.source_row_id))
+        return pending[0] if pending else None
+    floor_date, _ = floor
 
-    earnings_row = conn.execute(
-        "SELECT report_date FROM earnings_history WHERE ticker = ? AND report_date > ? "
-        "AND report_date <= ? ORDER BY report_date ASC LIMIT 1",
-        (ticker, cursor_date.isoformat(), as_of_date.isoformat()),
-    ).fetchone()
-    if earnings_row is not None:
-        candidates_events.append(TriggerInfo("earnings_release", _parse_date(earnings_row["report_date"])))
+    earnings_rows = conn.execute(
+        "SELECT rowid AS rid, report_date FROM earnings_history WHERE ticker = ? "
+        "AND report_date >= ? AND report_date <= ? ORDER BY report_date ASC",
+        (ticker, floor_date.isoformat(), as_of_date.isoformat()),
+    ).fetchall()
+    for row in earnings_rows:
+        if not _is_consumed(conn, ticker, "earnings_history", row["rid"]):
+            pending.append(TriggerInfo(
+                "earnings_release", _parse_date(row["report_date"]),
+                source_table="earnings_history", source_row_id=row["rid"],
+            ))
 
-    guidance_row = conn.execute(
-        "SELECT event_date, guidance_direction FROM guidance_events WHERE ticker = ? AND "
-        "event_date > ? AND event_date <= ? AND guidance_direction IN ('raised','cut') "
-        "ORDER BY event_date ASC LIMIT 1",
-        (ticker, cursor_date.isoformat(), as_of_date.isoformat()),
-    ).fetchone()
-    if guidance_row is not None:
-        candidates_events.append(TriggerInfo("guidance_change", _parse_date(guidance_row["event_date"])))
+    guidance_rows = conn.execute(
+        "SELECT event_id, event_date FROM guidance_events WHERE ticker = ? AND "
+        "event_date >= ? AND event_date <= ? AND guidance_direction IN ('raised','cut') ORDER BY event_date ASC",
+        (ticker, floor_date.isoformat(), as_of_date.isoformat()),
+    ).fetchall()
+    for row in guidance_rows:
+        if not _is_consumed(conn, ticker, "guidance_events", row["event_id"]):
+            pending.append(TriggerInfo(
+                "guidance_change", _parse_date(row["event_date"]),
+                source_table="guidance_events", source_row_id=row["event_id"],
+            ))
 
     material_rows = conn.execute(
-        "SELECT event_date, event_type FROM material_events WHERE ticker = ? AND event_date > ? "
-        "AND event_date <= ? ORDER BY event_date ASC",
-        (ticker, cursor_date.isoformat(), as_of_date.isoformat()),
+        "SELECT event_id, event_date, event_type FROM material_events WHERE ticker = ? "
+        "AND event_date >= ? AND event_date <= ? ORDER BY event_date ASC",
+        (ticker, floor_date.isoformat(), as_of_date.isoformat()),
     ).fetchall()
     for row in material_rows:
         trigger_name = MATERIAL_EVENT_TRIGGER_MAP.get(row["event_type"])
-        if trigger_name is not None:
-            candidates_events.append(TriggerInfo(trigger_name, _parse_date(row["event_date"])))
+        if trigger_name is not None and not _is_consumed(conn, ticker, "material_events", row["event_id"]):
+            pending.append(TriggerInfo(
+                trigger_name, _parse_date(row["event_date"]),
+                source_table="material_events", source_row_id=row["event_id"],
+            ))
 
-    if not candidates_events:
+    if not pending:
         return None
 
-    candidates_events.sort(key=lambda t: t.eligibility_date)
-    return candidates_events[0]
+    pending.sort(key=lambda t: (t.eligibility_date, t.source_table, t.source_row_id))
+    return pending[0]
 
 
 @dataclass
@@ -224,6 +288,8 @@ def _write_review(
     corrects_episode_id: Optional[str] = None,
     decision_timestamp_utc: Optional[datetime] = None,
     commit: bool = True,
+    source_table: Optional[str] = None,
+    source_row_id: Optional[int] = None,
 ) -> str:
     episode_id = str(uuid.uuid4())
     if decision_timestamp_utc is None:
@@ -254,6 +320,17 @@ def _write_review(
             _build_explanation(outcome),
         ),
     )
+    if source_table is not None and source_row_id is not None:
+        # Records that THIS specific source event row (not just "this date")
+        # has now produced an episode, so detect_episode_trigger() never
+        # surfaces it again -- including when a same-day sibling event is
+        # still pending and gets its own episode on a later loop iteration
+        # or call. Same transaction as the reviews INSERT above.
+        conn.execute(
+            "INSERT INTO consumed_triggers (ticker, source_table, source_row_id, episode_trigger, "
+            "eligibility_date, episode_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (ticker, source_table, source_row_id, episode_trigger, eligibility_date.isoformat(), episode_id),
+        )
     # commit=False lets retry_insufficient_data() write this row and mark the
     # audit case resolved as ONE atomic transaction (see required_inputs.py) --
     # a crash between two separate commits could otherwise leave a case
@@ -314,13 +391,20 @@ def run_episode(
             record_insufficient_data_case(
                 conn, ticker, as_of_date, trigger.episode_trigger, trigger.eligibility_date,
                 trigger.source_candidate_id, outcome.required.missing,
+                trigger_source_table=trigger.source_table or None,
+                trigger_source_row_id=trigger.source_row_id or None,
             )
-            # This trigger couldn't be scored, so it can't advance the
-            # cursor -- stop here rather than looping forever on it. It will
+            # This trigger couldn't be scored. It is intentionally NOT marked
+            # consumed (record_insufficient_data_case preserves its source
+            # identity on the audit case instead, which _is_consumed() also
+            # checks) -- stop here rather than looping forever on it. It will
             # be retried later via retry_insufficient_data().
             break
 
-        episode_id = _write_review(conn, ticker, as_of_date, trigger.episode_trigger, trigger.eligibility_date, outcome)
+        episode_id = _write_review(
+            conn, ticker, as_of_date, trigger.episode_trigger, trigger.eligibility_date, outcome,
+            source_table=trigger.source_table or None, source_row_id=trigger.source_row_id or None,
+        )
         episode_ids.append(episode_id)
 
     return episode_ids
@@ -334,6 +418,8 @@ def run_episode_for_retry(
     episode_trigger: str,
     eligibility_date: date,
     resolved_from_audit_id: int,
+    trigger_source_table: Optional[str] = None,
+    trigger_source_row_id: Optional[int] = None,
     calendar: TradingCalendar = default_calendar,
     commit: bool = True,
 ) -> Optional[str]:
@@ -342,13 +428,20 @@ def run_episode_for_retry(
     original episode_trigger/eligibility_date, not a new trigger type. Returns
     None (leaving the case unresolved) if inputs are still insufficient.
     commit=False lets the caller combine this write with marking the audit
-    case resolved in one transaction."""
+    case resolved in one transaction. Forwards the case's preserved
+    trigger_source_table/trigger_source_row_id so the originating source
+    event finally gets recorded in consumed_triggers now that it can be
+    scored -- it was deliberately left unconsumed while the case was open
+    (see _is_consumed(), which also checks open insufficient_data_cases
+    rows) so detect_episode_trigger() wouldn't treat it as available for a
+    second, competing episode in the meantime."""
     outcome = _score_ticker(conn, calendar, ticker, as_of_date)
     if not outcome.required.ok:
         return None
     return _write_review(
         conn, ticker, as_of_date, episode_trigger, eligibility_date, outcome,
         resolved_from_audit_id=resolved_from_audit_id, commit=commit,
+        source_table=trigger_source_table, source_row_id=trigger_source_row_id,
     )
 
 

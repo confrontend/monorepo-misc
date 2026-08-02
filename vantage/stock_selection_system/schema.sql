@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS candidates (
     technical_score REAL,
     fundamental_score REAL,
     expected_return REAL,
+    direction TEXT,          -- e.g. 'long'/'short', from sources like Danelfin Trade Ideas that
+                              -- provide one; NULL for sources that don't (manual, plain Danelfin
+                              -- ranking). Eligibility metadata only -- never read by scoring.
+    raw_source_data TEXT,    -- JSON-serialized raw record from the source API, kept for
+                              -- traceability/debugging when a source's schema is unverified or
+                              -- richer than the normalized columns above capture. Eligibility
+                              -- metadata only -- never read by scoring.
     UNIQUE (date, ticker, source)
 );
 
@@ -133,6 +140,15 @@ CREATE TABLE IF NOT EXISTS insufficient_data_cases (
     episode_trigger TEXT,           -- the ORIGINAL trigger that made this stock eligible for review
     eligibility_date DATE,          -- the date that original trigger occurred
     source_candidate_id INTEGER,    -- FK to candidates.candidate_id
+    trigger_source_table TEXT,      -- the specific source row this trigger came from (e.g.
+                                     -- 'earnings_history', 'guidance_events', 'material_events',
+                                     -- 'candidates'), so that once this case resolves, the SAME
+                                     -- consumed_triggers row can be recorded that would have been
+                                     -- recorded at the time of the original (failed) detection --
+                                     -- otherwise this specific event row would still look
+                                     -- "unconsumed" and detect_episode_trigger could surface it
+                                     -- again as a brand-new trigger after resolution.
+    trigger_source_row_id INTEGER,  -- rowid/primary key within trigger_source_table
     resolved BOOLEAN DEFAULT FALSE, -- set true once a reviews row is eventually created from this
     resolved_episode_id TEXT,       -- the episode_id of the reviews row that resolved this, if any
     retry_after DATE,               -- optional: when to attempt rescoring again
@@ -141,19 +157,33 @@ CREATE TABLE IF NOT EXISTS insufficient_data_cases (
 
 -- Prevents a repeated ingestion run from spawning a second unresolved case for the same
 -- underlying episode intent while an earlier one is still open. Only one unresolved case may
--- exist per (ticker, source_candidate_id, episode_trigger, eligibility_date) at a time.
+-- exist per (ticker, source_candidate_id, episode_trigger, eligibility_date, trigger_source_table,
+-- trigger_source_row_id) at a time.
+--
+-- trigger_source_table/trigger_source_row_id are part of the key for the same reason
+-- consumed_triggers is keyed on source event identity rather than just a date: two DISTINCT
+-- same-day trigger events (e.g. two separate guidance_events rows, both dated 2026-01-12, both
+-- becoming 'guidance_change' episode attempts) would otherwise collide on
+-- (ticker, episode_trigger, eligibility_date) alone and get merged into ONE audit case -- even
+-- though they are two separate episode intents with two different underlying source rows. That
+-- would silently drop one of them: resolving the merged case only ever writes ONE reviews row
+-- (resolved_episode_id is a single column), so the second event's episode would never get
+-- created.
 --
 -- NOTE: SQL UNIQUE constraints treat NULL as distinct from every other value, including
--- another NULL -- two unresolved rows that both have a NULL source_candidate_id would NOT
--- collide under a plain column-list index, silently defeating the "at most one" guarantee.
--- COALESCE(source_candidate_id, -1) closes that gap so the constraint holds even when
--- source_candidate_id is not yet known.
+-- another NULL -- two unresolved rows that both have a NULL source_candidate_id (or NULL
+-- trigger_source_table/trigger_source_row_id, e.g. force_rescore()/record_correction(), which
+-- aren't tied to a specific source event row) would NOT collide under a plain column-list
+-- index, silently defeating the "at most one" guarantee. COALESCE(..., sentinel) closes that
+-- gap for every nullable column in the key.
 CREATE UNIQUE INDEX IF NOT EXISTS unique_unresolved_audit_case
 ON insufficient_data_cases (
     ticker,
     COALESCE(source_candidate_id, -1),
     episode_trigger,
-    eligibility_date
+    eligibility_date,
+    COALESCE(trigger_source_table, ''),
+    COALESCE(trigger_source_row_id, -1)
 )
 WHERE resolved = FALSE;
 
@@ -184,11 +214,14 @@ CREATE TABLE IF NOT EXISTS reviews (
     eligibility_date DATE,          -- the date the triggering event itself occurred (NOT the
                                      -- same as review_date/decision_timestamp_utc, which is when
                                      -- this episode was scored). Added beyond the literal spec
-                                     -- schema because episode-trigger detection needs a reliable
-                                     -- "already turned into an episode, up to here" cursor per
-                                     -- ticker -- using review_date for that cursor lets a second
-                                     -- trigger event that lands in the same processing gap get
-                                     -- silently skipped forever. See episodes.py:detect_episode_trigger.
+                                     -- schema for audit/reporting purposes. Episode-trigger
+                                     -- detection itself does NOT use this as a cursor -- see
+                                     -- consumed_triggers below and episodes.py:detect_episode_trigger.
+                                     -- A date-only cursor (MAX(eligibility_date)) would silently
+                                     -- and permanently skip a second distinct trigger event dated
+                                     -- on the SAME day as an already-consumed one, since "greater
+                                     -- than the cursor date" excludes same-day events once the
+                                     -- cursor advances to that date.
     resolved_from_audit_id INTEGER, -- NULL unless this review resolves a prior
                                      -- insufficient_data_cases.audit_id
     corrects_episode_id TEXT,       -- NULL unless this episode is a correction of a prior one
@@ -227,6 +260,31 @@ CREATE TABLE IF NOT EXISTS context_ingestion_coverage (
     ticker TEXT PRIMARY KEY,
     covered_through DATE NOT NULL,
     checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Consumed triggers: records, per specific source event ROW (not just a date), that it has
+-- already been turned into an episode (or an insufficient_data_cases audit row -- see
+-- trigger_source_table/trigger_source_row_id above). detect_episode_trigger() uses this to
+-- decide "has THIS event already produced an episode," rather than "is this event dated after
+-- some threshold" -- the latter (a date-only cursor) permanently drops any second distinct
+-- trigger event that lands on the SAME calendar date as an already-consumed one, which
+-- conflicts with the spec's requirement that distinct same-date events produce distinct
+-- episodes. 'candidates' rows use candidate_id as source_row_id; 'earnings_history' rows (no
+-- surrogate key) use SQLite's implicit rowid; 'guidance_events'/'material_events' use
+-- event_id.
+CREATE TABLE IF NOT EXISTS consumed_triggers (
+    consumed_id INTEGER PRIMARY KEY,
+    ticker TEXT,
+    source_table TEXT,              -- 'candidates' / 'earnings_history' / 'guidance_events' / 'material_events'
+    source_row_id INTEGER,
+    episode_trigger TEXT,
+    eligibility_date DATE,
+    episode_id TEXT,                -- the reviews row this consumption produced, if any (may be
+                                     -- NULL if consumption was recorded via an insufficient_data_cases
+                                     -- path that hasn't resolved yet -- not currently used that way,
+                                     -- reserved for future use)
+    consumed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (ticker, source_table, source_row_id)
 );
 
 -- Episode entries: append-only. Exactly one row per episode, written only once the applicable

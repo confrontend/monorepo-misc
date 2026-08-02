@@ -286,6 +286,37 @@ def test_repeated_ingestion_does_not_create_second_unresolved_case(conn):
     assert len(cases) == 1
 
 
+def test_distinct_same_day_source_events_get_separate_audit_cases(conn):
+    # Regression test: two DIFFERENT guidance_events rows landing on the
+    # exact same eligibility_date, for the same ticker and episode_trigger
+    # ('guidance_change'), must NOT be deduped into a single audit case --
+    # they're two separate episode intents from two separate source rows.
+    # The old dedup key (ticker, source_candidate_id, episode_trigger,
+    # eligibility_date) had no way to tell them apart; trigger_source_table/
+    # trigger_source_row_id close that gap.
+    result = check_required_inputs(conn, "ATI", date(2026, 2, 1))
+    audit_id_1 = record_insufficient_data_case(
+        conn, "ATI", date(2026, 2, 1), "guidance_change", date(2026, 1, 12), None, result.missing,
+        trigger_source_table="guidance_events", trigger_source_row_id=1,
+    )
+    audit_id_2 = record_insufficient_data_case(
+        conn, "ATI", date(2026, 2, 1), "guidance_change", date(2026, 1, 12), None, result.missing,
+        trigger_source_table="guidance_events", trigger_source_row_id=2,
+    )
+    assert audit_id_1 != audit_id_2
+    cases = conn.execute("SELECT * FROM insufficient_data_cases WHERE resolved = FALSE").fetchall()
+    assert len(cases) == 2
+
+    # But re-recording for the SAME source row still dedupes as before.
+    audit_id_1_again = record_insufficient_data_case(
+        conn, "ATI", date(2026, 2, 2), "guidance_change", date(2026, 1, 12), None, result.missing,
+        trigger_source_table="guidance_events", trigger_source_row_id=1,
+    )
+    assert audit_id_1_again == audit_id_1
+    cases = conn.execute("SELECT * FROM insufficient_data_cases WHERE resolved = FALSE").fetchall()
+    assert len(cases) == 2
+
+
 def test_retry_only_resolves_when_all_fields_available(conn):
     # Seed everything EXCEPT the wait-check earnings_calendar row.
     _seed_full_market_history(conn)

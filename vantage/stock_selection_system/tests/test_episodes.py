@@ -11,7 +11,7 @@ from src.episodes import (
     run_episode_for_retry,
 )
 from src.ingestion.base import mark_context_coverage
-from src.required_inputs import check_required_inputs, record_insufficient_data_case
+from src.required_inputs import check_required_inputs, record_insufficient_data_case, retry_insufficient_data
 from src.trading_calendar import TradingCalendar
 
 _CAL = TradingCalendar()
@@ -273,6 +273,51 @@ def test_run_episode_processes_all_pending_triggers_in_one_call(conn):
     assert run_episode(conn, "ATI", date(2026, 2, 1)) == []
 
 
+def test_same_day_distinct_trigger_events_each_get_their_own_episode(conn):
+    # Regression test for the P1 finding: an earnings release AND a guidance
+    # change dated on the IDENTICAL calendar day must each produce their own
+    # episode. A date-only cursor (MAX(eligibility_date)) would consume the
+    # first event and advance the cursor to that same date, then permanently
+    # exclude the second (event_date > cursor_date is false for a same-day
+    # event) -- detection must instead be keyed on event ROW identity via
+    # consumed_triggers, not just a date threshold.
+    _seed_candidate(conn, d="2026-01-01")
+    _seed_all_required(conn, as_of=date(2026, 2, 1))  # earnings report_date = 2026-01-12
+
+    # A guidance change on the EXACT same date as the seeded earnings release.
+    conn.execute(
+        "INSERT INTO guidance_events (ticker, event_date, guidance_direction, detail) "
+        "VALUES ('ATI', '2026-01-12', 'raised', 'Raised FY guidance same day as earnings')"
+    )
+    conn.commit()
+
+    episode_ids = run_episode(conn, "ATI", date(2026, 2, 1))
+    # first_eligibility (2026-01-01), then BOTH same-day events (2026-01-12).
+    assert len(episode_ids) == 3
+
+    rows = [
+        conn.execute("SELECT * FROM reviews WHERE episode_id = ?", (eid,)).fetchone()
+        for eid in episode_ids
+    ]
+    assert rows[0]["episode_trigger"] == "first_eligibility"
+    assert rows[0]["eligibility_date"] == "2026-01-01"
+
+    same_day = {rows[1]["episode_trigger"], rows[2]["episode_trigger"]}
+    assert same_day == {"earnings_release", "guidance_change"}
+    assert rows[1]["eligibility_date"] == "2026-01-12"
+    assert rows[2]["eligibility_date"] == "2026-01-12"
+
+    # Each event row is recorded exactly once in consumed_triggers -- neither
+    # was silently dropped nor double-consumed.
+    consumed = conn.execute(
+        "SELECT source_table FROM consumed_triggers WHERE ticker = 'ATI' ORDER BY source_table"
+    ).fetchall()
+    assert [r["source_table"] for r in consumed] == ["candidates", "earnings_history", "guidance_events"]
+
+    # No more pending triggers.
+    assert run_episode(conn, "ATI", date(2026, 2, 1)) == []
+
+
 # -- run_episode_for_retry: preserves original trigger --------------------------------
 
 def test_retry_uses_preserved_trigger_and_eligibility_date(conn):
@@ -297,6 +342,54 @@ def test_retry_uses_preserved_trigger_and_eligibility_date(conn):
     row = conn.execute("SELECT * FROM reviews WHERE episode_id = ?", (new_episode_id,)).fetchone()
     assert row["episode_trigger"] == "first_eligibility"
     assert row["resolved_from_audit_id"] == case["audit_id"]
+
+
+def test_retry_via_insufficient_data_records_consumption_and_stays_settled(conn):
+    # End-to-end regression: an earnings-release trigger that initially can't
+    # be scored (insufficient data) must, once retried and resolved, record
+    # its OWN consumed_triggers row -- not just the candidate's -- so a later
+    # detect_episode_trigger() call never re-surfaces that earnings event as
+    # a "new" pending trigger, and never confuses it with a same-day sibling.
+    _seed_candidate(conn, d="2026-01-01")
+    _seed_full_market_history(conn, as_of=date(2026, 2, 1))
+    _seed_earnings(conn, as_of=date(2026, 2, 1))  # report_date = 2026-01-12
+    _seed_security_metadata(conn)
+    _seed_context_coverage(conn)
+    # Deliberately omit _seed_earnings_calendar so the wait-check input is
+    # missing and BOTH pending triggers (first_eligibility, earnings_release)
+    # fall back to insufficient_data_cases.
+
+    episode_ids = run_episode(conn, "ATI", date(2026, 2, 1))
+    assert episode_ids == []
+    cases = conn.execute("SELECT * FROM insufficient_data_cases WHERE resolved = FALSE").fetchall()
+    assert len(cases) == 1  # only the earliest pending trigger gets a case per run_episode() call
+    assert cases[0]["episode_trigger"] == "first_eligibility"
+    assert cases[0]["trigger_source_table"] == "candidates"
+
+    # Supply the missing wait-check input and resolve via the real retry path.
+    _seed_earnings_calendar(conn)
+
+    def _adapter(**kwargs):
+        return run_episode_for_retry(conn=conn, **kwargs)
+
+    resolved_ids = retry_insufficient_data(conn, _adapter, today=date(2026, 2, 1))
+    assert len(resolved_ids) == 1
+
+    consumed = conn.execute(
+        "SELECT source_table FROM consumed_triggers WHERE ticker = 'ATI'"
+    ).fetchall()
+    assert [r["source_table"] for r in consumed] == ["candidates"]
+
+    # The earnings_release trigger was never scored above (run_episode() stops
+    # at the first unscorable trigger per call), so it's still genuinely
+    # pending -- and now scorable, since earnings_calendar exists.
+    remaining = run_episode(conn, "ATI", date(2026, 2, 1))
+    assert len(remaining) == 1
+    row = conn.execute("SELECT * FROM reviews WHERE episode_id = ?", (remaining[0],)).fetchone()
+    assert row["episode_trigger"] == "earnings_release"
+
+    # And now nothing is pending at all.
+    assert run_episode(conn, "ATI", date(2026, 2, 1)) == []
 
 
 # -- force_rescore: only creates episode when label actually changes ------------------

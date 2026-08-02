@@ -305,18 +305,37 @@ def record_insufficient_data_case(
     eligibility_date: date,
     source_candidate_id: Optional[int],
     missing: list[tuple[str, str]],
+    trigger_source_table: Optional[str] = None,
+    trigger_source_row_id: Optional[int] = None,
 ) -> int:
     """Writes ONE row to insufficient_data_cases (not one per missing field)
     plus one insufficient_data_fields row per missing field. If an unresolved
     case already exists for this (ticker, source_candidate_id, episode_trigger,
-    eligibility_date) key (enforced by the partial unique index), reuses it
-    instead of creating a duplicate -- a repeated ingestion run must not spawn
-    a second unresolved case for the same episode intent."""
+    eligibility_date, trigger_source_table, trigger_source_row_id) key
+    (enforced by the partial unique index), reuses it instead of creating a
+    duplicate -- a repeated ingestion run must not spawn a second unresolved
+    case for the same episode intent.
+
+    trigger_source_table/trigger_source_row_id preserve the originating
+    source event row's identity so that, once this case eventually resolves,
+    the same row can be recorded in consumed_triggers -- and, in the
+    meantime, so episodes.detect_episode_trigger()/_is_consumed() can see
+    that this specific event row already has an OPEN case and must not be
+    offered up again as a second, competing pending trigger. They're also
+    part of THIS dedup key (not just episode_trigger/eligibility_date) so
+    that two distinct same-day events of the same trigger type -- e.g. two
+    separate guidance_events rows both dated 2026-01-12 -- get two separate
+    audit cases instead of silently merging into one (which would only ever
+    resolve into a single reviews row, permanently losing the other)."""
     existing = conn.execute(
         "SELECT audit_id FROM insufficient_data_cases WHERE ticker = ? AND "
         "(source_candidate_id IS ? OR source_candidate_id = ?) AND episode_trigger = ? "
-        "AND eligibility_date = ? AND resolved = FALSE",
-        (ticker, source_candidate_id, source_candidate_id, episode_trigger, eligibility_date.isoformat()),
+        "AND eligibility_date = ? AND (trigger_source_table IS ? OR trigger_source_table = ?) "
+        "AND (trigger_source_row_id IS ? OR trigger_source_row_id = ?) AND resolved = FALSE",
+        (
+            ticker, source_candidate_id, source_candidate_id, episode_trigger, eligibility_date.isoformat(),
+            trigger_source_table, trigger_source_table, trigger_source_row_id, trigger_source_row_id,
+        ),
     ).fetchone()
 
     if existing is not None:
@@ -324,8 +343,12 @@ def record_insufficient_data_case(
     else:
         cur = conn.execute(
             "INSERT INTO insufficient_data_cases (ticker, as_of_date, episode_trigger, "
-            "eligibility_date, source_candidate_id, resolved) VALUES (?, ?, ?, ?, ?, FALSE)",
-            (ticker, as_of_date.isoformat(), episode_trigger, eligibility_date.isoformat(), source_candidate_id),
+            "eligibility_date, source_candidate_id, trigger_source_table, trigger_source_row_id, "
+            "resolved) VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)",
+            (
+                ticker, as_of_date.isoformat(), episode_trigger, eligibility_date.isoformat(),
+                source_candidate_id, trigger_source_table, trigger_source_row_id,
+            ),
         )
         audit_id = cur.lastrowid
 
@@ -368,7 +391,8 @@ def retry_insufficient_data(
     new_episode_ids: list[str] = []
 
     cases = conn.execute(
-        "SELECT audit_id, ticker, episode_trigger, eligibility_date, source_candidate_id "
+        "SELECT audit_id, ticker, episode_trigger, eligibility_date, source_candidate_id, "
+        "trigger_source_table, trigger_source_row_id "
         "FROM insufficient_data_cases WHERE resolved = FALSE"
     ).fetchall()
 
@@ -390,6 +414,8 @@ def retry_insufficient_data(
                 episode_trigger=case["episode_trigger"],
                 eligibility_date=eligibility_date,
                 resolved_from_audit_id=audit_id,
+                trigger_source_table=case["trigger_source_table"],
+                trigger_source_row_id=case["trigger_source_row_id"],
                 commit=False,
             )
             if episode_id is None:

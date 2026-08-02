@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<template id="__bundler_thumbnail" data-bg-color="#f3f2f2">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#f3f2f2"></rect>
+    <rect x="0" y="0" width="280" height="800" fill="#eae9e9"></rect>
+    <rect x="0" y="0" width="280" height="800" fill="none" stroke="#201e1d" stroke-width="4"></rect>
+    <text x="40" y="90" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#201e1d">Stock</text>
+    <text x="40" y="130" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#201e1d">Selection</text>
+    <rect x="330" y="70" width="820" height="70" fill="#201e1d"></rect>
+    <rect x="330" y="180" width="240" height="120" fill="#ffffff" stroke="#201e1d" stroke-width="4"></rect>
+    <rect x="600" y="180" width="240" height="120" fill="#ffffff" stroke="#201e1d" stroke-width="4"></rect>
+    <rect x="870" y="180" width="280" height="120" fill="#ffffff" stroke="#201e1d" stroke-width="4"></rect>
+    <rect x="330" y="340" width="820" height="360" fill="#ffffff" stroke="#201e1d" stroke-width="4"></rect>
+    <rect x="330" y="340" width="820" height="60" fill="#ec3013"></rect>
+  </svg>
+</template>
+<helmet>
+  <link rel="stylesheet" href="_ds/modernist-c26c61ac-5cb0-4dff-b466-e0c760910d55/styles.css">
+  <script src="_ds/modernist-c26c61ac-5cb0-4dff-b466-e0c760910d55/_ds_bundle.js"></script>
+  <style>
+    body{margin:0}
+    a{color:var(--color-accent)}
+    a:hover{color:var(--color-accent-700)}
+    ::-webkit-scrollbar{width:10px;height:10px}
+    ::-webkit-scrollbar-thumb{background:var(--color-neutral-400)}
+    select.input{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23605d5d' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 8px center;background-size:14px;padding-right:28px}
+  </style>
+</helmet>
+
+<div style="display:flex;height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);font-size:15px;overflow:hidden">
+
+  <div style="flex:none;width:232px;display:flex;flex-direction:column;border-right:2px solid var(--color-divider);background:var(--color-surface);overflow-y:auto">
+    <div style="padding:22px 16px 16px">
+      <div style="font-family:var(--font-heading);font-weight:800;font-size:18px;line-height:1.15">{{ productName }}</div>
+      <div style="font-size:11px;color:color-mix(in srgb, var(--color-text) 55%, transparent);margin-top:6px;letter-spacing:.02em">Candidate validation &amp; forward tracking</div>
+    </div>
+    <div style="height:2px;background:var(--color-divider);margin:4px 0 8px"></div>
+    <nav style="display:flex;flex-direction:column;padding:0 0 12px">
+      <div onClick="{{ goDashboard }}" style="{{ navDashboardStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        Dashboard
+      </div>
+      <div onClick="{{ goIntake }}" style="{{ navIntakeStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg>
+        Candidate Intake
+      </div>
+      <div onClick="{{ goEpisodes }}" style="{{ navEpisodesStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+        Episodes
+      </div>
+      <div onClick="{{ goIncomplete }}" style="{{ navIncompleteStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        Incomplete Data
+        <sc-if value="{{ openIncompleteCount }}" hint-placeholder-val="{{ true }}">
+          <span style="margin-left:auto;font-size:10px;font-weight:800;background:var(--color-neutral-800);color:var(--color-bg);padding:1px 6px">{{ openIncompleteCount }}</span>
+        </sc-if>
+      </div>
+      <div onClick="{{ goReports }}" style="{{ navReportsStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        Reports
+      </div>
+      <div onClick="{{ goSettings }}" style="{{ navSettingsStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Settings
+      </div>
+    </nav>
+    <div style="margin-top:auto;padding:14px 16px;border-top:2px solid var(--color-divider);font-size:11px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">
+      Rule engine v2.3<br>Not a trading system — tracking &amp; review only.
+    </div>
+  </div>
+
+  <div style="flex:1;overflow-y:auto;min-width:0">
+
+    <!-- ================= DASHBOARD ================= -->
+    <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:28px 36px 48px" data-screen-label="Dashboard">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px">
+          <div>
+            <h1 style="font-size:28px;margin-bottom:4px">{{ productName }}</h1>
+            <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px">Candidate validation &amp; forward tracking</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="font-size:13px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ today }}</div>
+            <span class="tag tag-neutral" style="display:inline-flex;align-items:center;gap:6px"><span style="width:7px;height:7px;background:{{ connectionDotColor }};flex:none"></span>{{ connectionLabel }}</span>
+            <button type="button" class="btn btn-secondary" onClick="{{ onRefresh }}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path><path d="M8 16H3v5"></path></svg>
+              <sc-if value="{{ refreshing }}" hint-placeholder-val="{{ false }}">Refreshing…</sc-if>
+              <sc-if value="{{ notRefreshing }}" hint-placeholder-val="{{ true }}">Refresh</sc-if>
+            </button>
+          </div>
+        </div>
+        <div class="hr"></div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:28px">
+          <div class="card"><div class="card-kicker">Total</div><div class="card-title" style="font-size:26px">{{ summary.total }}</div><div class="card-body">Scored episodes</div></div>
+          <div class="card"><div class="card-kicker" style="color:#1c6b34">Confirm</div><div class="card-title" style="font-size:26px">{{ summary.confirm }}</div><div class="card-body">decisions</div></div>
+          <div class="card"><div class="card-kicker" style="color:#7a5300">Mixed</div><div class="card-title" style="font-size:26px">{{ summary.mixed }}</div><div class="card-body">decisions</div></div>
+          <div class="card"><div class="card-kicker" style="color:var(--color-accent-700)">Reject</div><div class="card-title" style="font-size:26px">{{ summary.reject }}</div><div class="card-body">decisions</div></div>
+          <div class="card"><div class="card-kicker" style="color:#1e457a">Wait</div><div class="card-title" style="font-size:26px">{{ summary.wait }}</div><div class="card-body">decisions</div></div>
+          <div class="card"><div class="card-kicker">Open</div><div class="card-title" style="font-size:26px">{{ summary.openIncomplete }}</div><div class="card-body">insufficient-data cases</div></div>
+          <div class="card"><div class="card-kicker">Tracked</div><div class="card-title" style="font-size:26px">{{ summary.tickersTracked }}</div><div class="card-body">tickers</div></div>
+        </div>
+
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px">
+          <h3 style="margin:0">Recent decisions</h3>
+          <a href="#" onClick="{{ goEpisodes }}" style="font-size:13px;text-decoration:none">View all episodes →</a>
+        </div>
+        <table class="table">
+          <thead><tr><th>Ticker</th><th>Decision</th><th>Total</th><th>Earnings</th><th>Market</th><th>Context</th><th>Trigger</th><th>Review date</th><th>Entry</th><th>Outcome</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ recentEpisodes }}" as="ep" hint-placeholder-count="6">
+              <tr onClick="{{ ep.onRowClick }}" style="cursor:pointer">
+                <td style="font-weight:800;font-family:var(--font-heading)">{{ ep.ticker }}</td>
+                <td><span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;background:{{ ep.badgeBg }};color:{{ ep.badgeFg }}"><span style="width:6px;height:6px;background:{{ ep.badgeDot }};flex:none"></span>{{ ep.decision }}</span></td>
+                <td>{{ ep.totalScore }}</td>
+                <td>{{ ep.earningsScore }}</td>
+                <td>{{ ep.marketScore }}</td>
+                <td>{{ ep.contextScore }}</td>
+                <td style="max-width:220px">{{ ep.trigger }}</td>
+                <td class="text-muted">{{ ep.reviewDate }}</td>
+                <td>{{ ep.entryStatus }}</td>
+                <td>{{ ep.outcomeStatus }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </sc-if>
+
+    <!-- ================= CANDIDATE INTAKE ================= -->
+    <sc-if value="{{ isIntake }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:28px 36px 48px" data-screen-label="Candidate Intake">
+        <h1 style="font-size:28px;margin-bottom:4px">Candidate Intake</h1>
+        <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px;margin-bottom:2px">This answers one question only: "which stocks should we examine?" It does not score or decide anything.</div>
+        <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px;margin-bottom:20px">Two separate ways a ticker becomes a candidate — pick the column that matches how you found it.</div>
+        <div class="hr"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+          <div class="card elev-sm" style="gap:14px">
+            <div>
+              <div class="card-kicker">Automatic — Danelfin discovers</div>
+              <div class="card-title">Fetch candidates from Danelfin Trade Ideas</div>
+              <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent);margin-top:4px">You never type a ticker here. Set the criteria below and Danelfin hands back its ranked trade ideas — it does not decide Confirm/Mixed/Reject/Wait.</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label>Market</label>
+                <select class="input" value="{{ fetchMarket }}" onChange="{{ onFetchMarketChange }}">
+                  <option value="US">USA</option><option value="EU">Europe</option>
+                </select>
+              </div>
+              <div class="field"><label>Direction</label>
+                <select class="input" value="{{ fetchDirection }}" onChange="{{ onFetchDirectionChange }}">
+                  <option value="Long">Long</option><option value="Short">Short</option><option value="Any">Any</option>
+                </select>
+              </div>
+              <div class="field"><label>Asset type</label>
+                <select class="input" value="{{ fetchAssetType }}" onChange="{{ onFetchAssetTypeChange }}">
+                  <option value="Stocks">Stocks</option><option value="ETFs">ETFs</option>
+                </select>
+              </div>
+              <div class="field"><label>Minimum AI score</label><input class="input" type="number" min="0" max="10" step="0.1" value="{{ fetchMinAiScore }}" onChange="{{ onFetchMinAiScoreChange }}"></input></div>
+              <div class="field" style="grid-column:1/-1"><label>As-of date</label><input class="input" type="date" value="{{ fetchAsOf }}" onChange="{{ onFetchAsOfChange }}"></input></div>
+              <div class="field" style="grid-column:1/-1"><label>Connection</label><span class="tag tag-neutral" style="display:inline-flex;align-items:center;gap:6px;height:36px"><span style="width:7px;height:7px;background:{{ connectionDotColor }};flex:none"></span>{{ connectionLabel }}</span></div>
+            </div>
+            <button type="button" class="btn btn-primary btn-block" onClick="{{ onRunFetch }}" disabled="{{ fetchDisabled }}">
+              <sc-if value="{{ isFetchLoading }}" hint-placeholder-val="{{ false }}">Fetching…</sc-if>
+              <sc-if value="{{ danelfinDisconnected }}" hint-placeholder-val="{{ false }}">Danelfin unavailable</sc-if>
+              <sc-if value="{{ isFetchNotLoadingConnected }}" hint-placeholder-val="{{ true }}">Fetch candidates</sc-if>
+            </button>
+            <sc-if value="{{ danelfinDisconnected }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-accent-700)">Danelfin API connection is down — automatic intake is unavailable. Use manual intake instead.</div>
+            </sc-if>
+
+            <sc-if value="{{ isFetchDone }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:14px;margin-top:4px">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+                  <div style="text-align:center;padding:8px 4px;background:var(--color-neutral-100)"><div style="font-family:var(--font-heading);font-weight:800;font-size:20px">{{ fetchFoundCount }}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:color-mix(in srgb, var(--color-text) 55%, transparent)">Found</div></div>
+                  <div style="text-align:center;padding:8px 4px;background:#e8f5ea"><div style="font-family:var(--font-heading);font-weight:800;font-size:20px;color:#1c6b34">{{ fetchStoredCount }}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#1c6b34">Stored</div></div>
+                  <div style="text-align:center;padding:8px 4px;background:#fdf3df"><div style="font-family:var(--font-heading);font-weight:800;font-size:20px;color:#7a5300">{{ fetchSkippedTotalCount }}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#7a5300">Skipped</div></div>
+                  <div style="text-align:center;padding:8px 4px;background:#fff2ef"><div style="font-family:var(--font-heading);font-weight:800;font-size:20px;color:var(--color-accent-700)">{{ fetchFailedTotalCount }}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-accent-700)">Failed</div></div>
+                </div>
+
+                <sc-for list="{{ fetchCategoryGroups }}" as="grp" hint-placeholder-count="2">
+                  <div>
+                    <div style="font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:{{ grp.color }};margin-bottom:4px">{{ grp.label }} ({{ grp.items.length }})</div>
+                    <sc-for list="{{ grp.items }}" as="r" hint-placeholder-count="1">
+                      <div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--color-divider)"><span style="font-weight:800;font-family:var(--font-heading)">{{ r.ticker }}</span> — <span class="text-muted">{{ r.reason }}</span></div>
+                    </sc-for>
+                  </div>
+                </sc-for>
+
+                <button type="button" class="btn btn-secondary btn-block" onClick="{{ onReviewCandidates }}">Review candidates</button>
+              </div>
+            </sc-if>
+          </div>
+
+          <div class="card elev-sm" style="gap:14px">
+            <div>
+              <div class="card-kicker">Manual — you decide</div>
+              <div class="card-title">Add a known ticker</div>
+              <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent);margin-top:4px">This is the only place you type a specific ticker. It skips Danelfin's eligibility check entirely and is guaranteed to be added — Automatic can only reject or skip a ticker; Manual never does.</div>
+            </div>
+            <div class="field"><label>Ticker</label><input class="input" placeholder="e.g. AAPL" value="{{ manualTicker }}" onChange="{{ onManualTickerChange }}"></input></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label>Direction</label>
+                <select class="input" value="{{ manualDirection }}" onChange="{{ onManualDirectionChange }}">
+                  <option value="Long">Long</option><option value="Short">Short</option>
+                </select>
+              </div>
+              <div class="field"><label>As-of date</label><input class="input" type="date" value="{{ manualAsOf }}" onChange="{{ onManualAsOfChange }}"></input></div>
+              <div class="field" style="grid-column:1/-1"><label>Source</label><span class="tag tag-outline" style="height:36px;display:inline-flex;align-items:center">Manual</span></div>
+            </div>
+            <button type="button" class="btn btn-primary btn-block" onClick="{{ onOpenManualConfirm }}" disabled="{{ manualDisabled }}">Add to tracking</button>
+            <sc-if value="{{ hasManualToast }}" hint-placeholder-val="{{ false }}">
+              <div class="tag tag-accent" style="width:fit-content">{{ manualToast }}</div>
+            </sc-if>
+            <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent);border-top:1px solid var(--color-divider);padding-top:10px">Use this when you already know which ticker you want to evaluate. It bypasses Danelfin eligibility but still uses all required data checks and scoring rules.</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:var(--color-neutral-100);border-left:3px solid var(--color-neutral-700);margin:20px 0">
+          <div style="font-size:13px">Danelfin is used only to discover eligible candidates. Final decisions are based on separate Earnings, Market, and Context evidence.</div>
+        </div>
+
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px">
+          <h3 style="margin:0">Candidates</h3>
+          <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ candidateResultCount }} of {{ candidateTotalCount }}</div>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px">
+          <div class="field" style="width:110px"><label>Ticker</label>
+            <select class="input" value="{{ candidateFilterTicker }}" onChange="{{ onCandidateFilterTicker }}">
+              <option value="all">All</option>
+              <sc-for list="{{ candidateTickerOptions }}" as="t" hint-placeholder-count="6"><option value="{{ t.value }}">{{ t.label }}</option></sc-for>
+            </select>
+          </div>
+          <div class="field" style="width:120px"><label>Source</label>
+            <select class="input" value="{{ candidateFilterSource }}" onChange="{{ onCandidateFilterSource }}">
+              <option value="all">All</option><option value="Danelfin">Danelfin</option><option value="Manual">Manual</option>
+            </select>
+          </div>
+          <div class="field" style="width:110px"><label>Direction</label>
+            <select class="input" value="{{ candidateFilterDirection }}" onChange="{{ onCandidateFilterDirection }}">
+              <option value="all">All</option><option value="Long">Long</option><option value="Short">Short</option>
+            </select>
+          </div>
+          <div class="field" style="width:150px"><label>Validation status</label>
+            <select class="input" value="{{ candidateFilterStatus }}" onChange="{{ onCandidateFilterStatus }}">
+              <option value="all">All</option><option value="New">New</option><option value="Validating">Validating</option><option value="Ready for scoring">Ready for scoring</option><option value="Insufficient data">Insufficient data</option><option value="Scored">Scored</option><option value="Failed">Failed</option>
+            </select>
+          </div>
+          <div class="field" style="width:140px"><label>Candidate from</label><input class="input" type="date" value="{{ candidateFilterFrom }}" onChange="{{ onCandidateFilterFrom }}"></input></div>
+          <div class="field" style="width:140px"><label>Candidate to</label><input class="input" type="date" value="{{ candidateFilterTo }}" onChange="{{ onCandidateFilterTo }}"></input></div>
+          <button type="button" class="btn btn-secondary" style="margin-left:auto" onClick="{{ onValidateSelected }}" disabled="{{ noSelection }}">Validate selected ({{ selectedCount }})</button>
+        </div>
+
+        <table class="table">
+          <thead><tr><th></th><th>Ticker</th><th>Source</th><th>Candidate date</th><th>Direction</th><th>Rank</th><th>AI score</th><th>Technical</th><th>Fundamental</th><th>Exp. return</th><th>Validation status</th><th>Last validated</th><th>Action</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ filteredCandidates }}" as="c" hint-placeholder-count="8">
+              <tr onClick="{{ c.onRowClick }}" style="cursor:pointer">
+                <td onClick="{{ c.stopClick }}"><input type="checkbox" checked="{{ c.isSelected }}" onChange="{{ c.onToggleSelect }}"></input></td>
+                <td style="font-weight:800;font-family:var(--font-heading)">{{ c.ticker }}</td>
+                <td><span class="tag tag-neutral">{{ c.source }}</span></td>
+                <td class="text-muted">{{ c.candidateDate }}</td>
+                <td>{{ c.direction }}</td>
+                <td>{{ c.rank }}</td>
+                <td>{{ c.aiScore }}</td>
+                <td>{{ c.techScore }}</td>
+                <td>{{ c.fundScore }}</td>
+                <td>{{ c.expReturn }}</td>
+                <td><span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;background:{{ c.statusBg }};color:{{ c.statusFg }}"><span style="width:6px;height:6px;background:{{ c.statusDot }};flex:none"></span>{{ c.validationStatus }}</span></td>
+                <td class="text-muted">{{ c.lastValidated }}</td>
+                <td onClick="{{ c.stopClick }}">
+                  <sc-if value="{{ c.canValidate }}" hint-placeholder-val="{{ false }}"><button type="button" class="btn btn-ghost" onClick="{{ c.onValidate }}">Validate</button></sc-if>
+                  <sc-if value="{{ c.isValidatingRow }}" hint-placeholder-val="{{ false }}"><span class="text-muted">Validating…</span></sc-if>
+                  <sc-if value="{{ c.isScored }}" hint-placeholder-val="{{ false }}"><a href="#" onClick="{{ c.onViewEpisode }}">View episode</a></sc-if>
+                </td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </sc-if>
+
+    <!-- ================= EPISODES ================= -->
+    <sc-if value="{{ isEpisodes }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:28px 36px 48px" data-screen-label="Episodes">
+        <h1 style="font-size:28px;margin-bottom:4px">Episodes</h1>
+        <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px;margin-bottom:20px">Full log of frozen scoring decisions. Reviews are immutable — corrections create a new episode.</div>
+        <div class="hr"></div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:18px">
+          <div class="field" style="width:110px"><label>Ticker</label>
+            <select class="input" value="{{ filterTicker }}" onChange="{{ onFilterTicker }}">
+              <option value="all">All</option>
+              <sc-for list="{{ uniqueTickersOptions }}" as="t" hint-placeholder-count="6"><option value="{{ t.value }}">{{ t.label }}</option></sc-for>
+            </select>
+          </div>
+          <div class="field" style="width:130px"><label>Decision</label>
+            <select class="input" value="{{ filterDecision }}" onChange="{{ onFilterDecision }}">
+              <option value="all">All</option><option value="Confirm">Confirm</option><option value="Mixed">Mixed</option><option value="Reject">Reject</option><option value="Wait">Wait</option>
+            </select>
+          </div>
+          <div class="field" style="width:180px"><label>Trigger contains</label><input class="input" value="{{ filterTrigger }}" onChange="{{ onFilterTriggerText }}" placeholder="e.g. earnings"></input></div>
+          <div class="field" style="width:140px"><label>Review from</label><input class="input" type="date" value="{{ filterFrom }}" onChange="{{ onFilterFrom }}"></input></div>
+          <div class="field" style="width:140px"><label>Review to</label><input class="input" type="date" value="{{ filterTo }}" onChange="{{ onFilterTo }}"></input></div>
+          <div class="field" style="width:130px"><label>Entry status</label>
+            <select class="input" value="{{ filterEntry }}" onChange="{{ onFilterEntry }}">
+              <option value="all">All</option><option value="Filled">Filled</option><option value="Pending">Pending</option><option value="N/A">N/A</option>
+            </select>
+          </div>
+          <div class="field" style="width:130px"><label>Outcome status</label>
+            <select class="input" value="{{ filterOutcome }}" onChange="{{ onFilterOutcome }}">
+              <option value="all">All</option><option value="Resolved">Resolved</option><option value="Pending">Pending</option><option value="N/A">N/A</option>
+            </select>
+          </div>
+          <div class="field" style="width:150px;margin-left:auto"><label>Sort</label>
+            <select class="input" value="{{ filterSort }}" onChange="{{ onFilterSort }}">
+              <option value="newest">Newest</option><option value="oldest">Oldest</option><option value="highest">Highest score</option><option value="lowest">Lowest score</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent);margin-bottom:8px">{{ resultCount }} of {{ summary.total }} episodes</div>
+
+        <table class="table">
+          <thead><tr><th>Ticker</th><th>Decision</th><th>Total</th><th>Earnings</th><th>Market</th><th>Context</th><th>Trigger</th><th>Review date</th><th>Entry</th><th>Outcome</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ filteredEpisodes }}" as="ep" hint-placeholder-count="10">
+              <tr onClick="{{ ep.onRowClick }}" style="cursor:pointer">
+                <td style="font-weight:800;font-family:var(--font-heading)">{{ ep.ticker }}</td>
+                <td><span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;background:{{ ep.badgeBg }};color:{{ ep.badgeFg }}"><span style="width:6px;height:6px;background:{{ ep.badgeDot }};flex:none"></span>{{ ep.decision }}</span></td>
+                <td>{{ ep.totalScore }}</td>
+                <td>{{ ep.earningsScore }}</td>
+                <td>{{ ep.marketScore }}</td>
+                <td>{{ ep.contextScore }}</td>
+                <td style="max-width:220px">{{ ep.trigger }}</td>
+                <td class="text-muted">{{ ep.reviewDate }}</td>
+                <td>{{ ep.entryStatus }}</td>
+                <td>{{ ep.outcomeStatus }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </sc-if>
+
+    <!-- ================= INCOMPLETE DATA ================= -->
+    <sc-if value="{{ isIncomplete }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:28px 36px 48px" data-screen-label="Incomplete Data">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px">
+          <div>
+            <h1 style="font-size:28px;margin-bottom:4px">Incomplete Data</h1>
+            <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px">Audit queue for episodes that could not yet be scored.</div>
+          </div>
+          <button type="button" class="btn btn-primary" onClick="{{ onRunRetry }}" disabled="{{ retrying }}">
+            <sc-if value="{{ retrying }}" hint-placeholder-val="{{ false }}">Retrying…</sc-if>
+            <sc-if value="{{ notRetrying }}" hint-placeholder-val="{{ true }}">Retry incomplete cases</sc-if>
+          </button>
+        </div>
+        <div class="hr"></div>
+
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:14px 16px;background:var(--color-neutral-100);border-left:3px solid var(--color-neutral-700);margin-bottom:20px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-700)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:2px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <div style="font-size:13px"><strong>Missing data is never treated as neutral.</strong> An episode without every required field is not scored 0 and does not enter Confirm/Mixed/Reject/Wait — it stays open here until the data resolves or the retry window is exhausted.</div>
+        </div>
+
+        <sc-if value="{{ hasRetryMessage }}" hint-placeholder-val="{{ false }}">
+          <div class="tag tag-accent" style="margin-bottom:14px;width:fit-content">{{ retryMessage }}</div>
+        </sc-if>
+
+        <table class="table">
+          <thead><tr><th>Ticker</th><th>Original trigger</th><th>Eligibility date</th><th>Missing groups</th><th>Source event</th><th>Retry status</th><th>Last checked</th><th>Resolved</th></tr></thead>
+          <tbody>
+            <sc-for list="{{ incompleteCases }}" as="c" hint-placeholder-count="5">
+              <tr onClick="{{ c.onRowClick }}" style="cursor:pointer">
+                <td style="font-weight:800;font-family:var(--font-heading)">{{ c.ticker }}</td>
+                <td style="max-width:200px">{{ c.originalTrigger }}</td>
+                <td class="text-muted">{{ c.eligibilityDate }}</td>
+                <td>{{ c.missingGroupsText }}</td>
+                <td>{{ c.sourceEvent }}</td>
+                <td>{{ c.retryStatus }}</td>
+                <td class="text-muted">{{ c.lastChecked }}</td>
+                <td>{{ c.resolvedStatus }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </sc-if>
+
+    <!-- ================= REPORTS ================= -->
+    <sc-if value="{{ isReports }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:28px 36px 48px" data-screen-label="Reports">
+        <h1 style="font-size:28px;margin-bottom:4px">Reports</h1>
+        <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px;margin-bottom:20px">One report per episode with an entry price on record.</div>
+        <div class="hr"></div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">
+          <sc-for list="{{ reportCards }}" as="r" hint-placeholder-count="6">
+            <div class="card elev-sm" style="gap:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-family:var(--font-heading);font-weight:800;font-size:18px">{{ r.ticker }}</span>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;background:{{ r.badgeBg }};color:{{ r.badgeFg }}"><span style="width:6px;height:6px;background:{{ r.badgeDot }};flex:none"></span>{{ r.decision }}</span>
+                </div>
+                <button type="button" class="btn btn-ghost" onClick="{{ r.onExport }}">Export</button>
+              </div>
+              <p class="card-body" style="opacity:1">{{ r.explanation }}</p>
+              <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent)">{{ r.entryPriceText }}</div>
+              <div style="height:1px;background:var(--color-divider)"></div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+                <sc-for list="{{ r.outcomes }}" as="o" hint-placeholder-count="4">
+                  <div style="text-align:center">
+                    <div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ o.period }}d</div>
+                    <div style="font-family:var(--font-heading);font-weight:800;font-size:14px">{{ o.retText }}</div>
+                    <div style="font-size:10px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">SPY {{ o.vsSpyText }} · Sec {{ o.vsSectorText }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ================= SETTINGS ================= -->
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:28px 36px 48px;max-width:640px" data-screen-label="Settings">
+        <h1 style="font-size:28px;margin-bottom:4px">Settings</h1>
+        <div style="color:color-mix(in srgb, var(--color-text) 60%, transparent);font-size:14px;margin-bottom:20px">System configuration for this tracking instance.</div>
+        <div class="hr"></div>
+        <div class="card elev-sm" style="gap:16px">
+          <div class="field"><label>Rule version</label><input class="input" value="v2.3" readonly="{{ true }}"></input></div>
+          <div class="field"><label>Danelfin API key</label><input class="input" value="••••••••••••4f2a" readonly="{{ true }}"></input></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="field"><label>Benchmark index</label><input class="input" value="SPY" readonly="{{ true }}"></input></div>
+            <div class="field"><label>Sector benchmark</label><input class="input" value="Sector ETF (auto)" readonly="{{ true }}"></input></div>
+          </div>
+          <div class="field"><label>Outcome checkpoints</label><input class="input" value="7 / 30 / 90 / 180 trading days" readonly="{{ true }}"></input></div>
+          <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent);border-top:1px solid var(--color-divider);padding-top:10px">This system tracks and evaluates decisions. It does not place trades.</div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <!-- ================= DETAIL DRAWER ================= -->
+  <sc-if value="{{ hasDrawer }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;background:color-mix(in srgb, var(--color-neutral-900) 45%, transparent);z-index:40" onClick="{{ closeDrawer }}">
+      <div style="position:absolute;top:0;right:0;bottom:0;width:min(560px,94vw);background:var(--color-bg);box-shadow:var(--shadow-lg);overflow-y:auto;padding:24px 28px 40px" onClick="{{ stopClick }}">
+
+        <sc-if value="{{ drawer.isEpisode }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-family:var(--font-heading);font-weight:800;font-size:24px">{{ drawer.ticker }}</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 12px;background:{{ drawer.badgeBg }};color:{{ drawer.badgeFg }}"><span style="width:6px;height:6px;background:{{ drawer.badgeDot }};flex:none"></span>{{ drawer.decision }}</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" onClick="{{ closeDrawer }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px;margin-bottom:18px">
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Episode</div>{{ drawer.episodeId }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Review date</div>{{ drawer.reviewDate }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Rule version</div>{{ drawer.ruleVersion }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Trigger</div>{{ drawer.trigger }}</div>
+          </div>
+
+          <sc-if value="{{ drawer.hasCorrectedRef }}" hint-placeholder-val="{{ false }}">
+            <div class="tag tag-outline" style="margin-bottom:16px;width:fit-content">{{ drawer.correctedRef }}</div>
+          </sc-if>
+
+          <h4 style="margin-bottom:10px">Scores &amp; evidence</h4>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">
+            <sc-for list="{{ drawer.scoreCards }}" as="s" hint-placeholder-count="3">
+              <div class="card" style="gap:6px">
+                <div class="card-kicker">{{ s.label }}</div>
+                <div style="font-family:var(--font-heading);font-weight:800;font-size:22px">{{ s.score }}</div>
+                <p class="card-body">{{ s.evidence }}</p>
+              </div>
+            </sc-for>
+          </div>
+
+          <h4 style="margin-bottom:6px">Decision explanation</h4>
+          <p style="font-size:13px;margin-bottom:18px">{{ drawer.explanation }}</p>
+
+          <div style="height:2px;background:var(--color-divider);margin:0 0 16px"></div>
+          <h4 style="margin-bottom:6px">Entry price</h4>
+          <p style="font-size:13px;margin-bottom:18px">{{ drawer.entryPriceText }}</p>
+
+          <sc-if value="{{ drawer.hasOutcomes }}" hint-placeholder-val="{{ false }}">
+            <h4 style="margin-bottom:10px">Forward outcome</h4>
+            <table class="table" style="margin-bottom:8px">
+              <thead><tr><th>Days</th><th>Date</th><th>Price</th><th>Return</th><th>vs SPY</th><th>vs Sector</th><th>Status</th></tr></thead>
+              <tbody>
+                <sc-for list="{{ drawer.outcomes }}" as="o" hint-placeholder-count="4">
+                  <tr>
+                    <td>{{ o.period }}d</td>
+                    <td class="text-muted">{{ o.date }}</td>
+                    <td>{{ o.priceText }}</td>
+                    <td>{{ o.retText }}</td>
+                    <td>{{ o.vsSpyText }}</td>
+                    <td>{{ o.vsSectorText }}</td>
+                    <td>{{ o.status }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </sc-if>
+        </sc-if>
+
+        <sc-if value="{{ drawer.isCandidate }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-family:var(--font-heading);font-weight:800;font-size:24px">{{ drawer.ticker }}</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 12px;background:{{ drawer.statusBg }};color:{{ drawer.statusFg }}"><span style="width:6px;height:6px;background:{{ drawer.statusDot }};flex:none"></span>{{ drawer.validationStatus }}</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" onClick="{{ closeDrawer }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:12px;margin-bottom:16px">
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Source</div>{{ drawer.source }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Candidate date</div>{{ drawer.candidateDate }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Last validation attempt</div>{{ drawer.lastValidated }}</div>
+          </div>
+          <h4 style="margin-bottom:6px">Danelfin eligibility metadata</h4>
+          <p style="font-size:13px;margin-bottom:16px">{{ drawer.eligibilityMeta }}</p>
+          <div style="height:2px;background:var(--color-divider);margin:0 0 16px"></div>
+          <h4 style="margin-bottom:10px">Data checks</h4>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+            <div class="card" style="gap:4px"><div class="card-kicker">Price data</div><div style="font-weight:800;font-family:var(--font-heading)">{{ drawer.priceDataStatus }}</div></div>
+            <div class="card" style="gap:4px"><div class="card-kicker">Earnings data</div><div style="font-weight:800;font-family:var(--font-heading)">{{ drawer.earningsDataStatus }}</div></div>
+            <div class="card" style="gap:4px"><div class="card-kicker">Context review</div><div style="font-weight:800;font-family:var(--font-heading)">{{ drawer.contextDataStatus }}</div></div>
+          </div>
+          <sc-if value="{{ drawer.hasMissingFields }}" hint-placeholder-val="{{ false }}">
+            <h4 style="margin-bottom:8px">Missing fields</h4>
+            <ul style="font-size:13px;padding-left:18px;margin:0 0 16px">
+              <sc-for list="{{ drawer.missingFields }}" as="f" hint-placeholder-count="2"><li style="margin-bottom:4px">{{ f }}</li></sc-for>
+            </ul>
+          </sc-if>
+          <sc-if value="{{ drawer.hasEpisode }}" hint-placeholder-val="{{ false }}">
+            <div class="tag tag-outline" style="margin-bottom:16px;width:fit-content">Episode {{ drawer.episodeId }}</div>
+          </sc-if>
+          <sc-if value="{{ drawer.canValidateFromDrawer }}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="btn btn-primary btn-block" onClick="{{ drawer.onValidate }}">Validate candidate</button>
+          </sc-if>
+        </sc-if>
+
+        <sc-if value="{{ drawer.isIncomplete }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+            <span style="font-family:var(--font-heading);font-weight:800;font-size:24px">{{ drawer.ticker }}</span>
+            <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" onClick="{{ closeDrawer }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div class="tag tag-neutral" style="margin-bottom:16px;width:fit-content">Awaiting required data — {{ drawer.resolvedStatus }}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;margin-bottom:18px">
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Original trigger</div>{{ drawer.originalTrigger }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Eligibility date</div>{{ drawer.eligibilityDate }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Source event</div>{{ drawer.sourceEvent }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Retry status</div>{{ drawer.retryStatus }}</div>
+            <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em">Last checked</div>{{ drawer.lastChecked }}</div>
+          </div>
+          <h4 style="margin-bottom:8px">Missing groups</h4>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+            <sc-for list="{{ drawer.missingGroups }}" as="g" hint-placeholder-count="2"><span class="tag tag-neutral">{{ g }}</span></sc-for>
+          </div>
+          <h4 style="margin-bottom:8px">Missing fields</h4>
+          <ul style="font-size:13px;padding-left:18px;margin:0">
+            <sc-for list="{{ drawer.missingFields }}" as="f" hint-placeholder-count="3"><li style="margin-bottom:4px">{{ f }}</li></sc-for>
+          </ul>
+        </sc-if>
+
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ================= MANUAL CONFIRM DIALOG ================= -->
+  <sc-if value="{{ manualConfirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop" style="z-index:50">
+      <div class="dialog">
+        <div class="dialog-title">Add {{ manualTicker }} to tracking?</div>
+        <div class="dialog-body">This creates a new tracked candidate record with source "Manual", as of {{ manualAsOf }}. It bypasses Danelfin eligibility but still requires all scoring data checks.</div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" onClick="{{ onCancelManualConfirm }}">Cancel</button>
+          <button type="button" class="btn btn-primary" onClick="{{ onConfirmManualAdd }}">Add to tracking</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;productName&quot;: { &quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;Stock Selection System&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Branding&quot; },
+  &quot;defaultScreen&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;dashboard&quot;, &quot;options&quot;: [&quot;dashboard&quot;, &quot;intake&quot;, &quot;episodes&quot;, &quot;incomplete&quot;, &quot;reports&quot;, &quot;settings&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Behavior&quot; },
+  &quot;danelfinConnected&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Behavior&quot; }
+}">
+class Component extends DCLogic {
+  state = {
+    screen: (this.props && this.props.defaultScreen) || 'dashboard',
+    drawer: null,
+    refreshing: false,
+    fetchState: 'idle',
+    fetchResults: null,
+    fetchTickerInput: '',
+    fetchAsOf: '2026-08-01',
+    manualTicker: '',
+    manualAsOf: '2026-08-01',
+    manualConfirmOpen: false,
+    manualToast: '',
+    retrying: false,
+    retryMessage: '',
+    filters: { ticker: 'all', decision: 'all', trigger: '', entryStatus: 'all', outcomeStatus: 'all', dateFrom: '', dateTo: '', sort: 'newest' },
+    fetchMarket: 'US', fetchDirection: 'Long', fetchAssetType: 'Stocks', fetchMinAiScore: 7,
+    manualDirection: 'Long',
+    selectedCandidates: {}, validatingRows: {},
+    candidateFilters: { ticker: 'all', source: 'all', direction: 'all', status: 'all', dateFrom: '', dateTo: '' },
+    candidates: [
+      { ticker: 'ATI', source: 'Danelfin', candidateDate: '2026-07-27', direction: 'Long', rank: 3, aiScore: 8.7, techScore: 7.9, fundScore: 8.1, expReturn: '+12.4%', validationStatus: 'Scored', lastValidated: '2026-07-28', priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: 'OK', missingFields: [], episodeId: 'EP-20260728-ATI', eligibilityMeta: 'Long · US equities · min AI 7 · as of 2026-07-27' },
+      { ticker: 'NVDA', source: 'Danelfin', candidateDate: '2026-07-28', direction: 'Long', rank: 1, aiScore: 9.5, techScore: 9.2, fundScore: 9.0, expReturn: '+18.2%', validationStatus: 'Scored', lastValidated: '2026-07-29', priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: 'OK', missingFields: [], episodeId: 'EP-20260729-NVDA', eligibilityMeta: 'Long · US equities · min AI 7 · as of 2026-07-28' },
+      { ticker: 'RTX', source: 'Danelfin', candidateDate: '2026-07-21', direction: 'Long', rank: 9, aiScore: 6.2, techScore: 5.8, fundScore: 6.5, expReturn: '+3.1%', validationStatus: 'Scored', lastValidated: '2026-07-22', priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: 'OK', missingFields: [], episodeId: 'EP-20260722-RTX', eligibilityMeta: 'Long · US equities · min AI 6 · as of 2026-07-21' },
+      { ticker: 'GS', source: 'Danelfin', candidateDate: '2026-07-22', direction: 'Long', rank: 6, aiScore: 7.5, techScore: 7.0, fundScore: 7.8, expReturn: '+6.9%', validationStatus: 'Scored', lastValidated: '2026-07-23', priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: 'OK', missingFields: [], episodeId: 'EP-20260722-GS', eligibilityMeta: 'Long · US equities · min AI 7 · as of 2026-07-22' },
+      { ticker: 'TSLA', source: 'Danelfin', candidateDate: '2026-07-31', direction: 'Long', rank: 5, aiScore: 8.0, techScore: 7.4, fundScore: 6.9, expReturn: '+9.0%', validationStatus: 'Ready for scoring', lastValidated: '2026-07-31', priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: 'Not reviewed', missingFields: [], episodeId: null, eligibilityMeta: 'Long · US equities · min AI 7 · as of 2026-07-31' },
+      { ticker: 'COIN', source: 'Danelfin', candidateDate: '2026-07-30', direction: 'Long', rank: 11, aiScore: 7.2, techScore: 6.8, fundScore: '—', expReturn: '—', validationStatus: 'Insufficient data', lastValidated: '2026-07-31', priceDataStatus: 'OK', earningsDataStatus: 'Missing', contextDataStatus: 'Missing', missingFields: ['Segment revenue breakdown', 'Sector volatility index'], episodeId: null, eligibilityMeta: 'Long · US equities · min AI 7 · as of 2026-07-30' },
+      { ticker: 'SNAP', source: 'Danelfin', candidateDate: '2026-07-29', direction: 'Short', rank: 14, aiScore: 6.0, techScore: '—', fundScore: '—', expReturn: '—', validationStatus: 'Validating', lastValidated: '—', priceDataStatus: 'Pending', earningsDataStatus: 'Pending', contextDataStatus: 'Pending', missingFields: [], episodeId: null, eligibilityMeta: 'Short · US equities · min AI 6 · as of 2026-07-29' },
+      { ticker: 'AAPL', source: 'Manual', candidateDate: '2026-07-29', direction: 'Long', rank: '—', aiScore: '—', techScore: '—', fundScore: '—', expReturn: '—', validationStatus: 'New', lastValidated: '—', priceDataStatus: 'Pending', earningsDataStatus: 'Pending', contextDataStatus: 'Pending', missingFields: [], episodeId: null, eligibilityMeta: 'Manually added — bypassed Danelfin eligibility' },
+      { ticker: 'PFE', source: 'Manual', candidateDate: '2026-07-30', direction: 'Long', rank: '—', aiScore: '—', techScore: '—', fundScore: '—', expReturn: '—', validationStatus: 'New', lastValidated: '—', priceDataStatus: 'Pending', earningsDataStatus: 'Pending', contextDataStatus: 'Pending', missingFields: [], episodeId: null, eligibilityMeta: 'Manually added — bypassed Danelfin eligibility' },
+      { ticker: 'ZM', source: 'Danelfin', candidateDate: '2026-07-26', direction: 'Long', rank: 8, aiScore: 6.8, techScore: 6.5, fundScore: 6.0, expReturn: '—', validationStatus: 'Failed', lastValidated: '2026-07-27', priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: 'OK', missingFields: [], episodeId: null, eligibilityMeta: 'Long · US equities · min AI 6 · as of 2026-07-26' },
+    ],
+  };
+
+  episodes = [
+    { ticker: 'ATI', decision: 'Confirm', totalScore: 82, earningsScore: 88, marketScore: 76, contextScore: 80, trigger: 'Earnings beat + guidance raise', reviewDate: '2026-07-28', entryStatus: 'Filled', outcomeStatus: 'Resolved', episodeId: 'EP-20260728-ATI', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Q2 EPS $1.42 vs $1.18 est.; FY guidance raised 6% on backlog strength.', market: 'Relative strength vs sector +8% over 20 sessions; volume confirms breakout.', context: 'Materials sector rotation underway; no offsetting macro headwinds flagged.' },
+      explanation: 'All three factors aligned: a confirmed earnings beat, supportive relative strength, and a favorable sector backdrop. No disqualifying context risk was found.',
+      entryPrice: { date: '2026-07-29', price: 68.42 },
+      outcomes: [
+        { period: '7', date: '2026-08-07', price: 69.88, ret: 2.1, vsSpy: 1.0, vsSector: 0.6, status: 'Resolved' },
+        { period: '30', date: '2026-09-09', price: 72.11, ret: 5.4, vsSpy: 2.2, vsSector: 1.8, status: 'Resolved' },
+        { period: '90', date: '2026-12-04', price: 75.14, ret: 9.8, vsSpy: 3.9, vsSector: 3.1, status: 'Resolved' },
+        { period: '180', date: '2027-04-08', price: 78.15, ret: 14.2, vsSpy: 5.7, vsSector: 4.4, status: 'Resolved' },
+      ], correctedRef: null },
+    { ticker: 'MSFT', decision: 'Mixed', totalScore: 61, earningsScore: 70, marketScore: 58, contextScore: 55, trigger: 'Cloud growth deceleration flagged', reviewDate: '2026-07-25', entryStatus: 'Filled', outcomeStatus: 'Pending', episodeId: 'EP-20260725-MSFT', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Azure revenue growth 27% YoY, down from 31% prior quarter.', market: 'Price holding above 50-day average but momentum flattening.', context: 'Elevated capex spend across hyperscaler peers raises margin-timing question.' },
+      explanation: 'Earnings still healthy but decelerating; market posture is neutral-to-firm; context carries a real but unresolved capex risk. Net signal is mixed, not disqualifying.',
+      entryPrice: { date: '2026-07-27', price: 448.20 },
+      outcomes: [
+        { period: '7', date: '2026-08-03', price: 452.60, ret: 1.0, vsSpy: 0.3, vsSector: 0.2, status: 'Resolved' },
+        { period: '30', date: '2026-09-05', price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '90', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '180', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+      ], correctedRef: null },
+    { ticker: 'RTX', decision: 'Reject', totalScore: 38, earningsScore: 40, marketScore: 35, contextScore: 40, trigger: 'Defense contract delay', reviewDate: '2026-07-22', entryStatus: 'N/A', outcomeStatus: 'N/A', episodeId: 'EP-20260722-RTX', ruleVersion: 'v2.2',
+      evidence: { earnings: 'Program delay pushes $340M of recognized revenue into next fiscal year.', market: 'Underperforming sector peers by 6% over the trailing month.', context: 'Procurement timeline risk unresolved pending congressional budget action.' },
+      explanation: 'All three factors were unfavorable at review: a confirmed revenue delay, weak relative performance, and unresolved policy risk. No entry taken.',
+      entryPrice: null, outcomes: [], correctedRef: null },
+    { ticker: 'AAPL', decision: 'Wait', totalScore: 55, earningsScore: 60, marketScore: 52, contextScore: 50, trigger: 'Pre-earnings volatility spike', reviewDate: '2026-07-30', entryStatus: 'Pending', outcomeStatus: 'N/A', episodeId: 'EP-20260730-AAPL', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Earnings print due in 6 trading days; no confirmed results yet.', market: 'Implied volatility elevated 40% above 3-month average ahead of print.', context: 'Supply-chain commentary mixed across component suppliers.' },
+      explanation: 'Signal is not yet resolvable — the earnings event that would confirm or reject this candidate has not occurred. Held in Wait pending the print.',
+      entryPrice: { date: '2026-08-04', price: null }, outcomes: [], correctedRef: null },
+    { ticker: 'NVDA', decision: 'Confirm', totalScore: 91, earningsScore: 95, marketScore: 89, contextScore: 88, trigger: 'AI datacenter demand surge', reviewDate: '2026-07-29', entryStatus: 'Filled', outcomeStatus: 'Resolved', episodeId: 'EP-20260729-NVDA', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Datacenter revenue +94% YoY, above the high end of guidance range.', market: 'New 52-week high on 2.3x average volume.', context: 'Hyperscaler capex commitments extended through next two fiscal years.' },
+      explanation: 'Exceptionally strong on all three factors: an outsized earnings beat, confirming price/volume action, and durable demand context.',
+      entryPrice: { date: '2026-07-30', price: 132.10 },
+      outcomes: [
+        { period: '7', date: '2026-08-07', price: 137.40, ret: 4.0, vsSpy: 2.9, vsSector: 2.1, status: 'Resolved' },
+        { period: '30', date: '2026-09-09', price: 148.55, ret: 12.5, vsSpy: 8.1, vsSector: 6.4, status: 'Resolved' },
+        { period: '90', date: '2026-12-05', price: 159.20, ret: 20.5, vsSpy: 12.0, vsSector: 9.7, status: 'Resolved' },
+        { period: '180', date: '2027-04-09', price: 171.80, ret: 30.0, vsSpy: 16.8, vsSector: 13.2, status: 'Resolved' },
+      ], correctedRef: null },
+    { ticker: 'JPM', decision: 'Mixed', totalScore: 64, earningsScore: 68, marketScore: 60, contextScore: 62, trigger: 'Rate-cut sensitivity', reviewDate: '2026-07-23', entryStatus: 'Filled', outcomeStatus: 'Pending', episodeId: 'EP-20260723-JPM', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Net interest income roughly flat YoY as deposit costs offset loan growth.', market: 'Trading in line with financials sector, no clear edge.', context: 'Rate-path uncertainty ahead of next policy meeting.' },
+      explanation: 'No single factor disqualifies, but none confirm strongly either — net interest income is stable rather than growing and macro rate path is undecided.',
+      entryPrice: { date: '2026-07-24', price: 214.30 },
+      outcomes: [
+        { period: '7', date: '2026-07-31', price: 216.10, ret: 0.8, vsSpy: 0.1, vsSector: 0.0, status: 'Resolved' },
+        { period: '30', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '90', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '180', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+      ], correctedRef: null },
+    { ticker: 'XOM', decision: 'Reject', totalScore: 33, earningsScore: 30, marketScore: 35, contextScore: 34, trigger: 'Crude oversupply signal', reviewDate: '2026-07-19', entryStatus: 'N/A', outcomeStatus: 'N/A', episodeId: 'EP-20260719-XOM', ruleVersion: 'v2.2',
+      evidence: { earnings: 'Refining margins compressed 18% quarter over quarter.', market: 'Sector-wide drawdown of 9% on inventory build headlines.', context: 'OPEC+ supply signals point to continued oversupply near-term.' },
+      explanation: 'Earnings, market action, and macro context were all unfavorable and mutually reinforcing. Clear reject.',
+      entryPrice: null, outcomes: [], correctedRef: null },
+    { ticker: 'PFE', decision: 'Wait', totalScore: 50, earningsScore: 52, marketScore: 48, contextScore: 50, trigger: 'Pipeline readout pending', reviewDate: '2026-07-30', entryStatus: 'Pending', outcomeStatus: 'N/A', episodeId: 'EP-20260730-PFE', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Trial readout for lead pipeline asset expected within 10 trading days.', market: 'Price range-bound ahead of the binary catalyst.', context: 'No competing readout scheduled in the same window.' },
+      explanation: 'The decisive catalyst has not occurred yet; scoring this now would be premature. Held in Wait until the readout.',
+      entryPrice: { date: '2026-08-05', price: null }, outcomes: [], correctedRef: null },
+    { ticker: 'DIS', decision: 'Confirm', totalScore: 78, earningsScore: 82, marketScore: 74, contextScore: 76, trigger: 'Streaming margin inflection', reviewDate: '2026-07-26', entryStatus: 'Filled', outcomeStatus: 'Resolved', episodeId: 'EP-20260726-DIS', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Direct-to-consumer segment posted first sustained operating profit.', market: 'Gap-up on earnings held for 5 sessions with rising volume.', context: 'Parks attendance trends remain constructive into peak season.' },
+      explanation: 'A structural margin inflection in streaming, confirmed by durable price action and a supportive parks backdrop.',
+      entryPrice: { date: '2026-07-27', price: 96.80 },
+      outcomes: [
+        { period: '7', date: '2026-08-04', price: 98.90, ret: 2.2, vsSpy: 1.1, vsSector: 0.8, status: 'Resolved' },
+        { period: '30', date: '2026-09-08', price: 101.30, ret: 4.6, vsSpy: 2.0, vsSector: 1.4, status: 'Resolved' },
+        { period: '90', date: '2026-12-03', price: 104.90, ret: 8.4, vsSpy: 3.5, vsSector: 2.9, status: 'Resolved' },
+        { period: '180', date: '2027-04-07', price: 108.20, ret: 11.8, vsSpy: 4.9, vsSector: 3.7, status: 'Resolved' },
+      ], correctedRef: null },
+    { ticker: 'GS', decision: 'Mixed', totalScore: 59, earningsScore: 66, marketScore: 55, contextScore: 54, trigger: 'Trading desk revenue beat, IB soft', reviewDate: '2026-07-22', entryStatus: 'Filled', outcomeStatus: 'Pending', episodeId: 'EP-20260722-GS', ruleVersion: 'v2.3',
+      evidence: { earnings: 'FICC trading revenue +14% YoY, investment banking fees -9% YoY.', market: 'Modest relative underperformance vs financials sector.', context: 'Deal pipeline commentary cautious for next two quarters.' },
+      explanation: 'A genuine beat in one business line was offset by softness in another, with a cautious forward outlook. Neither confirms nor rejects cleanly.',
+      entryPrice: { date: '2026-07-23', price: 512.40 },
+      outcomes: [
+        { period: '7', date: '2026-07-30', price: 508.10, ret: -0.8, vsSpy: -1.5, vsSector: -1.1, status: 'Resolved' },
+        { period: '30', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '90', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '180', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+      ], correctedRef: 'Corrected — see Episode EP-20260610-GS2 (restated after upstream data correction)' },
+    { ticker: 'CAT', decision: 'Reject', totalScore: 41, earningsScore: 44, marketScore: 38, contextScore: 41, trigger: 'Dealer inventory build-up', reviewDate: '2026-07-17', entryStatus: 'N/A', outcomeStatus: 'N/A', episodeId: 'EP-20260717-CAT', ruleVersion: 'v2.2',
+      evidence: { earnings: 'Dealer inventories up 22% QoQ, ahead of retail sell-through.', market: 'Underperforming machinery peers by 5% over 20 sessions.', context: 'Global construction PMI readings soft across three of four regions.' },
+      explanation: 'Rising channel inventory ahead of demand, weak relative price action, and soft macro construction data together support a clear reject.',
+      entryPrice: null, outcomes: [], correctedRef: null },
+    { ticker: 'TGT', decision: 'Wait', totalScore: 52, earningsScore: 54, marketScore: 50, contextScore: 51, trigger: 'Inventory correction underway', reviewDate: '2026-07-31', entryStatus: 'Pending', outcomeStatus: 'N/A', episodeId: 'EP-20260731-TGT', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Inventory levels normalizing but next print is 3 weeks out.', market: 'Trading sideways, awaiting confirmation of the trend.', context: 'Consumer spending data for the category is mixed month to month.' },
+      explanation: 'The inventory correction appears underway but is not yet confirmed by a reporting period. Held in Wait for the next print.',
+      entryPrice: { date: '2026-08-06', price: null }, outcomes: [], correctedRef: null },
+    { ticker: 'UNH', decision: 'Confirm', totalScore: 85, earningsScore: 89, marketScore: 82, contextScore: 83, trigger: 'Medical cost ratio improvement', reviewDate: '2026-07-25', entryStatus: 'Filled', outcomeStatus: 'Resolved', episodeId: 'EP-20260725-UNH', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Medical cost ratio improved 110bps sequentially, ahead of consensus.', market: 'Breakout above prior resistance on above-average volume.', context: 'Regulatory backdrop stable, no pending rate-setting risk flagged.' },
+      explanation: 'A confirmed cost-ratio improvement, validated by price action, with no offsetting regulatory risk in context.',
+      entryPrice: { date: '2026-07-26', price: 512.60 },
+      outcomes: [
+        { period: '7', date: '2026-08-03', price: 519.40, ret: 1.3, vsSpy: 0.4, vsSector: 0.3, status: 'Resolved' },
+        { period: '30', date: '2026-09-06', price: 534.80, ret: 4.3, vsSpy: 1.9, vsSector: 1.5, status: 'Resolved' },
+        { period: '90', date: '2026-12-02', price: 552.10, ret: 7.7, vsSpy: 3.0, vsSector: 2.4, status: 'Resolved' },
+        { period: '180', date: '2027-04-06', price: 571.30, ret: 11.4, vsSpy: 4.6, vsSector: 3.6, status: 'Resolved' },
+      ], correctedRef: null },
+    { ticker: 'BA', decision: 'Mixed', totalScore: 57, earningsScore: 62, marketScore: 53, contextScore: 55, trigger: 'Delivery cadence recovering', reviewDate: '2026-07-20', entryStatus: 'Filled', outcomeStatus: 'Pending', episodeId: 'EP-20260720-BA', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Monthly deliveries up 18% sequentially but still below pre-2019 run rate.', market: 'Choppy price action within a wide 90-day range.', context: 'Regulatory certification timeline for a new variant remains open.' },
+      explanation: 'Recovery is real but incomplete, price action lacks conviction, and a regulatory timeline remains an open question — mixed, not disqualifying.',
+      entryPrice: { date: '2026-07-21', price: 178.90 },
+      outcomes: [
+        { period: '7', date: '2026-07-28', price: 181.20, ret: 1.3, vsSpy: 0.2, vsSector: 0.1, status: 'Resolved' },
+        { period: '30', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '90', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+        { period: '180', date: null, price: null, ret: null, vsSpy: null, vsSector: null, status: 'Pending' },
+      ], correctedRef: null },
+    { ticker: 'GOOGL', decision: 'Confirm', totalScore: 80, earningsScore: 84, marketScore: 77, contextScore: 78, trigger: 'Search ad recovery + cloud beat', reviewDate: '2026-07-24', entryStatus: 'Filled', outcomeStatus: 'Resolved', episodeId: 'EP-20260724-GOOGL', ruleVersion: 'v2.3',
+      evidence: { earnings: 'Search ad revenue +11% YoY, Cloud segment operating margin turned positive.', market: 'Held gap-up gains for 10 sessions, above-average volume.', context: 'No material antitrust developments in the review window.' },
+      explanation: 'Broad-based earnings strength across two segments, confirmed by durable price action, with no offsetting legal/context risk.',
+      entryPrice: { date: '2026-07-25', price: 181.40 },
+      outcomes: [
+        { period: '7', date: '2026-08-01', price: 184.70, ret: 1.8, vsSpy: 0.7, vsSector: 0.5, status: 'Resolved' },
+        { period: '30', date: '2026-09-05', price: 190.20, ret: 4.8, vsSpy: 2.1, vsSector: 1.6, status: 'Resolved' },
+        { period: '90', date: '2026-11-30', price: 196.80, ret: 8.5, vsSpy: 3.4, vsSector: 2.8, status: 'Resolved' },
+        { period: '180', date: '2027-04-03', price: 203.50, ret: 12.2, vsSpy: 5.0, vsSector: 3.9, status: 'Resolved' },
+      ], correctedRef: null },
+  ];
+
+  incompleteCases = [
+    { ticker: 'MMM', originalTrigger: 'Margin expansion signal', eligibilityDate: '2026-07-27', missingGroups: ['Earnings', 'Context'], missingFields: ['Segment revenue breakdown', 'Guidance transcript', 'Peer sector classification'], sourceEvent: 'Q2 earnings release', retryStatus: 'Pending', lastChecked: '2026-07-30', resolvedStatus: 'Open' },
+    { ticker: 'BAC', originalTrigger: 'Net interest margin beat', eligibilityDate: '2026-07-24', missingGroups: ['Market'], missingFields: ['Sector relative volume', 'Options skew data'], sourceEvent: 'Earnings call', retryStatus: 'Retried 2x', lastChecked: '2026-07-29', resolvedStatus: 'Open' },
+    { ticker: 'ADBE', originalTrigger: 'Subscription growth reacceleration', eligibilityDate: '2026-07-20', missingGroups: ['Context'], missingFields: ['Peer multiple set'], sourceEvent: 'Analyst day', retryStatus: 'Retried 1x', lastChecked: '2026-07-28', resolvedStatus: 'Resolved' },
+    { ticker: 'LMT', originalTrigger: 'Backlog growth signal', eligibilityDate: '2026-07-18', missingGroups: ['Earnings', 'Market', 'Context'], missingFields: ['Segment backlog detail', 'Sector volatility index', 'Peer set definition'], sourceEvent: '10-Q filing', retryStatus: 'Exhausted', lastChecked: '2026-07-26', resolvedStatus: 'Open' },
+    { ticker: 'SBUX', originalTrigger: 'Same-store sales inflection', eligibilityDate: '2026-07-15', missingGroups: ['Context'], missingFields: ['Sector benchmark mapping'], sourceEvent: 'Investor update', retryStatus: 'Pending', lastChecked: '2026-07-31', resolvedStatus: 'Open' },
+  ];
+
+  badgeFor(decision) {
+    const map = {
+      Confirm: { bg: '#e8f5ea', fg: '#1c6b34', dot: '#2f9e4f' },
+      Mixed: { bg: '#fdf3df', fg: '#7a5300', dot: '#c98a00' },
+      Reject: { bg: '#fff2ef', fg: '#ae1800', dot: '#ec3013' },
+      Wait: { bg: '#e9f0fb', fg: '#1e457a', dot: '#3568b0' },
+    };
+    return map[decision] || { bg: '#f8f4f4', fg: '#605d5d', dot: '#9b9797' };
+  }
+
+  navStyle(name) {
+    const active = this.state.screen === name;
+    return {
+      display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', fontSize: '14px',
+      fontFamily: 'var(--font-heading)', fontWeight: active ? 800 : 400, cursor: 'pointer',
+      color: active ? '#ae1800' : 'var(--color-text)',
+      background: active ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)' : 'transparent',
+      borderLeft: active ? '3px solid var(--color-accent)' : '3px solid transparent',
+    };
+  }
+
+  fmtPct(n) { return n === null || n === undefined ? '—' : (n >= 0 ? '+' : '') + n.toFixed(1) + '%'; }
+  fmtPrice(n) { return n === null || n === undefined ? '—' : '$' + n.toFixed(2); }
+
+  buildEpisodeDetail(ep) {
+    const b = this.badgeFor(ep.decision);
+    const outcomes = (ep.outcomes || []).map(o => ({
+      period: o.period, date: o.date || '—',
+      priceText: o.status === 'Resolved' ? this.fmtPrice(o.price) : '—',
+      retText: o.status === 'Resolved' ? this.fmtPct(o.ret) : '—',
+      vsSpyText: o.status === 'Resolved' ? this.fmtPct(o.vsSpy) : '—',
+      vsSectorText: o.status === 'Resolved' ? this.fmtPct(o.vsSector) : '—',
+      status: o.status,
+    }));
+    return {
+      isEpisode: true, isIncomplete: false,
+      ticker: ep.ticker, decision: ep.decision, badgeBg: b.bg, badgeFg: b.fg, badgeDot: b.dot,
+      episodeId: ep.episodeId, trigger: ep.trigger, reviewDate: ep.reviewDate, ruleVersion: ep.ruleVersion,
+      scoreCards: [
+        { label: 'Earnings', score: ep.earningsScore, evidence: ep.evidence.earnings },
+        { label: 'Market', score: ep.marketScore, evidence: ep.evidence.market },
+        { label: 'Context', score: ep.contextScore, evidence: ep.evidence.context },
+      ],
+      explanation: ep.explanation,
+      entryPriceText: ep.entryPrice
+        ? (ep.entryPrice.price != null ? `${this.fmtPrice(ep.entryPrice.price)} on ${ep.entryPrice.date} (session open)` : `Entry scheduled for ${ep.entryPrice.date} — price pending until that session opens.`)
+        : 'No entry taken — decision was Reject.',
+      outcomes, hasOutcomes: outcomes.length > 0,
+      correctedRef: ep.correctedRef, hasCorrectedRef: !!ep.correctedRef,
+      onExport: () => window.print(),
+    };
+  }
+
+  goDashboard = () => this.setState({ screen: 'dashboard', drawer: null });
+  goIntake = () => this.setState({ screen: 'intake', drawer: null });
+  goEpisodes = () => this.setState({ screen: 'episodes', drawer: null });
+  goIncomplete = () => this.setState({ screen: 'incomplete', drawer: null });
+  goReports = () => this.setState({ screen: 'reports', drawer: null });
+  goSettings = () => this.setState({ screen: 'settings', drawer: null });
+
+  openEpisodeDrawer(ep) { this.setState({ drawer: { type: 'episode', item: ep } }); }
+  openIncompleteDrawer(c) { this.setState({ drawer: { type: 'incomplete', item: c } }); }
+  openCandidateDrawer(c) { this.setState({ drawer: { type: 'candidate', item: c } }); }
+  closeDrawer = () => this.setState({ drawer: null });
+  stopClick = (e) => e.stopPropagation();
+
+  refreshDashboard = () => { this.setState({ refreshing: true }); setTimeout(() => this.setState({ refreshing: false }), 700); };
+
+  runFetch = () => {
+    this.setState({ fetchState: 'loading', fetchResults: null });
+    setTimeout(() => {
+      const pool = [
+        { ticker: 'HWM', aiScore: 9.4, rank: 1 }, { ticker: 'VIST', aiScore: 9.2, rank: 2 }, { ticker: 'TSLA', aiScore: 8.0, rank: 5 },
+        { ticker: 'PLTR', aiScore: 7.6, rank: 7 }, { ticker: 'AVGO', aiScore: 8.4, rank: 4 }, { ticker: 'ATI', aiScore: 8.7, rank: 3 },
+        { ticker: 'MMM', aiScore: 5.9, rank: 20 }, { ticker: 'XRAY', aiScore: 7.0, rank: 9 },
+      ];
+      const existing = new Set(this.state.candidates.map(c => c.ticker));
+      const minAi = parseFloat(this.state.fetchMinAiScore) || 0;
+      const dir = this.state.fetchDirection === 'Any' ? 'Long' : this.state.fetchDirection;
+      const asOf = this.state.fetchAsOf;
+      const cats = { stored: [], alreadyStored: [], skipped: [], fetchFailed: [], invalidRecord: [], dbFailed: [] };
+      const newCandidates = [];
+      pool.forEach(p => {
+        if (p.ticker === 'MMM') { cats.fetchFailed.push({ ticker: p.ticker, reason: 'Danelfin request timed out for this record' }); return; }
+        if (p.ticker === 'XRAY') { cats.invalidRecord.push({ ticker: p.ticker, reason: 'Source record missing required eligibility fields' }); return; }
+        if (p.aiScore < minAi) { cats.skipped.push({ ticker: p.ticker, reason: `AI score ${p.aiScore} below minimum ${minAi}` }); return; }
+        if (existing.has(p.ticker)) { cats.alreadyStored.push({ ticker: p.ticker, reason: 'Already a candidate' }); return; }
+        if (p.ticker === 'PLTR') { cats.dbFailed.push({ ticker: p.ticker, reason: 'Could not persist candidate to database' }); return; }
+        cats.stored.push({ ticker: p.ticker, reason: `Rank #${p.rank}, AI ${p.aiScore}` });
+        newCandidates.push({ ticker: p.ticker, source: 'Danelfin', candidateDate: asOf, direction: dir, rank: p.rank, aiScore: p.aiScore, techScore: '—', fundScore: '—', expReturn: '—', validationStatus: 'New', lastValidated: '—', priceDataStatus: 'Pending', earningsDataStatus: 'Pending', contextDataStatus: 'Pending', missingFields: [], episodeId: null, eligibilityMeta: `${dir} · ${this.state.fetchMarket === 'EU' ? 'Europe' : 'US'} ${this.state.fetchAssetType.toLowerCase()} · min AI ${minAi} · as of ${asOf}` });
+      });
+      this.setState(s => ({ fetchState: 'done', fetchResults: { found: pool.length, cats }, candidates: [...newCandidates, ...s.candidates] }));
+    }, 1100);
+  };
+  onFetchMarketChange = (e) => this.setState({ fetchMarket: e.target.value });
+  onFetchDirectionChange = (e) => this.setState({ fetchDirection: e.target.value });
+  onFetchAssetTypeChange = (e) => this.setState({ fetchAssetType: e.target.value });
+  onFetchMinAiScoreChange = (e) => this.setState({ fetchMinAiScore: e.target.value });
+  updateFetchAsOf = (e) => this.setState({ fetchAsOf: e.target.value });
+  onReviewCandidates = () => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, source: 'Danelfin', dateFrom: s.fetchAsOf, dateTo: s.fetchAsOf } }));
+
+  candidateBadge(status) {
+    const map = {
+      New: { bg: '#f8f4f4', fg: '#605d5d', dot: '#9b9797' },
+      Validating: { bg: '#e9f0fb', fg: '#1e457a', dot: '#3568b0' },
+      'Ready for scoring': { bg: '#fdf3df', fg: '#7a5300', dot: '#c98a00' },
+      'Insufficient data': { bg: '#f8f4f4', fg: '#605d5d', dot: '#9b9797' },
+      Scored: { bg: '#e8f5ea', fg: '#1c6b34', dot: '#2f9e4f' },
+      Failed: { bg: '#fff2ef', fg: '#ae1800', dot: '#ec3013' },
+    };
+    return map[status] || map.New;
+  }
+
+  validateCandidate = (ticker) => {
+    this.setState(s => ({ validatingRows: { ...s.validatingRows, [ticker]: true }, candidates: s.candidates.map(c => c.ticker === ticker ? { ...c, validationStatus: 'Validating' } : c) }));
+    setTimeout(() => {
+      this.setState(s => ({
+        validatingRows: { ...s.validatingRows, [ticker]: false },
+        candidates: s.candidates.map(c => {
+          if (c.ticker !== ticker) return c;
+          if (ticker === 'COIN') return { ...c, validationStatus: 'Insufficient data', lastValidated: s.fetchAsOf, earningsDataStatus: 'Missing', contextDataStatus: 'Missing', missingFields: ['Segment revenue breakdown', 'Sector volatility index'] };
+          if (ticker === 'ZM') return { ...c, validationStatus: 'Failed', lastValidated: s.fetchAsOf };
+          return { ...c, validationStatus: 'Ready for scoring', lastValidated: s.fetchAsOf, priceDataStatus: 'OK', earningsDataStatus: 'OK', contextDataStatus: c.contextDataStatus === 'OK' ? 'OK' : 'Not reviewed' };
+        }),
+      }));
+    }, 900);
+  };
+  toggleSelectCandidate = (ticker) => this.setState(s => ({ selectedCandidates: { ...s.selectedCandidates, [ticker]: !s.selectedCandidates[ticker] } }));
+  validateSelected = () => {
+    Object.keys(this.state.selectedCandidates).filter(t => this.state.selectedCandidates[t]).forEach(t => this.validateCandidate(t));
+    this.setState({ selectedCandidates: {} });
+  };
+  onCandidateFilterTicker = (e) => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, ticker: e.target.value } }));
+  onCandidateFilterSource = (e) => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, source: e.target.value } }));
+  onCandidateFilterDirection = (e) => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, direction: e.target.value } }));
+  onCandidateFilterStatus = (e) => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, status: e.target.value } }));
+  onCandidateFilterFrom = (e) => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, dateFrom: e.target.value } }));
+  onCandidateFilterTo = (e) => this.setState(s => ({ candidateFilters: { ...s.candidateFilters, dateTo: e.target.value } }));
+  onManualDirectionChange = (e) => this.setState({ manualDirection: e.target.value });
+
+  updateManualTicker = (e) => this.setState({ manualTicker: e.target.value.toUpperCase() });
+  updateManualAsOf = (e) => this.setState({ manualAsOf: e.target.value });
+  openManualConfirm = () => { if (this.state.manualTicker.trim()) this.setState({ manualConfirmOpen: true }); };
+  cancelManualConfirm = () => this.setState({ manualConfirmOpen: false });
+  confirmManualAdd = () => {
+    const t = this.state.manualTicker.trim().toUpperCase();
+    const entry = { ticker: t, source: 'Manual', candidateDate: this.state.manualAsOf, direction: this.state.manualDirection, rank: '—', aiScore: '—', techScore: '—', fundScore: '—', expReturn: '—', validationStatus: 'New', lastValidated: '—', priceDataStatus: 'Pending', earningsDataStatus: 'Pending', contextDataStatus: 'Pending', missingFields: [], episodeId: null, eligibilityMeta: 'Manually added — bypassed Danelfin eligibility' };
+    this.setState(s => ({ candidates: [entry, ...s.candidates], manualConfirmOpen: false, manualTicker: '', manualToast: `Added ${t} to tracking — Manual` }));
+    setTimeout(() => this.setState({ manualToast: '' }), 3500);
+  };
+
+  runRetry = () => {
+    this.setState({ retrying: true, retryMessage: '' });
+    setTimeout(() => this.setState({ retrying: false, retryMessage: 'Rechecked 5 open cases — 2 resolved, 3 still missing required data.' }), 900);
+  };
+
+  setFilterField(key, val) { this.setState(s => ({ filters: { ...s.filters, [key]: val } })); }
+  setFilterTicker = (e) => this.setFilterField('ticker', e.target.value);
+  setFilterDecision = (e) => this.setFilterField('decision', e.target.value);
+  setFilterTriggerText = (e) => this.setFilterField('trigger', e.target.value);
+  setFilterEntry = (e) => this.setFilterField('entryStatus', e.target.value);
+  setFilterOutcome = (e) => this.setFilterField('outcomeStatus', e.target.value);
+  setFilterFrom = (e) => this.setFilterField('dateFrom', e.target.value);
+  setFilterTo = (e) => this.setFilterField('dateTo', e.target.value);
+  setFilterSort = (e) => this.setFilterField('sort', e.target.value);
+
+  renderVals() {
+    const episodesWithUi = this.episodes.map(ep => {
+      const b = this.badgeFor(ep.decision);
+      return { ...ep, badgeBg: b.bg, badgeFg: b.fg, badgeDot: b.dot, onRowClick: () => this.openEpisodeDrawer(ep) };
+    });
+    const recentEpisodes = episodesWithUi.slice(0, 6);
+
+    const f = this.state.filters;
+    let filtered = episodesWithUi.filter(ep => {
+      if (f.ticker !== 'all' && ep.ticker !== f.ticker) return false;
+      if (f.decision !== 'all' && ep.decision !== f.decision) return false;
+      if (f.trigger && !ep.trigger.toLowerCase().includes(f.trigger.toLowerCase())) return false;
+      if (f.entryStatus !== 'all' && ep.entryStatus !== f.entryStatus) return false;
+      if (f.outcomeStatus !== 'all' && ep.outcomeStatus !== f.outcomeStatus) return false;
+      if (f.dateFrom && ep.reviewDate < f.dateFrom) return false;
+      if (f.dateTo && ep.reviewDate > f.dateTo) return false;
+      return true;
+    });
+    filtered = filtered.slice().sort((a, b) => {
+      if (f.sort === 'newest') return b.reviewDate.localeCompare(a.reviewDate);
+      if (f.sort === 'oldest') return a.reviewDate.localeCompare(b.reviewDate);
+      if (f.sort === 'highest') return b.totalScore - a.totalScore;
+      if (f.sort === 'lowest') return a.totalScore - b.totalScore;
+      return 0;
+    });
+
+    const uniqueTickersOptions = [...new Set(this.episodes.map(e => e.ticker))].sort().map(t => ({ value: t, label: t }));
+
+    const summary = {
+      total: this.episodes.length,
+      confirm: this.episodes.filter(e => e.decision === 'Confirm').length,
+      mixed: this.episodes.filter(e => e.decision === 'Mixed').length,
+      reject: this.episodes.filter(e => e.decision === 'Reject').length,
+      wait: this.episodes.filter(e => e.decision === 'Wait').length,
+      openIncomplete: this.incompleteCases.filter(c => c.resolvedStatus === 'Open').length,
+      tickersTracked: this.state.candidates.length,
+    };
+
+    const incompleteUi = this.incompleteCases.map(c => ({ ...c, missingGroupsText: c.missingGroups.join(', '), onRowClick: () => this.openIncompleteDrawer(c) }));
+
+    let drawer = { isEpisode: false, isIncomplete: false };
+    if (this.state.drawer && this.state.drawer.type === 'episode') {
+      drawer = this.buildEpisodeDetail(this.state.drawer.item);
+    } else if (this.state.drawer && this.state.drawer.type === 'incomplete') {
+      const c = this.state.drawer.item;
+      drawer = { isEpisode: false, isIncomplete: true, ticker: c.ticker, originalTrigger: c.originalTrigger, eligibilityDate: c.eligibilityDate, missingGroups: c.missingGroups, missingFields: c.missingFields, sourceEvent: c.sourceEvent, retryStatus: c.retryStatus, lastChecked: c.lastChecked, resolvedStatus: c.resolvedStatus };
+    } else if (this.state.drawer && this.state.drawer.type === 'candidate') {
+      const liveC = this.state.candidates.find(x => x.ticker === this.state.drawer.item.ticker) || this.state.drawer.item;
+      const cb = this.candidateBadge(liveC.validationStatus);
+      drawer = {
+        isEpisode: false, isIncomplete: false, isCandidate: true,
+        ticker: liveC.ticker, source: liveC.source, candidateDate: liveC.candidateDate, lastValidated: liveC.lastValidated,
+        eligibilityMeta: liveC.eligibilityMeta, priceDataStatus: liveC.priceDataStatus, earningsDataStatus: liveC.earningsDataStatus, contextDataStatus: liveC.contextDataStatus,
+        missingFields: liveC.missingFields, hasMissingFields: liveC.missingFields.length > 0,
+        episodeId: liveC.episodeId, hasEpisode: !!liveC.episodeId,
+        validationStatus: liveC.validationStatus, statusBg: cb.bg, statusFg: cb.fg, statusDot: cb.dot,
+        canValidateFromDrawer: ['New', 'Failed', 'Insufficient data', 'Ready for scoring'].includes(liveC.validationStatus),
+        onValidate: () => this.validateCandidate(liveC.ticker),
+      };
+    }
+
+    const fr = this.state.fetchResults || { found: 0, cats: { stored: [], alreadyStored: [], skipped: [], fetchFailed: [], invalidRecord: [], dbFailed: [] } };
+    const catGroupDefs = [
+      { key: 'alreadyStored', label: 'Already stored', color: '#7a5300' },
+      { key: 'skipped', label: 'Skipped (ineligible)', color: '#7a5300' },
+      { key: 'fetchFailed', label: 'Fetch failed', color: 'var(--color-accent-700)' },
+      { key: 'invalidRecord', label: 'Invalid source record', color: 'var(--color-accent-700)' },
+      { key: 'dbFailed', label: 'Database failed', color: 'var(--color-accent-700)' },
+    ];
+    const fetchCategoryGroups = catGroupDefs.map(d => ({ label: d.label, color: d.color, items: fr.cats[d.key] })).filter(g => g.items.length > 0);
+    const failedTotal = fr.cats.fetchFailed.length + fr.cats.invalidRecord.length + fr.cats.dbFailed.length;
+
+    const cf = this.state.candidateFilters;
+    const candidatesWithUi = this.state.candidates.map(c => {
+      const cb = this.candidateBadge(c.validationStatus);
+      return {
+        ...c, statusBg: cb.bg, statusFg: cb.fg, statusDot: cb.dot,
+        isSelected: !!this.state.selectedCandidates[c.ticker], onToggleSelect: () => this.toggleSelectCandidate(c.ticker),
+        onRowClick: () => this.openCandidateDrawer(c), stopClick: this.stopClick,
+        canValidate: ['New', 'Failed', 'Insufficient data', 'Ready for scoring'].includes(c.validationStatus),
+        isValidatingRow: c.validationStatus === 'Validating', isScored: !!c.episodeId,
+        onValidate: () => this.validateCandidate(c.ticker), onViewEpisode: () => this.openEpisodeDrawer(this.episodes.find(e => e.episodeId === c.episodeId)),
+      };
+    });
+    const filteredCandidates = candidatesWithUi.filter(c => {
+      if (cf.ticker !== 'all' && c.ticker !== cf.ticker) return false;
+      if (cf.source !== 'all' && c.source !== cf.source) return false;
+      if (cf.direction !== 'all' && c.direction !== cf.direction) return false;
+      if (cf.status !== 'all' && c.validationStatus !== cf.status) return false;
+      if (cf.dateFrom && c.candidateDate < cf.dateFrom) return false;
+      if (cf.dateTo && c.candidateDate > cf.dateTo) return false;
+      return true;
+    });
+    const candidateTickerOptions = [...new Set(this.state.candidates.map(c => c.ticker))].sort().map(t => ({ value: t, label: t }));
+    const selectedKeys = Object.keys(this.state.selectedCandidates).filter(t => this.state.selectedCandidates[t]);
+
+    const reportCards = episodesWithUi.filter(ep => ep.entryPrice).map(ep => this.buildEpisodeDetail(ep));
+
+    const connected = (this.props && this.props.danelfinConnected) ?? true;
+    return {
+      productName: (this.props && this.props.productName) || 'Stock Selection System',
+      connectionLabel: connected ? 'Danelfin API connected' : 'Danelfin API disconnected',
+      connectionDotColor: connected ? '#2f9e4f' : '#ec3013',
+      danelfinDisconnected: !connected,
+      fetchDisabled: this.state.fetchState === 'loading' || !connected,
+      isFetchNotLoadingConnected: this.state.fetchState !== 'loading' && connected,
+      isDashboard: this.state.screen === 'dashboard', isIntake: this.state.screen === 'intake', isEpisodes: this.state.screen === 'episodes',
+      isIncomplete: this.state.screen === 'incomplete', isReports: this.state.screen === 'reports', isSettings: this.state.screen === 'settings',
+      goDashboard: this.goDashboard, goIntake: this.goIntake, goEpisodes: this.goEpisodes, goIncomplete: this.goIncomplete, goReports: this.goReports, goSettings: this.goSettings,
+      navDashboardStyle: this.navStyle('dashboard'), navIntakeStyle: this.navStyle('intake'), navEpisodesStyle: this.navStyle('episodes'),
+      navIncompleteStyle: this.navStyle('incomplete'), navReportsStyle: this.navStyle('reports'), navSettingsStyle: this.navStyle('settings'),
+      today: 'Saturday, August 1, 2026',
+      refreshing: this.state.refreshing, notRefreshing: !this.state.refreshing, onRefresh: this.refreshDashboard,
+      summary, recentEpisodes,
+      hasDrawer: drawer.isEpisode || drawer.isIncomplete || drawer.isCandidate, drawer, closeDrawer: this.closeDrawer, stopClick: this.stopClick,
+      filteredEpisodes: filtered, resultCount: filtered.length, uniqueTickersOptions,
+      filterTicker: f.ticker, filterDecision: f.decision, filterTrigger: f.trigger, filterEntry: f.entryStatus, filterOutcome: f.outcomeStatus, filterFrom: f.dateFrom, filterTo: f.dateTo, filterSort: f.sort,
+      onFilterTicker: this.setFilterTicker, onFilterDecision: this.setFilterDecision, onFilterTriggerText: this.setFilterTriggerText, onFilterEntry: this.setFilterEntry, onFilterOutcome: this.setFilterOutcome, onFilterFrom: this.setFilterFrom, onFilterTo: this.setFilterTo, onFilterSort: this.setFilterSort,
+      fetchAsOf: this.state.fetchAsOf, onFetchAsOfChange: this.updateFetchAsOf,
+      fetchMarket: this.state.fetchMarket, onFetchMarketChange: this.onFetchMarketChange,
+      fetchDirection: this.state.fetchDirection, onFetchDirectionChange: this.onFetchDirectionChange,
+      fetchAssetType: this.state.fetchAssetType, onFetchAssetTypeChange: this.onFetchAssetTypeChange,
+      fetchMinAiScore: this.state.fetchMinAiScore, onFetchMinAiScoreChange: this.onFetchMinAiScoreChange,
+      isFetchLoading: this.state.fetchState === 'loading', isFetchNotLoading: this.state.fetchState !== 'loading', isFetchDone: this.state.fetchState === 'done', onRunFetch: this.runFetch,
+      onReviewCandidates: this.onReviewCandidates,
+      fetchFoundCount: fr.found, fetchStoredCount: fr.cats.stored.length, fetchSkippedTotalCount: fr.cats.skipped.length, fetchFailedTotalCount: failedTotal,
+      fetchCategoryGroups,
+      manualTicker: this.state.manualTicker, manualAsOf: this.state.manualAsOf, manualDirection: this.state.manualDirection, onManualDirectionChange: this.onManualDirectionChange, manualDisabled: !this.state.manualTicker.trim(),
+      onManualTickerChange: this.updateManualTicker, onManualAsOfChange: this.updateManualAsOf,
+      onOpenManualConfirm: this.openManualConfirm, manualConfirmOpen: this.state.manualConfirmOpen, onCancelManualConfirm: this.cancelManualConfirm, onConfirmManualAdd: this.confirmManualAdd,
+      manualToast: this.state.manualToast, hasManualToast: !!this.state.manualToast,
+      filteredCandidates, candidateTickerOptions, candidateResultCount: filteredCandidates.length, candidateTotalCount: this.state.candidates.length,
+      candidateFilterTicker: cf.ticker, candidateFilterSource: cf.source, candidateFilterDirection: cf.direction, candidateFilterStatus: cf.status, candidateFilterFrom: cf.dateFrom, candidateFilterTo: cf.dateTo,
+      onCandidateFilterTicker: this.onCandidateFilterTicker, onCandidateFilterSource: this.onCandidateFilterSource, onCandidateFilterDirection: this.onCandidateFilterDirection, onCandidateFilterStatus: this.onCandidateFilterStatus, onCandidateFilterFrom: this.onCandidateFilterFrom, onCandidateFilterTo: this.onCandidateFilterTo,
+      onValidateSelected: this.validateSelected, noSelection: selectedKeys.length === 0, selectedCount: selectedKeys.length,
+      incompleteCases: incompleteUi, onRunRetry: this.runRetry, retrying: this.state.retrying, notRetrying: !this.state.retrying, retryMessage: this.state.retryMessage, hasRetryMessage: !!this.state.retryMessage,
+      openIncompleteCount: summary.openIncomplete,
+      reportCards,
+    };
+  }
+}
+</script>
+</body>
+</html>
