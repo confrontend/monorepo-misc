@@ -1,0 +1,4 @@
+pandas
+pandas_market_calendars>=5.0
+requests
+pytest
