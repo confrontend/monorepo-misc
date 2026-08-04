@@ -1,7 +1,7 @@
 """
 Tests the /api/actions/ingest-live and /api/actions/mark-context-reviewed
 FastAPI endpoints by calling the route functions directly (no HTTP layer,
-no TestClient dependency) with AlphaVantageClient/StooqClient/DanelfinClient
+no TestClient dependency) with AlphaVantageClient/EODHDClient/DanelfinClient
 patched out -- this project has no live network access in CI/sandboxes, so
 these tests verify the ENDPOINT'S wiring/contract (request validation,
 per-ticker error handling, response shape), not real API behavior.
@@ -43,7 +43,7 @@ class _FakeAV:
         return []
 
 
-class _FakeStooq:
+class _FakeEODHD:
     def __init__(self, *a, **kw):
         pass
 
@@ -69,7 +69,7 @@ def test_ingest_live_rejects_empty_tickers():
 
 
 @patch("src.ingestion.alpha_vantage.AlphaVantageClient", _FakeAV)
-@patch("src.ingestion.stooq.StooqClient", _FakeStooq)
+@patch("api.main.EODHDClient", _FakeEODHD)
 @patch("src.ingestion.danelfin.DanelfinClient", _FakeDanelfin)
 def test_ingest_live_happy_path_shape():
     req = api_main.IngestLiveRequest(tickers=["ATI", "MSFT"], as_of_date=AS_OF)
@@ -85,7 +85,7 @@ def test_ingest_live_happy_path_shape():
 
 
 @patch("src.ingestion.alpha_vantage.AlphaVantageClient", _FakeAV)
-@patch("src.ingestion.stooq.StooqClient", _FakeStooq)
+@patch("api.main.EODHDClient", _FakeEODHD)
 def test_ingest_live_can_skip_candidates():
     req = api_main.IngestLiveRequest(tickers=["ATI"], as_of_date=AS_OF, include_candidates=False)
     result = api_main.ingest_live(req)
@@ -104,16 +104,16 @@ def test_ingest_live_missing_alpha_vantage_key_returns_400(monkeypatch):
 
 
 def test_ingest_live_one_ticker_failing_does_not_abort_the_batch():
-    class _FlakyStooq(_FakeStooq):
+    class _FlakyEODHD(_FakeEODHD):
         def get_daily(self, ticker, outputsize="full"):
             if ticker == "SPY":
                 return {}
             if ticker == "BAD":
-                raise RuntimeError("simulated Stooq error for BAD")
+                raise RuntimeError("simulated EODHD error for BAD")
             return {}
 
     with patch("src.ingestion.alpha_vantage.AlphaVantageClient", _FakeAV), \
-         patch("src.ingestion.stooq.StooqClient", _FlakyStooq):
+         patch("api.main.EODHDClient", _FlakyEODHD):
         req = api_main.IngestLiveRequest(tickers=["BAD", "ATI"], as_of_date=AS_OF, include_candidates=False)
         result = api_main.ingest_live(req)
 

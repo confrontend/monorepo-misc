@@ -40,12 +40,15 @@ and returns.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Optional
 
 from .base import upsert_candidate
+
+logger = logging.getLogger(__name__)
 from .danelfin import DanelfinClient
 
 TRADE_IDEAS_SOURCE = "danelfin_trade_ideas"
@@ -365,10 +368,9 @@ def fetch_trade_ideas_candidates(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
 ) -> TradeIdeasResult:
-    """THE primary, no-ticker-required candidate discovery workflow: calls
-    danelfin.get_trade_ideas() with whatever filters are given (all
-    optional -- omitting everything just fetches the latest Trade Ideas
-    snapshot unfiltered), normalizes and upserts every returned record into
+    """THE primary, long-only candidate discovery workflow. It always calls
+    Danelfin with direction='long', regardless of the caller's optional
+    direction argument, then normalizes and upserts every returned long record into
     `candidates` with source='danelfin_trade_ideas', and reports exactly
     what happened to each one.
 
@@ -426,6 +428,9 @@ def fetch_trade_ideas_candidates(
     episodes.py:detect_episode_trigger() exactly like any other source's --
     Danelfin Trade Ideas data is eligibility-only and is never read by
     score_earnings/score_market/score_context/decide()."""
+    # This application validates stocks for bullish/long decisions. Never
+    # allow the mixed-direction or short Trade Ideas feed into that workflow.
+    direction = "long"
     filters = {
         "market": market, "direction": direction, "asset_type": asset_type,
         "aiscore": aiscore, "fundamental": fundamental, "technical": technical,
@@ -457,6 +462,7 @@ def fetch_trade_ideas_candidates(
         result.warnings.append(f"Danelfin Trade Ideas fetch was truncated: {partial_error}")
 
     result.total_ideas = len(raw_ideas)
+    logger.info("Danelfin Trade Ideas returned records=%d", result.total_ideas)
 
     for i, raw in enumerate(raw_ideas):
         if not isinstance(raw, dict):
@@ -481,8 +487,32 @@ def fetch_trade_ideas_candidates(
             raw.get("fundamental_score") if raw.get("fundamental_score") is not None else raw.get("fundamental")
         )
         expected_return = _safe_float(raw.get("expected_return"))
-        idea_direction = raw.get("direction")
+        raw_direction = raw.get("direction")
+        if raw_direction is not None and str(raw_direction).strip().lower() != "long":
+            reason = f"short/non-long Trade Idea rejected by long-only workflow: {raw_direction!r}"
+            result.skipped.append({"index": i, "ticker": ticker, "reason": reason})
+            result.ideas.append(TradeIdeaRecord(index=i, status="skipped", ticker=ticker, reason=reason, direction=str(raw_direction)).to_dict())
+            continue
+        # Danelfin's live Trade Ideas payload does not echo direction. The
+        # value is still known because the request above is hard-filtered.
+        idea_direction = "long"
         raw_json = _safe_raw_json(raw)
+
+        logger.debug(
+            "Danelfin Trade Ideas normalization index=%d ticker=%s raw_keys=%s "
+            "rank_present=%s direction_present=%s normalized_rank=%r normalized_direction=%r "
+            "ai_score=%r technical_score=%r fundamental_score=%r",
+            i,
+            ticker,
+            sorted(str(key) for key in raw.keys()),
+            any(key in raw for key in ("rank", "source_rank")),
+            "direction" in raw,
+            source_rank,
+            idea_direction,
+            ai_score,
+            technical_score,
+            fundamental_score,
+        )
 
         try:
             upsert_candidate(
@@ -504,4 +534,55 @@ def fetch_trade_ideas_candidates(
             expected_return=expected_return, direction=idea_direction,
         ).to_dict())
 
+    return result
+
+
+def fetch_best_stocks_candidates(
+    conn: sqlite3.Connection,
+    as_of_date: date,
+    danelfin: DanelfinClient,
+) -> dict:
+    """Fetch and store the official Danelfin Best Stocks ranked snapshot."""
+    result = {"source": "danelfin_beststocks", "as_of_date": as_of_date.isoformat(), "successful": [], "failed": {}, "stocks": [], "warnings": []}
+    try:
+        rows = danelfin.get_best_stocks()
+    except Exception as exc:
+        result["warnings"].append(f"Danelfin Best Stocks fetch failed: {exc}")
+        return result
+
+    logger.info("Danelfin Best Stocks returned records=%d", len(rows))
+    for index, raw in enumerate(rows):
+        ticker = str(raw.get("ticker") or "").strip().upper() if isinstance(raw, dict) else ""
+        if not ticker:
+            result["failed"][str(index)] = "record had no ticker"
+            continue
+        rank = raw.get("rank")
+        normalized = {
+            "ticker": ticker,
+            "rank": rank,
+            "ai_score": _safe_float(raw.get("aiscore")),
+            "technical_score": _safe_float(raw.get("technical")),
+            "fundamental_score": _safe_float(raw.get("fundamental")),
+            "sentiment_score": _safe_float(raw.get("sentiment")),
+            "low_risk_score": _safe_float(raw.get("low_risk")),
+            "perf_ytd": _safe_float(raw.get("perf_ytd")),
+            "source_date": raw.get("date"),
+        }
+        logger.debug(
+            "Danelfin Best Stocks normalization index=%d ticker=%s raw_keys=%s rank=%r ai_score=%r",
+            index, ticker, sorted(str(key) for key in raw.keys()), rank, normalized["ai_score"],
+        )
+        try:
+            upsert_candidate(
+                conn, as_of_date, ticker, source="danelfin_beststocks",
+                source_rank=str(rank) if rank is not None else None,
+                ai_score=normalized["ai_score"],
+                technical_score=normalized["technical_score"],
+                fundamental_score=normalized["fundamental_score"],
+                raw_source_data=_safe_raw_json(raw),
+            )
+            result["successful"].append(ticker)
+            result["stocks"].append(normalized)
+        except Exception as exc:
+            result["failed"][ticker] = f"failed to store candidate: {exc}"
     return result

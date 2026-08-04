@@ -21,10 +21,16 @@ from __future__ import annotations
 
 import os
 import logging
+import json
+import re
 import sqlite3
-from datetime import date, datetime
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from contextlib import asynccontextmanager
 
@@ -35,14 +41,108 @@ from pydantic import BaseModel
 from src.db import get_connection, init_db
 from src.episodes import run_episode, run_episode_for_retry
 from src.ingestion.live import ingest_candidates, ingest_price_and_earnings, mark_context_reviewed
-from src.pipeline import run_ati_demo
+from src.ingestion.eodhd import EODHDClient, EODHDConfigurationError, eodhd_authentication_failure, run_eodhd_test
 from src.reports import render_report
 from src.required_inputs import retry_insufficient_data
 from src.trading_calendar import default_calendar
 
 _DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent / "stock_selection.db")
 DB_PATH = os.environ.get("STOCK_SELECTION_DB", _DEFAULT_DB_PATH)
+DIAGNOSTICS_DIR = Path(__file__).resolve().parent.parent / "diagnostics"
+DIAGNOSTIC_DB_PATH = DIAGNOSTICS_DIR / "diagnostics.db"
 logger = logging.getLogger(__name__)
+_BACKTEST_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="backtest")
+_BACKTEST_JOBS: dict[str, dict] = {}
+_BACKTEST_JOBS_LOCK = threading.Lock()
+
+
+class _SQLiteDiagnosticHandler(logging.Handler):
+    """Write the existing Python log stream to a queryable SQLite database."""
+
+    _standard_record_fields = set(logging.LogRecord(None, 0, "", 0, "", (), None).__dict__)
+
+    def __init__(self, database_path: Path, retention_days: int = 30):
+        super().__init__(level=logging.DEBUG)
+        self.database_path = database_path
+        self.retention_days = retention_days
+        self._emit_count = 0
+        self._initialize_database()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.database_path, timeout=5)
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+
+    def _initialize_database(self) -> None:
+        with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS diagnostic_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    logger_name TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    module TEXT,
+                    function TEXT,
+                    line INTEGER,
+                    extra_json TEXT NOT NULL DEFAULT '{}'
+                )"""
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_diagnostic_events_ts_level ON diagnostic_events (ts, level)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_diagnostic_events_level_ts ON diagnostic_events (level, ts)")
+            self._purge(conn)
+
+    def _purge(self, conn: sqlite3.Connection) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=self.retention_days)).isoformat()
+        conn.execute("DELETE FROM diagnostic_events WHERE ts < ?", (cutoff,))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = _redact_debug(record.getMessage())
+            extras = {
+                key: _redact_debug(value)
+                for key, value in record.__dict__.items()
+                if key not in self._standard_record_fields
+            }
+            timestamp = datetime.fromtimestamp(record.created, timezone.utc).isoformat()
+            with self._connect() as conn:
+                conn.execute(
+                    """INSERT INTO diagnostic_events
+                    (ts, level, logger_name, message, module, function, line, extra_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        timestamp,
+                        record.levelname,
+                        record.name,
+                        str(message),
+                        record.module,
+                        record.funcName,
+                        record.lineno,
+                        json.dumps(extras, default=str, ensure_ascii=True),
+                    ),
+                )
+                self._emit_count += 1
+                if self._emit_count % 500 == 0:
+                    self._purge(conn)
+        except Exception:
+            # Diagnostics must never break the application being diagnosed.
+            self.handleError(record)
+
+
+def _configure_diagnostic_file_logging() -> None:
+    """Temporarily capture backend debug logs without exposing API secrets."""
+    DIAGNOSTICS_DIR.mkdir(exist_ok=True)
+    root_logger = logging.getLogger()
+    if any(getattr(handler, "_stock_selection_diagnostics", False) for handler in root_logger.handlers):
+        return
+    handler = _SQLiteDiagnosticHandler(DIAGNOSTIC_DB_PATH)
+    handler._stock_selection_diagnostics = True  # type: ignore[attr-defined]
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.DEBUG)
+
+
+_configure_diagnostic_file_logging()
 
 
 @asynccontextmanager
@@ -66,6 +166,32 @@ def _conn() -> sqlite3.Connection:
     if not os.path.exists(DB_PATH):
         init_db(DB_PATH)
     return get_connection(DB_PATH)
+
+
+def _redact_debug(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "***REDACTED***" if str(key).lower() in {"api_key", "api_token", "apikey", "authorization"} else _redact_debug(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_debug(item) for item in value]
+    if isinstance(value, str):
+        return re.sub(r"(?i)(api_token|apikey|api_key|authorization)=([^&\s]+)", r"\1=***REDACTED***", value)
+    return value
+
+
+class FrontendDebugLogRequest(BaseModel):
+    label: str
+    payload: Any = None
+
+
+@app.post("/api/debug-log")
+def frontend_debug_log(req: FrontendDebugLogRequest) -> dict:
+    """Temporary dev-only bridge for browser diagnostics into the backend log."""
+    payload = _redact_debug(req.payload)
+    logger.debug("FRONTEND %s payload=%s", req.label[:200], json.dumps(payload, default=str, ensure_ascii=True))
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -217,23 +343,6 @@ def list_insufficient_data_cases(
 # Trigger endpoints
 # ---------------------------------------------------------------------------
 
-class RunDemoRequest(BaseModel):
-    as_of_date: date
-    seed: int = 42
-
-
-@app.post("/api/actions/run-demo")
-def run_demo(req: RunDemoRequest) -> dict:
-    """Runs the synthetic ATI demo end-to-end (no API keys needed) -- ingest,
-    score, decide, entry price, all four outcome horizons."""
-    conn = _conn()
-    try:
-        result = run_ati_demo(conn, req.as_of_date, seed=req.seed)
-    except Exception as exc:  # surfaces to the UI instead of a bare 500
-        raise HTTPException(status_code=400, detail=str(exc))
-    return result
-
-
 class RetryRequest(BaseModel):
     as_of_date: date
 
@@ -251,6 +360,24 @@ def retry_insufficient(req: RetryRequest) -> dict:
     return {"resolved_episode_ids": resolved_ids, "count": len(resolved_ids)}
 
 
+class EODHDTestRequest(BaseModel):
+    ticker: str
+    as_of_date: date
+
+
+@app.post("/api/actions/test-eodhd")
+def test_eodhd(req: EODHDTestRequest) -> dict:
+    """Read-only EODHD diagnostic; never opens or modifies the application DB."""
+    ticker = req.ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker must not be empty")
+    try:
+        client = EODHDClient()
+    except EODHDConfigurationError:
+        return eodhd_authentication_failure(ticker, req.as_of_date)
+    return run_eodhd_test(ticker, req.as_of_date, client=client)
+
+
 class IngestLiveRequest(BaseModel):
     tickers: list[str]
     as_of_date: date
@@ -259,12 +386,11 @@ class IngestLiveRequest(BaseModel):
 
 @app.post("/api/actions/ingest-live")
 def ingest_live(req: IngestLiveRequest) -> dict:
-    """Fetches real price data from Stooq and earnings/estimate/calendar data
+    """Fetches real price data from EODHD and earnings/estimate/calendar data
     from Alpha Vantage for each ticker (and, if requested, eligibility candidates from
     Danelfin), upserts them, then runs the normal trigger-detection/scoring
     pipeline (episodes.run_episode) for each ticker against the freshly
-    ingested data -- mirroring what /api/actions/run-demo already does for
-    the synthetic dataset, so a live-ingested ticker actually shows up under
+    ingested data, so a live-ingested ticker actually shows up under
     Episodes or Insufficient-Data-Cases instead of just silently filling
     tables. Most freshly-ingested tickers will land in insufficient-data
     (missing the context group) until /api/actions/mark-context-reviewed is
@@ -274,7 +400,7 @@ def ingest_live(req: IngestLiveRequest) -> dict:
     verified against.
 
     Does NOT itself fetch entry prices or track outcomes -- those need a
-    real (non-demo) PriceDataSource that isn't wired up yet.
+    real PriceDataSource that isn't wired up yet.
 
     Deliberately does NOT touch context_ingestion_coverage -- call
     /api/actions/mark-context-reviewed separately and explicitly once you've
@@ -291,35 +417,20 @@ def ingest_live(req: IngestLiveRequest) -> dict:
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    from src.ingestion.stooq import StooqClient
-    from src.ingestion.yahoo import FallbackPriceClient, YahooFinanceClient
-    stooq = StooqClient()
-    price_client = FallbackPriceClient(stooq, YahooFinanceClient())
+    try:
+        price_client = EODHDClient()
+    except EODHDConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     price_results = []
     spy_series = None
     for ticker in req.tickers:
         try:
             if spy_series is None:
-                # Fetched once here (not inside ingest_price_and_earnings)
-                # so a SPY-fetch failure surfaces clearly rather than being
-                # silently retried per ticker.
-                try:
-                    spy_series = price_client.get_daily("SPY")
-                except Exception as stooq_exc:
-                    # The benchmark only needs ~63 sessions for its return;
-                    # Alpha Vantage compact data is sufficient as a fallback
-                    # even though it is not sufficient for a stock's ma_200.
-                    logger.warning("Stooq SPY fetch failed; trying Alpha Vantage compact fallback: %s", stooq_exc)
-                    try:
-                        spy_series = av.get_daily("SPY", outputsize="compact")
-                        logger.info("Alpha Vantage compact fallback supplied SPY benchmark bars=%d", len(spy_series))
-                    except Exception:
-                        logger.exception("Both Stooq and Alpha Vantage failed for SPY benchmark")
-                        # Keep the run alive so ticker-specific earnings,
-                        # estimates, and calendar data can still be fetched.
-                        # Price signals will carry an explicit warning.
-                        spy_series = {}
+                # Fetch EODHD's benchmark history once and reuse it for every
+                # ticker in this run. There is no Alpha Vantage price fallback:
+                # its free daily history cannot provide the required MA200.
+                spy_series = price_client.get_daily("SPY")
             price_results.append(
                 ingest_price_and_earnings(conn, ticker, req.as_of_date, av, price_client=price_client, spy_series=spy_series)
             )
@@ -426,6 +537,10 @@ class FetchTradeIdeasRequest(BaseModel):
     offset: Optional[int] = None
 
 
+class FetchBestStocksRequest(BaseModel):
+    as_of_date: date
+
+
 @app.post("/api/actions/fetch-trade-ideas")
 def fetch_trade_ideas_endpoint(req: FetchTradeIdeasRequest) -> dict:
     """THE primary, no-ticker-required candidate discovery workflow (src/
@@ -433,8 +548,8 @@ def fetch_trade_ideas_endpoint(req: FetchTradeIdeasRequest) -> dict:
     unlike /api/actions/fetch-candidates (which only evaluates tickers you
     already supply), this discovers candidates on its own from Danelfin
     Trade Ideas (GET /v3/trade-ideas, no ticker required). Every filter is
-    optional; omitting all of them fetches the latest unfiltered Trade
-    Ideas snapshot. Runs once, synchronously, only for this request -- no
+    optional; the direction is always forced to long because this workflow
+    validates buy-side candidates. Runs once, synchronously, only for this request -- no
     scheduler/background job. Returns source/as_of_date/applied filters/
     total ideas returned/per-record success-skipped-failed accounting/a
     preview row per record/warnings (see TradeIdeasResult.to_dict()).
@@ -445,6 +560,9 @@ def fetch_trade_ideas_endpoint(req: FetchTradeIdeasRequest) -> dict:
     /api/actions/add-manual-candidate instead; to evaluate specific
     already-known tickers against Danelfin's ranking (rather than
     discovering new ones), use /api/actions/fetch-candidates."""
+    if req.direction is not None and req.direction.lower() != "long":
+        raise HTTPException(status_code=400, detail="This application supports long Trade Ideas only; short ideas are not allowed.")
+
     conn = _conn()
     try:
         from src.ingestion.danelfin import DanelfinClient
@@ -461,6 +579,64 @@ def fetch_trade_ideas_endpoint(req: FetchTradeIdeasRequest) -> dict:
         market_cap=req.market_cap, limit=req.limit, offset=req.offset,
     )
     return result.to_dict()
+
+
+@app.post("/api/actions/fetch-beststocks")
+def fetch_beststocks_endpoint(req: FetchBestStocksRequest) -> dict:
+    """Fetch and store Danelfin's official ranked Best Stocks snapshot."""
+    conn = _conn()
+    try:
+        from src.ingestion.danelfin import DanelfinClient
+        danelfin = DanelfinClient()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    from src.ingestion.candidate_selection import fetch_best_stocks_candidates
+    return fetch_best_stocks_candidates(conn, req.as_of_date, danelfin)
+
+
+class BacktestRequest(BaseModel):
+    start_date: date
+    end_date: date
+    top_n: int = 10
+
+
+@app.post("/api/actions/run-backtest")
+def run_backtest_endpoint(req: BacktestRequest) -> dict:
+    """Start the cache-first historical backtest and return immediately."""
+    with _BACKTEST_JOBS_LOCK:
+        if any(job["status"] == "running" for job in _BACKTEST_JOBS.values()):
+            raise HTTPException(status_code=409, detail="A backtest is already running")
+        job_id = uuid.uuid4().hex
+        _BACKTEST_JOBS[job_id] = {"job_id": job_id, "status": "running", "started_at": time.time(), "progress": {"phase": "queued", "message": "Queued"}}
+
+    def execute() -> None:
+        from src.backtest import run_backtest
+
+        def update(progress: dict) -> None:
+            with _BACKTEST_JOBS_LOCK:
+                if job_id in _BACKTEST_JOBS:
+                    _BACKTEST_JOBS[job_id]["progress"] = progress
+
+        try:
+            result = run_backtest(req.start_date, req.end_date, top_n=req.top_n, cache_path=os.environ.get("BACKTEST_DB_PATH"), progress=update)
+            with _BACKTEST_JOBS_LOCK:
+                _BACKTEST_JOBS[job_id].update({"status": "complete", "result": result, "finished_at": time.time()})
+        except Exception as exc:
+            logger.exception("Historical backtest failed")
+            with _BACKTEST_JOBS_LOCK:
+                _BACKTEST_JOBS[job_id].update({"status": "failed", "error": str(exc), "finished_at": time.time()})
+
+    _BACKTEST_EXECUTOR.submit(execute)
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/actions/run-backtest/{job_id}")
+def backtest_status_endpoint(job_id: str) -> dict:
+    with _BACKTEST_JOBS_LOCK:
+        job = _BACKTEST_JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Backtest job not found")
+        return dict(job)
 
 
 class MarkContextReviewedRequest(BaseModel):

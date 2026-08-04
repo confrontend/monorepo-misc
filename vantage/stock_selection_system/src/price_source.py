@@ -38,7 +38,7 @@ class PriceDataSource(ABC):
 
 
 class InMemoryPriceSource(PriceDataSource):
-    """Simple dict-backed PriceDataSource for tests and the ATI demo. Keys are
+    """Simple dict-backed PriceDataSource for tests. Keys are
     (ticker, date)."""
 
     def __init__(self):

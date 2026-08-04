@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from src.db import init_db
-from src.ingestion.candidate_selection import add_manual_candidates, select_candidates
+from src.ingestion.candidate_selection import add_manual_candidates, fetch_best_stocks_candidates, select_candidates
 from src.episodes import detect_episode_trigger
 from src.scoring import score_earnings, score_market, score_context
 
@@ -32,6 +32,26 @@ class FakeDanelfin:
         if ticker in self._raise_for:
             raise RuntimeError(f"simulated Danelfin failure for {ticker}")
         return self._rows.get(ticker, {"ticker": ticker})
+
+
+class FakeBestStocksDanelfin:
+    def get_best_stocks(self):
+        return [{
+            "ticker": "ATI", "rank": 3, "aiscore": 8, "technical": 7,
+            "fundamental": 9, "sentiment": 6, "low_risk": 5,
+            "perf_ytd": 12.5, "date": "2026-02-01",
+        }]
+
+
+def test_best_stocks_candidates_store_official_rank_and_scores(conn):
+    result = fetch_best_stocks_candidates(conn, AS_OF, FakeBestStocksDanelfin())
+    assert result["successful"] == ["ATI"]
+    row = conn.execute("SELECT * FROM candidates WHERE ticker = 'ATI'").fetchone()
+    assert row["source"] == "danelfin_beststocks"
+    assert row["source_rank"] == "3"
+    assert row["ai_score"] == pytest.approx(8)
+    assert row["technical_score"] == pytest.approx(7)
+    assert row["fundamental_score"] == pytest.approx(9)
 
 
 def test_all_successful_upserts_every_ticker(conn):

@@ -9,7 +9,7 @@ pieces (episodes.py, required_inputs.py, jobs/*) stay independently testable.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from .episodes import run_episode
@@ -17,7 +17,6 @@ from .jobs.entry_price_job import run_entry_price_job
 from .jobs.outcome_tracking_job import run_outcome_tracking_job
 from .price_source import PriceDataSource
 from .required_inputs import retry_insufficient_data
-from .reports import render_report
 from .trading_calendar import TradingCalendar, default_calendar
 
 
@@ -56,42 +55,3 @@ def run_daily_cycle(
         "entries_written": entries_written,
         "outcomes_written": outcomes_written,
     }
-
-
-def run_ati_demo(conn: sqlite3.Connection, as_of_date: date, seed: int = 42) -> dict:
-    """Runs the required first end-to-end test case (implementation prompt:
-    "run the full pipeline end-to-end on ticker ATI first") using synthetic
-    seed data, fast-forwarding time so entries and all four outcome horizons
-    resolve within a single call."""
-    from .ingestion.seed_demo_data import FUTURE_HORIZON_TRADING_DAYS, TICKER, seed_demo_data
-    from .price_source import InMemoryPriceSource
-
-    calendar = default_calendar
-    price_source = InMemoryPriceSource()
-    seed_demo_data(conn, price_source, calendar, as_of_date, seed=seed)
-
-    episode_ids = run_episode(conn, TICKER, as_of_date, calendar=calendar)
-    if not episode_ids:
-        cases = conn.execute(
-            "SELECT * FROM insufficient_data_cases WHERE resolved = FALSE"
-        ).fetchall()
-        return {"episode_id": None, "insufficient_data_cases": [dict(c) for c in cases]}
-    episode_id = episode_ids[0]
-
-    decision_ts = datetime.fromisoformat(
-        conn.execute("SELECT decision_timestamp_utc FROM reviews WHERE episode_id = ?", (episode_id,)).fetchone()[0]
-        .replace("Z", "+00:00")
-    )
-    entry_date, market_open_ts = calendar.next_market_open_after(decision_ts)
-    now_after_open = market_open_ts + timedelta(hours=1)
-    run_entry_price_job(conn, price_source, calendar=calendar, now=now_after_open)
-
-    far_future_date = entry_date + timedelta(days=FUTURE_HORIZON_TRADING_DAYS * 2)
-    far_future_close = calendar.session_close(far_future_date) or datetime.combine(
-        far_future_date, market_open_ts.time(), tzinfo=timezone.utc
-    )
-    now_after_all_horizons = far_future_close + timedelta(hours=1)
-    run_outcome_tracking_job(conn, price_source, calendar=calendar, now=now_after_all_horizons)
-
-    report_text = render_report(conn, episode_id)
-    return {"episode_id": episode_id, "report": report_text}

@@ -67,6 +67,7 @@ def test_no_ticker_input_required(conn):
     # No tickers were passed into get_trade_ideas() either.
     assert "tickers" not in danelfin.calls[0]
     assert "ticker" not in danelfin.calls[0]
+    assert danelfin.calls[0]["direction"] == "long"
 
 
 def test_filters_are_forwarded_to_the_client(conn):
@@ -136,18 +137,19 @@ def test_rerunning_the_same_fetch_is_idempotent(conn):
 
 
 def test_duplicate_ticker_within_one_response_does_not_duplicate_rows(conn):
-    # Same ticker appearing twice in one Trade Ideas response (e.g. two
-    # different "ideas" for it) -- still exactly one candidates row.
+    # Same ticker appearing twice in one response -- still exactly one
+    # candidates row, and the long-only workflow never stores a short value.
     danelfin = FakeDanelfinTradeIdeas(ideas=[
         {"ticker": "ATI", "ai_score": 7.0, "direction": "long"},
         {"ticker": "ATI", "ai_score": 8.0, "direction": "short"},
     ])
     result = fetch_trade_ideas_candidates(conn, AS_OF, danelfin)
 
-    assert result.successful == ["ATI", "ATI"]
+    assert result.successful == ["ATI"]
+    assert result.skipped_count == 1
     rows = conn.execute("SELECT * FROM candidates WHERE ticker = 'ATI'").fetchall()
     assert len(rows) == 1
-    assert rows[0]["direction"] == "short"  # later record in the same batch wins
+    assert rows[0]["direction"] == "long"
 
 
 def test_db_error_during_upsert_is_reported_as_failed_not_raised(conn):

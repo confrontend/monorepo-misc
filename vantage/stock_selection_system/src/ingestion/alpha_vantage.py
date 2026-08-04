@@ -45,6 +45,7 @@ import csv
 import io
 import json
 import os
+import re
 import time
 from datetime import date, datetime
 from typing import Optional
@@ -57,6 +58,13 @@ load_dotenv()  # picks up ALPHA_VANTAGE_API_KEY from a .env file if present;
                 # since load_dotenv() does not override existing env vars.
 
 BASE_URL = "https://www.alphavantage.co/query"
+
+
+def _redact_error_text(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    value = re.sub(r"(?i)(api_token|apikey|api_key|authorization)=([^&\s]+)", r"\1=***REDACTED***", value)
+    return re.sub(r"(?i)(api\s+key(?:\s+as)?\s*[:=]?\s+)([A-Za-z0-9_-]{8,})", r"\1***REDACTED***", value)
 
 
 class AlphaVantageClient:
@@ -96,7 +104,9 @@ class AlphaVantageClient:
             # exactly the kind of thing that gets logged, printed in a stack
             # trace, or pasted into a bug report.
             safe_params = {**params, "apikey": "***REDACTED***"}
-            raise RuntimeError(f"Alpha Vantage API error/rate-limit for params {safe_params}: {data}")
+            raise RuntimeError(
+                f"Alpha Vantage API error/rate-limit for params {safe_params}: {_redact_error_text(data)}"
+            )
         return data
 
     def get_daily(self, ticker: str, outputsize: str = "full") -> dict[date, dict]:

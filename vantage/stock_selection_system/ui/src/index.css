@@ -157,6 +157,7 @@ label.checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; 
   border-radius: calc(var(--radius-md) * 0.75);
 }
 .tag-accent { background: var(--color-accent-100); color: var(--color-accent-800); }
+.tag-success { background: var(--color-confirm-bg); color: var(--color-confirm-fg); }
 .tag-neutral { background: var(--color-neutral-100); color: var(--color-neutral-800); }
 .tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
 .tag-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; }
@@ -266,6 +267,27 @@ label.checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; 
   display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px;
 }
 .section-heading h3 { margin: 0; }
+.score-legend { display: inline-flex; align-items: center; gap: 5px; color: var(--color-neutral-600); font-size: 11px; }
+.score-value { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.score-icon { font-size: 10px; line-height: 1; }
+.score-value.good { color: var(--color-confirm-fg); }
+.score-value.good .score-icon { color: var(--color-confirm-dot); }
+.score-value.middle { color: var(--color-mixed-fg); }
+.score-value.middle .score-icon { color: var(--color-mixed-dot); }
+.score-value.bad { color: var(--color-reject-fg); }
+.score-value.bad .score-icon { color: var(--color-reject-dot); }
+.score-value.missing { color: var(--color-neutral-fg); }
+.score-value.missing .score-icon { color: var(--color-neutral-dot); }
+.collapsible-table { margin-top: 18px; }
+.collapsible-table > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; list-style: none; }
+.collapsible-table > summary::-webkit-details-marker { display: none; }
+.collapsible-table > summary::before { content: "＋"; color: var(--color-accent); font-size: 18px; line-height: 1; }
+.collapsible-table[open] > summary::before { content: "－"; }
+.collapsible-table > summary > span:first-of-type { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+.collapsible-table .collapse-hint { color: var(--color-neutral-600); font-size: 11px; }
+.collapsible-table[open] .collapse-hint { font-size: 0; }
+.collapsible-table[open] .collapse-hint::after { content: "Collapse table"; font-size: 11px; }
+.collapsible-table > .section-heading { margin-top: 16px; }
 
 .stat-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -291,6 +313,17 @@ label.checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; 
 .table-scroll { overflow-x: auto; }
 .candidate-table { min-width: 980px; }
 .incomplete-table { min-width: 1050px; }
+.eodhd-table { min-width: 760px; }
+.eodhd-controls { display: flex; flex-direction: column; gap: 14px; }
+.backtest-controls { display: flex; flex-direction: column; gap: 14px; }
+.text-positive { color: var(--color-confirm-fg); }
+.text-negative { color: var(--color-reject-fg); }
+.eodhd-payloads { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.eodhd-payloads details { padding: 12px 16px; }
+.eodhd-payloads summary { cursor: pointer; font-weight: 700; }
+.json-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+.json-grid pre { overflow: auto; max-height: 360px; margin: 0; padding: 12px; background: var(--color-neutral-100); font-size: 11px; white-space: pre-wrap; }
+.json-grid h4 { margin: 0 0 6px; font-size: 12px; }
 .tag-list { display: flex; gap: 4px; flex-wrap: wrap; }
 .missing-preview { display: flex; flex-direction: column; gap: 2px; max-width: 260px; font-size: 12px; }
 .missing-preview span:last-child { color: var(--color-accent-700); font-weight: 600; }
@@ -317,6 +350,9 @@ label.checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; 
 .banner { margin: 0 0 var(--space-3); padding: 10px 14px; font-size: 13px; }
 .banner.error { background: var(--color-reject-bg); color: var(--color-reject-fg); }
 .banner.success { background: var(--color-confirm-bg); color: var(--color-confirm-fg); }
+.backtest-progress { margin-top: 14px; display: grid; gap: 6px; font-size: 12px; color: color-mix(in srgb, var(--color-text) 70%, transparent); }
+.progress-track { height: 8px; background: var(--color-divider); overflow: hidden; }
+.progress-fill { height: 100%; min-width: 5px; background: var(--color-accent); transition: width 300ms ease; }
 
 /* — detail drawer — */
 .drawer-backdrop {

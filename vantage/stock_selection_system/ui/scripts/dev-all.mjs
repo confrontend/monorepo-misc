@@ -154,8 +154,16 @@ run(
   "Run: npm install (from ui/)",
   { ...process.env, VITE_DEBUG: "true" },
 );
+run(
+  "BUILD", "35", npmBin,
+  ["run", "build:watch"],
+  uiDir,
+  "Run: npm install (from ui/)",
+  { ...process.env, VITE_DEBUG: "true" },
+);
 
 console.log(`Backend:  http://localhost:8000  (docs at /docs)  [using ${pythonCmd}]`);
 console.log("Frontend: http://localhost:5173  (Vite HMR enabled; browser changes update immediately)");
+console.log("UI build: watching source files and rebuilding ui/dist");
 console.log("Backend reload: watching the project directory for Python changes");
 console.log("Press Ctrl+C to stop both.\n");

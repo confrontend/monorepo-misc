@@ -1,7 +1,6 @@
 """
-Live ingestion orchestration: pulls from a price client (Stooq with Yahoo
-fallback) and AlphaVantageClient (price signals,
-earnings history, forward EPS estimates, earnings calendar) and
+Live ingestion orchestration: pulls daily prices from EODHD and earnings,
+forward EPS estimates, and the earnings calendar from AlphaVantageClient, and
 DanelfinClient (eligibility-filter candidates), and writes into the schema
 via the idempotent upsert_* helpers in base.py / manual_events.py.
 
@@ -38,7 +37,7 @@ from .manual_events import add_earnings_calendar_entry
 
 SPY_TICKER = "SPY"
 TRADING_DAYS_3M = 63  # ~3 trading months; matches return_3m's intent elsewhere in the codebase
-MIN_BARS_FOR_PRICE_SIGNAL = 60  # below this, ma_50/return_3m can't be computed meaningfully
+MIN_BARS_FOR_PRICE_SIGNAL = 200  # required for ma_200 and the Market score
 logger = logging.getLogger(__name__)
 
 
@@ -73,20 +72,15 @@ def ingest_price_and_earnings(
     earnings_calendar. Returns a summary dict:
     {ticker, wrote: {...bools...}, warnings: [...]}.
 
-    `price_client` defaults to `av` itself (AlphaVantageClient.get_daily) for
-    backward compatibility, but that path CANNOT satisfy
-    MIN_BARS_FOR_PRICE_SIGNAL on a free key -- outputsize='full' on
-    TIME_SERIES_DAILY is confirmed premium-only, and 'compact' only returns
-    ~100 sessions. Pass a `StooqClient()` (src/ingestion/stooq.py) instead
-    for real price history; api/main.py's /api/actions/ingest-live does this.
-    Any object with a `get_daily(ticker) -> {date: {open,high,low,close,
-    volume}}` method works.
+    `price_client` should be an EODHDClient in production. Any object with a
+    `get_daily(ticker) -> {date: {open,high,low,close,volume}}` method works,
+    which keeps this orchestration layer straightforward to unit test.
 
     `spy_series` lets a multi-ticker caller fetch SPY's price history ONCE
     per run and reuse it, instead of once per ticker -- matters for the free
     tier's tight rate limit."""
     if price_client is None:
-        price_client = av
+        raise ValueError("price_client is required; use EODHDClient for daily price history")
     result = {
         "ticker": ticker,
         "wrote": {"price_signal": False, "earnings_history": False, "estimate_snapshots": False, "earnings_calendar": False},

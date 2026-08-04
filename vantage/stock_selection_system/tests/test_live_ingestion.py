@@ -107,7 +107,7 @@ class FakeDanelfin:
 
 def test_ingest_price_and_earnings_writes_everything_with_full_data(conn):
     av = FakeAlphaVantage()
-    result = ingest_price_and_earnings(conn, "ATI", AS_OF, av)
+    result = ingest_price_and_earnings(conn, "ATI", AS_OF, av, price_client=av)
 
     assert result["wrote"] == {
         "price_signal": True, "earnings_history": True, "estimate_snapshots": True, "earnings_calendar": True,
@@ -160,7 +160,7 @@ def test_ingest_price_and_earnings_reuses_provided_spy_series(conn):
     av.get_daily = counting_get_daily
     spy_series = _daily_series(AS_OF, 210)
 
-    ingest_price_and_earnings(conn, "ATI", AS_OF, av, spy_series=spy_series)
+    ingest_price_and_earnings(conn, "ATI", AS_OF, av, price_client=av, spy_series=spy_series)
 
     # Only the ticker itself should have been fetched -- SPY was reused.
     assert calls["get_daily"] == 1
@@ -169,7 +169,7 @@ def test_ingest_price_and_earnings_reuses_provided_spy_series(conn):
 def test_ingest_price_and_earnings_uses_price_client_when_given_separately_from_av(conn):
     # Regression test for the Alpha-Vantage-free-tier price-history gap
     # (outputsize='full' on TIME_SERIES_DAILY confirmed premium-only): a
-    # distinct `price_client` (e.g. StooqClient) must be used for price
+    # distinct `price_client` (EODHDClient in production) must be used for price
     # history instead of `av`, and `av` must not be touched for it at all.
     av = FakeAlphaVantage()
     av.get_daily = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("av.get_daily should not be called"))
@@ -185,7 +185,7 @@ def test_ingest_price_and_earnings_uses_price_client_when_given_separately_from_
 def test_ingest_price_and_earnings_warns_without_crashing_on_thin_history(conn):
     av = FakeAlphaVantage(ticker_bars=10, spy_bars=10, has_reported_earnings=False,
                            has_upcoming_estimate=False, has_calendar_entry=False)
-    result = ingest_price_and_earnings(conn, "ATI", AS_OF, av)
+    result = ingest_price_and_earnings(conn, "ATI", AS_OF, av, price_client=av)
 
     assert result["wrote"] == {
         "price_signal": False, "earnings_history": False, "estimate_snapshots": False, "earnings_calendar": False,
@@ -196,8 +196,8 @@ def test_ingest_price_and_earnings_warns_without_crashing_on_thin_history(conn):
 
 def test_ingest_price_and_earnings_calendar_dedups_on_repeated_runs(conn):
     av = FakeAlphaVantage()
-    ingest_price_and_earnings(conn, "ATI", AS_OF, av)
-    ingest_price_and_earnings(conn, "ATI", AS_OF, av)  # simulate a re-run
+    ingest_price_and_earnings(conn, "ATI", AS_OF, av, price_client=av)
+    ingest_price_and_earnings(conn, "ATI", AS_OF, av, price_client=av)  # simulate a re-run
     rows = conn.execute("SELECT * FROM earnings_calendar WHERE ticker = 'ATI'").fetchall()
     assert len(rows) == 1
 
@@ -237,6 +237,6 @@ def test_ingest_price_and_earnings_never_calls_mark_context_coverage(conn):
     # Regression test for the explicit-manual-step design decision: fetching
     # price/earnings data must NEVER mark context coverage as a side effect.
     av = FakeAlphaVantage()
-    ingest_price_and_earnings(conn, "ATI", AS_OF, av)
+    ingest_price_and_earnings(conn, "ATI", AS_OF, av, price_client=av)
     row = conn.execute("SELECT * FROM context_ingestion_coverage WHERE ticker = 'ATI'").fetchone()
     assert row is None

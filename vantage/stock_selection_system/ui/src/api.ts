@@ -1,6 +1,9 @@
 import type {
   AddManualCandidateResult,
+  BacktestResult,
+  BestStocksResult,
   CandidateRow,
+  EODHDTestResult,
   EpisodeDetail,
   EpisodeSummary,
   FetchCandidatesResult,
@@ -9,7 +12,6 @@ import type {
   InsufficientDataCase,
   MarkContextReviewedResult,
   RetryResult,
-  RunDemoResult,
   Stats,
   TradeIdeasFilters,
 } from "./types";
@@ -69,13 +71,6 @@ export function listInsufficientDataCases(params: { resolved?: boolean; ticker?:
   return request(`/api/insufficient-data-cases?${qs.toString()}`);
 }
 
-export function runDemo(asOfDate: string, seed: number): Promise<RunDemoResult> {
-  return request("/api/actions/run-demo", {
-    method: "POST",
-    body: JSON.stringify({ as_of_date: asOfDate, seed }),
-  });
-}
-
 export function retryInsufficientData(asOfDate: string): Promise<RetryResult> {
   return request("/api/actions/retry-insufficient-data", {
     method: "POST",
@@ -94,6 +89,13 @@ export function markContextReviewed(tickers: string[], asOfDate: string): Promis
   return request("/api/actions/mark-context-reviewed", {
     method: "POST",
     body: JSON.stringify({ tickers, as_of_date: asOfDate }),
+  });
+}
+
+export function testEODHD(ticker: string, asOfDate: string): Promise<EODHDTestResult> {
+  return request("/api/actions/test-eodhd", {
+    method: "POST",
+    body: JSON.stringify({ ticker, as_of_date: asOfDate }),
   });
 }
 
@@ -125,4 +127,22 @@ export function fetchTradeIdeas(asOfDate: string, filters: TradeIdeasFilters): P
     method: "POST",
     body: JSON.stringify({ as_of_date: asOfDate, ...filters }),
   });
+}
+
+export function fetchBestStocks(asOfDate: string): Promise<BestStocksResult> {
+  return request("/api/actions/fetch-beststocks", {
+    method: "POST",
+    body: JSON.stringify({ as_of_date: asOfDate }),
+  });
+}
+
+export function startBacktest(startDate: string, endDate: string, topN: number): Promise<{ job_id: string; status: string }> {
+  return request("/api/actions/run-backtest", {
+    method: "POST",
+    body: JSON.stringify({ start_date: startDate, end_date: endDate, top_n: topN }),
+  });
+}
+
+export function getBacktestStatus(jobId: string): Promise<{ job_id: string; status: string; progress?: Record<string, unknown>; result?: BacktestResult; error?: string }> {
+  return request(`/api/actions/run-backtest/${jobId}`);
 }

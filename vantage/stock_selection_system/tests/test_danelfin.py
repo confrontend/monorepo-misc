@@ -1,7 +1,9 @@
+from datetime import date
+
 import pytest
 import requests
 
-from src.ingestion.danelfin import DanelfinClient, _extract_trade_idea_items
+from src.ingestion.danelfin import DanelfinClient, _extract_best_stocks_items, _extract_trade_idea_items
 
 
 class _FakeResponse:
@@ -238,10 +240,49 @@ def test_get_trade_ideas_end_to_end_with_the_real_response_shape():
     session = _FakeTradeIdeasSession({0: REAL_TRADE_IDEAS_RESPONSE})
     client = DanelfinClient(api_key="secret", session=session)
     ideas = client.get_trade_ideas(limit=100)
-
     assert len(session.requests) == 1  # stopped after the one short page
     assert {i["ticker"] for i in ideas} == {"ATI", "HWM", "QQQ"}
 
+
+def test_extract_best_stocks_items_flattens_ranked_snapshot():
+    payload = {"2026-08-02": {"ATI": {"rank": 3, "aiscore": 8, "technical": 7, "fundamental": 9}}}
+    items = _extract_best_stocks_items(payload)
+    assert items == [{
+        "rank": 3, "aiscore": 8, "technical": 7, "fundamental": 9,
+        "ticker": "ATI", "date": "2026-08-02",
+    }]
+
+
+def test_get_best_stocks_uses_dedicated_endpoint_and_api_key():
+    class Session:
+        def __init__(self):
+            self.request = None
+
+        def get(self, url, headers=None, timeout=None):
+            self.request = (url, headers, timeout)
+            return _FakeResponse({"2026-08-02": {"ATI": {"rank": 1}}})
+
+    session = Session()
+    rows = DanelfinClient(api_key="secret", session=session).get_best_stocks()
+    assert rows[0]["ticker"] == "ATI"
+    assert session.request[0] == "https://apirest.danelfin.com/v3/beststocks"
+    assert session.request[1] == {"x-api-key": "secret"}
+
+
+def test_get_ranking_uses_historical_date_without_us_market_parameter():
+    class Session:
+        def __init__(self):
+            self.request = None
+
+        def get(self, url, headers=None, params=None, timeout=None):
+            self.request = (url, headers, params, timeout)
+            return _FakeResponse({"2024-01-02": {"ATI": {"aiscore": 9}}})
+
+    session = Session()
+    payload = DanelfinClient(api_key="secret", session=session).get_ranking(date(2024, 1, 2), request_delay_seconds=0)
+    assert payload["2024-01-02"]["ATI"]["aiscore"] == 9
+    assert session.request[0] == "https://apirest.danelfin.com/ranking"
+    assert session.request[2] == {"date": "2024-01-02"}
 
 def test_get_trade_ideas_raises_clearly_on_unrecognized_response_shape():
     session = _FakeTradeIdeasSession({0: []})

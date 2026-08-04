@@ -9,7 +9,7 @@ interface Props {
 
 export default function EpisodeList({ episodes, selectedId, onSelect }: Props) {
   if (episodes.length === 0) {
-    return <div className="empty-state">No episodes match the current filters yet. Try running the ATI demo.</div>;
+    return <div className="empty-state">No episodes match the current filters yet. Validate candidates from Candidate Intake.</div>;
   }
 
   return (

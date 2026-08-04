@@ -1,12 +1,5 @@
-import { useState } from "react";
-import { runDemo } from "../api";
 import EpisodesTable from "../components/EpisodesTable";
-import type { EpisodeSummary, RunDemoResult, Stats } from "../types";
-
-// as_of_date must be a real NYSE trading day (see TradingCalendar) -- 2026-02-02
-// is the date the synthetic ATI demo dataset (src/ingestion/seed_demo_data.py)
-// was built around, documented in the README, always a safe default.
-const DEMO_AS_OF_DATE = "2026-02-02";
+import type { EpisodeSummary, Stats } from "../types";
 
 interface Props {
   stats: Stats | null;
@@ -36,7 +29,6 @@ export default function DashboardPage({ stats, recentEpisodes, onSelectEpisode, 
             <span className="tag-dot" style={{ background: connected ? "var(--color-confirm-dot)" : "var(--color-reject-dot)" }} />
             {connected ? "API connected" : "API disconnected"}
           </span>
-          <DemoRunner onRunComplete={onRefresh} />
           <button type="button" className="btn btn-secondary" onClick={onRefresh} disabled={refreshing}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M8 16H3v5" />
@@ -64,50 +56,8 @@ export default function DashboardPage({ stats, recentEpisodes, onSelectEpisode, 
       <EpisodesTable
         episodes={recentEpisodes}
         onSelect={onSelectEpisode}
-        emptyMessage="No episodes yet. Try running the ATI demo, or fetch candidates from Candidate Intake."
+        emptyMessage="No episodes yet. Fetch candidates from Candidate Intake and validate them."
       />
-    </div>
-  );
-}
-
-function DemoRunner({ onRunComplete }: { onRunComplete: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-
-  async function handleRun() {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const result: RunDemoResult = await runDemo(DEMO_AS_OF_DATE, 42);
-      if (result.episode_id) {
-        setMessage({ kind: "success", text: `Created episode ${result.episode_id.slice(0, 8)}…` });
-      } else {
-        setMessage({ kind: "error", text: `Ran, but inputs were insufficient (${result.insufficient_data_cases?.length ?? 0} case(s)).` });
-      }
-      onRunComplete();
-    } catch (err) {
-      setMessage({ kind: "error", text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <button
-        type="button"
-        className="btn btn-secondary"
-        onClick={handleRun}
-        disabled={busy}
-        title="Runs the synthetic ATI demo end-to-end -- no API keys needed"
-      >
-        {busy ? "Running…" : "Run ATI demo"}
-      </button>
-      {message && (
-        <span style={{ fontSize: 12, color: message.kind === "success" ? "var(--color-confirm-fg)" : "var(--color-accent-700)", maxWidth: 220 }}>
-          {message.text}
-        </span>
-      )}
     </div>
   );
 }

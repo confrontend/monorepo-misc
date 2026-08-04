@@ -1,0 +1,11 @@
+{
+  "name": "seekingalpha-dev",
+  "private": true,
+  "description": "Orchestration only: runs the gmail-prototype frontend and gmail-backend API together for local development.",
+  "scripts": {
+    "dev": "concurrently -n frontend,backend -c blue,green \"npm run dev --prefix gmail-prototype\" \"WATCHFILES_FORCE_POLLING=true python -m uvicorn --app-dir gmail-backend app:app --reload --port 8000\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

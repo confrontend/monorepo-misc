@@ -106,12 +106,6 @@ export interface CandidateRow {
   direction: string | null;
 }
 
-export interface RunDemoResult {
-  episode_id: string | null;
-  report?: string;
-  insufficient_data_cases?: InsufficientDataCase[];
-}
-
 export interface RetryResult {
   resolved_episode_ids: string[];
   count: number;
@@ -195,7 +189,68 @@ export interface FetchTradeIdeasResult {
   failed_count: number;
 }
 
+export interface BestStockRow {
+  ticker: string;
+  rank: number | null;
+  ai_score: number | null;
+  technical_score: number | null;
+  fundamental_score: number | null;
+  sentiment_score: number | null;
+  low_risk_score: number | null;
+  perf_ytd: number | null;
+  source_date: string | null;
+}
+
+export interface BestStocksResult {
+  source: string;
+  as_of_date: string;
+  successful: string[];
+  failed: Record<string, string>;
+  stocks: BestStockRow[];
+  warnings: string[];
+}
+
+export interface BacktestTrade {
+  ticker: string;
+  score_date: string;
+  entry_date: string;
+  exit_date: string;
+  ai_score: number | null;
+  return: number;
+}
+
+export interface BacktestResult {
+  run_id: string;
+  config: { start_date: string; end_date: string; top_n: number; rebalance: string; entry: string; selection: string };
+  summary: { rebalance_periods: number; trades: number; portfolio_return: number; spy_return: number | null; excess_return: number | null };
+  trades: BacktestTrade[];
+  warnings: string[];
+  cache: { hits: number; misses: number };
+}
+
 export interface MarkContextReviewedResult {
   marked: string[];
   as_of_date: string;
+}
+
+export type EODHDTestStatus = "passed" | "missing" | "unsupported" | "rate_limited" | "authentication_failed" | "provider_error";
+
+export interface EODHDTestSection {
+  status: EODHDTestStatus;
+  data: Record<string, unknown> | null;
+  provider_response: unknown;
+  http_status?: number;
+  provider_diagnostics?: Record<string, unknown>;
+  endpoint?: string;
+  error?: string;
+}
+
+export interface EODHDTestResult {
+  ticker: string;
+  provider_symbols: { ticker: string; benchmark: string };
+  as_of_date: string;
+  tests: Record<string, EODHDTestSection>;
+  all_required_data_available: boolean;
+  warnings: string[];
+  errors: string[];
 }

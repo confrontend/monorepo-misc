@@ -22,6 +22,19 @@ Python 3.10+. Uses `pandas_market_calendars` (NYSE calendar, correctly
 handles weekends/holidays/exceptional closures) as the single shared
 trading-calendar source required by the spec.
 
+## Project progress and agent handoff
+
+Before changing the project, an agent should read [`progress.md`](progress.md).
+It is the running handoff log for work that has already happened: recent steps,
+files inspected or changed, decisions and their reasons, test results, known
+errors, and the next suggested step. This helps an agent continue from the
+current state instead of repeating completed investigation.
+
+`progress.md` is append-only. After every meaningful action, add a short entry
+with the date/time, action, files, decision, test result, unresolved items, and
+next step. Never delete or rewrite earlier entries, and never put API keys,
+tokens, passwords, or other secrets in the log.
+
 ## Run the tests
 
 ```bash
@@ -42,27 +55,6 @@ python -m pytest tests/ -v
 - Episode-trigger detection processing every pending trigger in one call
   (not just the earliest), including two distinct trigger events dated on
   the identical calendar day (`tests/test_episodes.py`).
-- Full end-to-end run on synthetic ATI data: score -> decide -> immutable
-  review -> entry pricing -> all four outcome horizons
-  (`tests/test_pipeline_ati_demo.py`).
-
-## Run the required ATI end-to-end demo
-
-The implementation prompt requires running the full pipeline end-to-end on
-ticker ATI first. Since this environment has no live Danelfin/Alpha Vantage
-API keys, the demo uses a deterministic, seeded synthetic dataset (a
-plausible ATI-like uptrend, a beat-and-raise earnings scenario, one
-guidance-raise Context event) instead:
-
-```bash
-python cli.py demo-ati --db /tmp/stock_selection.db --as-of 2026-02-02
-```
-
-This ingests the synthetic data, detects the `first_eligibility` trigger,
-scores all three groups, writes an immutable `reviews` row, records the entry
-price, fast-forwards through all four outcome horizons, and prints a
-human-readable report.
-
 ## UI
 
 A small dashboard (React + TypeScript, `ui/`) sits on top of a read/trigger
@@ -70,13 +62,12 @@ HTTP API (FastAPI, `api/main.py`) that wraps the existing `src/` modules --
 no decision logic lives in either layer. It shows the episode list (with
 ticker/decision filters), a detail panel per episode (score breakdown, entry
 price, all resolved outcome horizons, the same text report `cli.py report`
-prints), and the insufficient-data-cases queue. Two buttons trigger backend
-work directly from the browser: "Run ATI demo" (`run_ati_demo`, synthetic
-data, no API keys needed) and "Retry insufficient-data" (`retry_insufficient_data`).
+prints), and the insufficient-data-cases queue. The browser can trigger
+real-data ingestion, candidate discovery, and insufficient-data retries.
 
 A third control, "Live ingestion" (top right), fetches real price/earnings
-data for a comma-separated list of tickers instead of the synthetic demo --
-see "Live ingestion" below. A fourth control, "Candidates", is where
+data for a comma-separated list of tickers -- see "Live ingestion" below. A
+second control, "Candidates", is where
 candidate discovery lives: "Fetch Danelfin Trade Ideas" discovers eligible
 tickers automatically (no tickers to type in, with optional Market/Direction/
 Asset type/Min AI score/Result limit filters and a preview table of results),
@@ -112,30 +103,71 @@ Either way, open `http://localhost:5173`. The Vite dev server proxies
 setup needed in dev. `npm run build` produces a static `ui/dist/` you can
 serve separately if you want a single deployed artifact later.
 
-`api/main.py` is intentionally read-mostly: the two POST endpoints call
-existing, already-tested pipeline functions (`run_ati_demo`,
-`retry_insufficient_data`) rather than reimplementing anything. Running
+`api/main.py` is intentionally read-mostly: its POST endpoints call existing
+pipeline functions rather than reimplementing anything. Running
 `src.pipeline.run_daily_cycle()` against live data from the UI isn't wired
 up yet, since that requires a real `PriceDataSource` (see below) -- it's a
 natural next endpoint to add once one exists.
 
+When running in development, diagnostic events are also stored in the separate
+SQLite database `diagnostics/diagnostics.db`. This is only an operational log,
+separate from `stock_selection.db`; it retains 30 days of events and is
+gitignored. Console output is unchanged. Query it with, for example:
+
+```sql
+SELECT ts, level, logger_name, message, module, function, line, extra_json
+FROM diagnostic_events
+WHERE level = 'ERROR' AND ts >= '2026-08-02T00:00:00+00:00'
+ORDER BY ts;
+```
+
 ## Wiring up real data
 
 `src/ingestion/alpha_vantage.py` and `src/ingestion/danelfin.py` are ready to
-use once you have API keys. Copy `.env.example` to `.env` and fill in your
-keys:
+use once you have API keys. Create a local `.env` file and fill in your keys:
 
 ```bash
-cp .env.example .env
+touch .env
 # then edit .env:
 #   ALPHA_VANTAGE_API_KEY=...
 #   DANELFIN_API_KEY=...
+#   EODHD_API_KEY=...
 ```
 
-Both clients call `load_dotenv()` on import, so a `.env` file in this
-directory is picked up automatically -- no need to `export` anything by
-hand. `.env` is gitignored; only `.env.example` (with blank values) is
-committed.
+The clients call `load_dotenv()` on import, so `.env` is picked up
+automatically. `.env` is gitignored and must never be committed.
+
+## Proposed position monitoring and sell-candidate alerts
+
+The initial Danelfin suggestion and validation are not the end of the
+workflow. Once a validated episode leads to a human purchase, the position
+must continue to be monitored. A later disappearance from Danelfin's
+suggestion list, combined with deteriorating evidence in a newer episode,
+should create a **sell-candidate alert** linked to the original episode ID.
+
+The intended interpretation is:
+
+```text
+Danelfin suggestion + successful validation
+  -> Confirm decision -> human purchase
+  -> later successful Danelfin fetch no longer includes the ticker
+  -> newer episode shows deterioration
+  -> flag the position as a sell candidate for human review
+```
+
+Important rules for this future workflow:
+
+- A failed or rate-limited Danelfin fetch must not count as a disappearance.
+- A short absence should be monitored; a sustained absence (for example,
+  about 10 successful observation days) is meaningful evidence.
+- A sell-candidate alert must be a new, linked event. It must not rewrite the
+  original Confirm decision, entry, or outcome history.
+- The alert is a human-review signal, not an automatic sell order.
+- The exact persistence window, deterioration conditions, position record, and
+  alert lifecycle still need to be formalized before implementation.
+
+This is a proposed extension to the frozen specification, not behavior that
+the current implementation provides yet.
 
 `src/ingestion/base.py` has idempotent upsert helpers (`upsert_candidate`,
 `upsert_estimate_snapshot`, `upsert_earnings_history`, `upsert_price_signal`,
@@ -144,6 +176,14 @@ re-running ingestion for an already-ingested day is a safe no-op/update.
 `src/ingestion/manual_events.py` has manual-entry and CSV-import functions for
 `guidance_events`, `insider_purchases`, `material_events`, and
 `earnings_calendar` (per the spec, these start as manual/CSV entry points).
+
+## EODHD price integration and diagnostic
+
+The UI's **EODHD Test** page and `POST /api/actions/test-eodhd` endpoint run a
+separate, read-only provider diagnostic. It tests EODHD daily prices for the
+candidate and SPY, and reports provider capabilities and diagnostics. It never
+writes the database or runs scoring. Set `EODHD_API_KEY` in `.env` to run it;
+the diagnostic redacts the key from logs, errors, and returned payloads.
 
 For a live daily run across a watchlist, call `src.pipeline.run_daily_cycle()`
 with your own `PriceDataSource` (see below) from a scheduler.
@@ -154,27 +194,15 @@ With `.env` filled in (above), the UI's "Live ingestion" control (or
 `POST /api/actions/ingest-live`) fetches real data for a comma-separated
 ticker list and an as-of date, then runs the normal trigger-detection/scoring
 pipeline against it -- so a live-ingested ticker shows up under Episodes or
-Insufficient-Data-Cases the same way the ATI demo does. `src/ingestion/live.py`
+Insufficient-Data-Cases. `src/ingestion/live.py`
 is the orchestration layer, taking a separate client per concern:
-`src/ingestion/stooq.py` for daily price history, `src/ingestion/alpha_vantage.py`
-for earnings/estimates/calendar, `src/ingestion/danelfin.py` for candidates.
+`src/ingestion/eodhd.py` for daily price history, `src/ingestion/alpha_vantage.py`
+for earnings/estimates/calendar, and `src/ingestion/danelfin.py` for candidates.
 
-**Prices use Stooq with a keyless Yahoo Finance chart fallback
-(`src/ingestion/stooq.py` and `src/ingestion/yahoo.py`), not Alpha Vantage.**
-This was a live-verified correction made after
-an actual ingestion run against Alpha Vantage's free tier came back with
-`price_signals` unwritten: `TIME_SERIES_DAILY_ADJUSTED` is premium-only (as
-originally found), but so -- confirmed only after that real run failed -- is
-`outputsize=full` on the plain `TIME_SERIES_DAILY` endpoint. The free
-`outputsize=compact` size caps at ~100 sessions, under
-`required_inputs.py`'s `MIN_PRICE_HISTORY_TRADING_DAYS=200`, so `ma_200`
-(and therefore `price_signals` / the Market score) could never be computed
-from Alpha Vantage's free tier at all, no matter the parsing. Stooq's daily
-CSV has no such gate. Its exact response shape is Stooq's well-documented
-public format but wasn't independently re-verified live here (same sandbox
-network restriction that blocked Danelfin, below) -- `StooqClient.get_daily()`
-parses defensively and raises a clear error rather than silently returning
-wrong/empty data if the shape doesn't match.
+**Prices use EODHD.** EODHD is queried for both the candidate and SPY with a
+450-calendar-day window, then the application requires at least 200 trading
+bars before writing `price_signals` (including MA200). Alpha Vantage is not used
+for prices because its free daily endpoint cannot provide enough history.
 
 That same real run also surfaced two client bugs, now fixed (with regression
 tests in `tests/test_alpha_vantage.py`): Alpha Vantage's rate-limit/premium
@@ -189,10 +217,10 @@ source.
 What's live-verified vs. best-effort, from actually calling these APIs with
 real keys while building this:
 
-- **Stooq (`get_daily`)** -- daily OHLCV, feeds `price_signals`
-  (ma_50/ma_200/avg_volume_30d/return_3m/spy_return_3m). Response shape not
-  independently re-verified live (see above) -- defensive parsing, raises
-  clearly rather than guessing if it doesn't match.
+- **EODHD (`get_daily`)** -- daily OHLCV for the ticker and SPY, feeds
+  `price_signals` (ma_50/ma_200/avg_volume_30d/return_3m/spy_return_3m).
+  The client requests 450 calendar days and the live path requires 200
+  trading bars before writing the signal.
 - `EARNINGS` (Alpha Vantage, free tier) -- reported quarters only, feeds
   `earnings_history`.
 - `EARNINGS_ESTIMATES` (Alpha Vantage, free tier) -- gives *both* the
@@ -212,9 +240,8 @@ real keys while building this:
   `ingest_candidates()` (`src/ingestion/live.py`) is the place to fix.
 
 Alpha Vantage's free tier is 25 requests/day, 5/minute -- a single
-`ingest_price_and_earnings()` call already fires 4 Alpha Vantage requests
-(earnings/estimates/calendar, plus a shared one-time SPY-equivalent isn't
-needed since prices moved to Stooq) back-to-back with no throttling, so a
+`ingest_price_and_earnings()` call fires 3 Alpha Vantage requests
+(earnings/estimates/calendar) back-to-back with no throttling, so a
 handful of tickers in one run can burn most of a day's quota; a rate-limited
 response now raises clearly (see above) instead of silently looking like "no
 data."
@@ -437,13 +464,13 @@ src/price_source.py                 PriceDataSource interface (see "Design decis
 src/jobs/entry_price_job.py         Records entry opens once the session has opened
 src/jobs/outcome_tracking_job.py    Records 7/30/90/180-day open-to-close outcomes
 src/reports.py                      Human-readable report renderer
-src/pipeline.py                     Orchestration (run_daily_cycle, run_ati_demo)
-src/ingestion/                      Stooq / Alpha Vantage / Danelfin clients (incl. Trade Ideas
+src/pipeline.py                     Orchestration (run_daily_cycle)
+src/ingestion/                      EODHD / Alpha Vantage / Danelfin clients (incl. Trade Ideas
                                      discovery), live.py orchestration, candidate_selection.py
                                      (standalone Danelfin workflows), manual-event CSV import,
-                                     idempotent upserts, synthetic ATI demo seed
-tests/                              352 tests covering every module above
-cli.py                              init-db / demo-ati / report / fetch-trade-ideas /
+                                     idempotent upserts
+tests/                              Tests covering the modules above
+cli.py                              init-db / report / fetch-trade-ideas /
                                      select-candidates / add-manual-candidate commands
 api/main.py                         FastAPI read/trigger API over the same src/ modules
 ui/                                 React + TypeScript dashboard (Vite) -- see "UI" below
@@ -490,10 +517,10 @@ decision lives in code:
   observable), not the forced end of a fixed 5-day span. See
   `src/scoring.py:_find_qualifying_insider_cluster`.
 - **`decision_timestamp_utc` defaults to `as_of_date` + wall-clock time**, not
-  pure wall-clock `now()`, so that backtest/demo runs against a past
-  `as_of_date` don't accidentally push entry-price lookups months into the
-  future while still preserving the pre-open/post-open distinction that
-  matters for `next_market_open_after()`. See `src/episodes.py:_write_review`.
+  pure wall-clock `now()`, so historical as-of dates don't accidentally push
+  entry-price lookups months into the future while still preserving the
+  pre-open/post-open distinction that matters for `next_market_open_after()`.
+  See `src/episodes.py:_write_review`.
 
 ## Fixed after code review
 
@@ -554,11 +581,6 @@ Three follow-up review rounds caught eleven real issues, all fixed:
   message is built (the outgoing request itself still carries the real
   key, obviously -- only the error text is redacted). See
   `tests/test_alpha_vantage.py`.
-- **`.env.example` was excluded by a broader `.env*`-style ignore rule**
-  at the repository level, contrary to what the README told people to
-  commit. `stock_selection_system/.gitignore` now explicitly negates it
-  (`!.env.example`) so it survives even if a parent `.gitignore` ignores
-  `.env*` broadly.
 - **Two distinct same-day trigger events could still merge into one
   insufficient-data case.** The same-day-trigger fix above made
   `detect_episode_trigger()` event-identity-aware, but

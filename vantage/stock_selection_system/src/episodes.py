@@ -297,7 +297,7 @@ def _write_review(
         # actually about) while keeping a real-ish time-of-day component, so
         # next_market_open_after's pre-open/post-open branching stays
         # meaningful. In live usage as_of_date == today, so this is just
-        # "now." In backtest/demo usage where as_of_date is an arbitrary past
+        # "now." When as_of_date is an arbitrary past
         # date, this avoids stamping a historical decision with the wall-clock
         # *date*, which would silently send entry-price lookups months into
         # the future.

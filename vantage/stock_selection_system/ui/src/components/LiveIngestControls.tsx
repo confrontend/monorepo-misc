@@ -6,7 +6,7 @@ interface Props {
   onRunComplete: () => void;
 }
 
-// Live ingestion isn't gated by the trading-calendar check the demo/retry
+// Live ingestion isn't gated by the trading-calendar check the retry
 // actions have (it just filters price bars/estimates/calendar rows <= this
 // date, no validation) -- so, unlike RunControls' DEFAULT_AS_OF_DATE, today's
 // real date is a perfectly good default here.

@@ -2,8 +2,8 @@
 Danelfin client -- the eligibility-filter data source (Section 1: Danelfin is
 used ONLY as an eligibility filter, never scored, never counted as evidence).
 
-Requires DANELFIN_API_KEY in the environment. Not exercised by the test suite
-or the ATI demo. Per spec Section 14, "Danelfin/eligibility-source API field
+Requires DANELFIN_API_KEY in the environment. Per spec Section 14,
+"Danelfin/eligibility-source API field
 availability and free-tier limits must be reverified before the ingestion
 pipeline is built" -- get_candidate()/get_candidates()' response shape below
 remains a best-effort placeholder, unverified live (this environment's
@@ -17,6 +17,7 @@ what changed from the original guess.
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import date
@@ -31,6 +32,12 @@ load_dotenv()  # picks up DANELFIN_API_KEY from a .env file if present; a
 
 BASE_URL = "https://apirest.danelfin.com"
 TRADE_IDEAS_PATH = "/v3/trade-ideas"
+BEST_STOCKS_PATH = "/v3/beststocks"
+RANKING_PATH = "/ranking"
+RANKING_MIN_REQUEST_INTERVAL_SECONDS = 6.1
+RANKING_RATE_LIMIT_RETRY_DEFAULT_WAIT_SECONDS = 6.5
+
+logger = logging.getLogger(__name__)
 
 # Common wrapper keys tried, as a FALLBACK, when a Trade Ideas response is a
 # dict but doesn't match the live-confirmed shape below (e.g. a future API
@@ -146,6 +153,22 @@ def _extract_trade_idea_items(payload) -> list[dict]:
     )
 
 
+def _extract_best_stocks_items(payload) -> list[dict]:
+    """Flatten the documented {snapshot_date: {ticker: metrics}} shape."""
+    if not isinstance(payload, dict):
+        raise RuntimeError("unexpected Best Stocks response shape: expected an object")
+    items: list[dict] = []
+    for snapshot_date, tickers in payload.items():
+        if not isinstance(tickers, dict):
+            continue
+        for ticker, metrics in tickers.items():
+            if isinstance(metrics, dict):
+                items.append({**metrics, "ticker": ticker, "date": snapshot_date})
+    if not items:
+        raise RuntimeError("Best Stocks response contained no snapshot records")
+    return items
+
+
 class DanelfinClient:
     def __init__(self, api_key: Optional[str] = None, session: Optional[requests.Session] = None):
         self.api_key = api_key or os.environ.get("DANELFIN_API_KEY")
@@ -155,6 +178,7 @@ class DanelfinClient:
                 "api_key= explicitly before using DanelfinClient."
             )
         self.session = session or requests.Session()
+        self._last_ranking_request_at = 0.0
 
     def get_candidate(self, ticker: str, as_of: Optional[date] = None) -> dict:
         """Returns the eligibility-filter row for a SINGLE ticker:
@@ -291,6 +315,51 @@ class DanelfinClient:
                 time.sleep(request_delay_seconds)
 
         return TradeIdeasPartialResult(all_items, partial_error=partial_error)
+
+    def get_best_stocks(self) -> list[dict]:
+        """Return Danelfin's official 25-stock Best Stocks snapshot."""
+        headers = {"x-api-key": self.api_key}
+        resp = self.session.get(f"{BASE_URL}{BEST_STOCKS_PATH}", headers=headers, timeout=30)
+        resp.raise_for_status()
+        return _extract_best_stocks_items(resp.json())
+
+    def get_ranking(
+        self,
+        snapshot_date: date,
+        market: Optional[str] = None,
+        request_delay_seconds: float = RANKING_MIN_REQUEST_INTERVAL_SECONDS,
+    ) -> dict:
+        """Return one historical ranking, paced to avoid provider 429s."""
+        params = {"date": snapshot_date.isoformat()}
+        if market:
+            params["market"] = market
+        headers = {"x-api-key": self.api_key}
+        elapsed = time.monotonic() - self._last_ranking_request_at
+        if request_delay_seconds > 0 and elapsed < request_delay_seconds:
+            time.sleep(request_delay_seconds - elapsed)
+        self._last_ranking_request_at = time.monotonic()
+        resp = self.session.get(f"{BASE_URL}{RANKING_PATH}", headers=headers, params=params, timeout=30)
+        if getattr(resp, "status_code", None) == 429:
+            wait_seconds = RANKING_RATE_LIMIT_RETRY_DEFAULT_WAIT_SECONDS
+            retry_after = (getattr(resp, "headers", None) or {}).get("Retry-After")
+            if retry_after is not None:
+                try:
+                    wait_seconds = max(wait_seconds, float(retry_after))
+                except (TypeError, ValueError):
+                    pass
+            logger.warning(
+                "Danelfin historical ranking rate limited date=%s retry_after=%.1fs",
+                snapshot_date,
+                wait_seconds,
+            )
+            time.sleep(wait_seconds)
+            self._last_ranking_request_at = time.monotonic()
+            resp = self.session.get(f"{BASE_URL}{RANKING_PATH}", headers=headers, params=params, timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Danelfin ranking response was not an object")
+        return payload
 
     def _fetch_trade_ideas_page(self, headers: dict, params: dict) -> list[dict]:
         """Fetches and parses one Trade Ideas page. On an HTTP 429

@@ -183,7 +183,7 @@ def test_fetch_trade_ideas_requires_no_tickers_field_at_all(_isolated_db):
     assert "tickers" not in api_main.FetchTradeIdeasRequest.model_fields
     req = api_main.FetchTradeIdeasRequest(as_of_date=AS_OF)
     result = api_main.fetch_trade_ideas_endpoint(req)
-    assert result["filters"] == {}
+    assert result["filters"]["direction"] == "long"
 
 
 def test_fetch_trade_ideas_missing_danelfin_key_returns_400(monkeypatch):

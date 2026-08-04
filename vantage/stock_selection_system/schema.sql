@@ -254,7 +254,7 @@ ON reviews (resolved_from_audit_id);
 -- even on days where zero new events were found. Without this, check_required_inputs() cannot
 -- tell "we checked and there was genuinely no news" from "we never checked this window at all,"
 -- and would treat the latter as a valid 0-eligible Context signal -- exactly the "missing data
--- treated as neutral" failure Section 4 prohibits. Ingestion (or the demo seed) must call
+-- treated as neutral" failure Section 4 prohibits. Ingestion must call
 -- mark_context_coverage() after each check, even when it finds nothing to insert.
 CREATE TABLE IF NOT EXISTS context_ingestion_coverage (
     ticker TEXT PRIMARY KEY,
