@@ -52,6 +52,14 @@ const findLatestCompletedRun = (db: DatabaseSync, fingerprint: string, methodolo
     ORDER BY id DESC LIMIT 1
   `).get(fingerprint, methodologyVersion) as RunRow | undefined;
 
+// Cheap, read-only existence check (single indexed lookup, no computation) so the dev-server hook
+// can tell "a run for this exact pair already exists" from "a full snapshot needs to be computed
+// and written" *before* deciding whether to pay for the latter -- see vite.config.ts's
+// schedulePersistence(), which only defers to the expensive ensureRunForFingerprint() path when
+// this returns nothing.
+export const findExistingRun = (fingerprint: string, methodologyVersion: string): RunRow | undefined =>
+  findLatestCompletedRun(getDb(), fingerprint, methodologyVersion);
+
 // Even though the raw input JSON isn't duplicated into the database, keep enough of a fingerprint
 // trail that a stored result can always be traced back to what produced it: which files, how big,
 // and (via the ticker rows already being computed anyway) how many records each ticker carried.

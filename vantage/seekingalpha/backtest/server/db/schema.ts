@@ -175,21 +175,51 @@ CREATE TABLE IF NOT EXISTS rating_call_results (
 CREATE INDEX IF NOT EXISTS idx_rating_call_results_run ON rating_call_results (run_id, horizon_days);
 `;
 
-const ALL_STATEMENTS = [
-  CREATE_ANALYSIS_RUNS,
-  CREATE_TICKER_STRATEGY_RESULTS,
-  CREATE_OVERALL_RESULTS,
-  CREATE_STRONG_BUY_RESULTS,
-  CREATE_RATING_TIER_RESULTS,
-  CREATE_RATING_TIER_TICKER_RESULTS,
-  CREATE_RATING_TIER_WIN_RATES,
-  CREATE_RATING_SCORE_CORRELATION,
-  CREATE_RATING_ACCURACY_RESULTS,
-  CREATE_RATING_CALL_RESULTS,
+// Ordered, append-only list of schema migrations, tracked via SQLite's built-in `PRAGMA
+// user_version` integer (no extra table needed to store "which version am I"). Each entry upgrades
+// the database from its own array index to index + 1. Once a migration has shipped and could exist
+// on a real on-disk database, never edit or reorder it -- only ever append a new one, the same
+// append-only discipline already used for progress.md and for analysis_runs itself. This is what
+// lets an existing database be upgraded in place instead of requiring a full wipe whenever a table
+// or column changes.
+type Migration = { description: string; up: (db: DatabaseSync) => void };
+
+const migrations: Migration[] = [
+  {
+    description: 'initial schema: analysis_runs + one result table per tab',
+    up: (db) => {
+      [
+        CREATE_ANALYSIS_RUNS,
+        CREATE_TICKER_STRATEGY_RESULTS,
+        CREATE_OVERALL_RESULTS,
+        CREATE_STRONG_BUY_RESULTS,
+        CREATE_RATING_TIER_RESULTS,
+        CREATE_RATING_TIER_TICKER_RESULTS,
+        CREATE_RATING_TIER_WIN_RATES,
+        CREATE_RATING_SCORE_CORRELATION,
+        CREATE_RATING_ACCURACY_RESULTS,
+        CREATE_RATING_CALL_RESULTS,
+      ].forEach((statement) => db.exec(statement));
+    },
+  },
 ];
 
 export const applySchema = (db: DatabaseSync): void => {
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
-  ALL_STATEMENTS.forEach((statement) => db.exec(statement));
+
+  const currentVersion = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+  for (let index = currentVersion; index < migrations.length; index += 1) {
+    const migration = migrations[index];
+    db.exec('BEGIN');
+    try {
+      migration.up(db);
+      db.exec(`PRAGMA user_version = ${index + 1}`);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Migration ${index + 1} ("${migration.description}") failed: ${message}`);
+    }
+  }
 };

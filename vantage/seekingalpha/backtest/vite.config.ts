@@ -5,10 +5,16 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import type { AnalysisModule } from './server/analysisModule';
-import { ensureRunForFingerprint } from './server/db/runs';
+import { ensureRunForFingerprint, findExistingRun } from './server/db/runs';
+import { getMethodologyVersion, invalidateMethodologyVersionCache } from './server/db/methodologyVersion';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const dataDirectories = [path.join(projectRoot, 'input'), path.join(projectRoot, 'benchmark')];
+// The two files whose content determines "what gets computed and how it's stored" -- watched
+// directly (rather than relying on buildFingerprint(), which only looks at input/benchmark) so
+// that editing calculation or persistence logic invalidates the methodology identity even when no
+// input JSON file changed. See methodologyVersion.ts, which hashes these same two files.
+const methodologyWatchPaths = [path.join(projectRoot, 'src', 'data.ts'), path.join(projectRoot, 'server', 'db', 'runs.ts')];
 
 const buildFingerprint = async () => {
   const entries: string[] = [];
@@ -47,6 +53,61 @@ const analysisApiPlugin = (): Plugin => ({
     let analysisModule: AnalysisModule | null = null;
     const resultCache = new Map<string, unknown>();
     let lastRunId: number | null = null;
+    let persistenceInFlight = false;
+
+    // A data.ts or runs.ts edit changes the methodology identity but never touches an input JSON
+    // file, so buildFingerprint() alone would never notice it -- the module reload above and the
+    // persisted run below would both keep serving/recording stale results indefinitely. Forcing
+    // analysisModule to null makes the next request's `!analysisModule` check reload it regardless
+    // of whether the fingerprint changed; invalidating the methodology cache makes that reload
+    // resolve to the *current* on-disk hash rather than whatever was first computed this process.
+    server.watcher.add(methodologyWatchPaths);
+    server.watcher.on('change', (file) => {
+      if (!methodologyWatchPaths.includes(file)) return;
+      invalidateMethodologyVersionCache();
+      analysisModule = null;
+    });
+
+    // Full-grid persistence (writeSnapshot in runs.ts) recomputes and writes every tab, which is
+    // the expensive part of a fingerprint/methodology change -- measured at ~10s cold, see
+    // progress.md. Running it synchronously inside loadAnalysis() blocked whichever request
+    // happened to trigger the reload (and, being single-threaded, every other request that arrived
+    // during it) for that whole duration. schedulePersistence() instead does a cheap existence
+    // check up front, and only defers to the expensive write via setImmediate -- after the
+    // triggering request's own response has already been sent -- when no run exists yet for this
+    // exact (fingerprint, methodology) pair. This does not add real parallelism (Node is still one
+    // thread, so a request arriving *during* that background write still waits its turn) -- it only
+    // moves the cost off the triggering request. True concurrency would need worker_threads, which
+    // is deliberately out of scope here.
+    const schedulePersistence = (analysis: AnalysisModule, fingerprint: string) => {
+      let methodologyVersion: string;
+      try {
+        methodologyVersion = getMethodologyVersion();
+      } catch (error) {
+        console.error('[analysis-db] failed to read methodology version:', error);
+        return;
+      }
+
+      const existing = findExistingRun(fingerprint, methodologyVersion);
+      if (existing) {
+        lastRunId = existing.id;
+        return;
+      }
+      if (persistenceInFlight) return;
+
+      lastRunId = null;
+      persistenceInFlight = true;
+      setImmediate(() => {
+        try {
+          const run = ensureRunForFingerprint(analysis, fingerprint);
+          lastRunId = run.id;
+        } catch (error) {
+          console.error('[analysis-db] failed to persist analysis run:', error);
+        } finally {
+          persistenceInFlight = false;
+        }
+      });
+    };
 
     const loadAnalysis = async () => {
       const fingerprint = await buildFingerprint();
@@ -60,15 +121,8 @@ const analysisApiPlugin = (): Plugin => ({
         // (fingerprint, methodology) pair into SQLite, alongside (not instead of) the existing
         // in-memory cache above, which keeps serving /api/analysis exactly as before. A DB problem
         // here is logged, not thrown -- persistence is a side effect, it should never take the
-        // live app down. ensureRunForFingerprint() is itself idempotent (reuses an already-
-        // completed run for the same fingerprint+methodology instead of recomputing), so calling
-        // it on every fingerprint change is cheap once a run for that pair already exists.
-        try {
-          const run = ensureRunForFingerprint(analysisModule, fingerprint);
-          lastRunId = run.id;
-        } catch (error) {
-          console.error('[analysis-db] failed to persist analysis run:', error);
-        }
+        // live app down.
+        schedulePersistence(analysisModule, fingerprint);
       }
       return { analysis: analysisModule, fingerprint, runId: lastRunId };
     };
