@@ -1,0 +1,1 @@
+seekingalpha/backtest/input/3-year/single/archive/*.zip filter=lfs diff=lfs merge=lfs -text
