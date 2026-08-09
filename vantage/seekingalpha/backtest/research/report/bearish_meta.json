@@ -1,0 +1,170 @@
+{
+  "generated_at": "2026-08-08T22:41:06+00:00",
+  "spec": "research/BEARISH_PRESPEC.md",
+  "prior_exploratory_evidence_known": true,
+  "dataset": {
+    "tickers": 700,
+    "price_rows": 515174,
+    "rating_events": 27475,
+    "price_start": "2023-07-31",
+    "price_end": "2026-08-07",
+    "spy_start": "1993-01-29",
+    "spy_end": "2026-08-03",
+    "spy_days": 8434
+  },
+  "universe_audit": {
+    "global_end": "2026-08-07",
+    "stale_days": 30,
+    "tickers_total": 700,
+    "early_end_count": 1,
+    "early_end_tickers": [
+      {
+        "ticker": "zztest",
+        "last_date": "2025-02-24"
+      }
+    ],
+    "likely_fixture_tickers": [
+      "zztest"
+    ],
+    "real_early_end_count": 0
+  },
+  "thresholds": {
+    "min_clusters": 15,
+    "discovery_t": 3.0,
+    "alpha": 0.05,
+    "bootstrap_reps": 4999
+  },
+  "execution": {
+    "entry": "first available stock session strictly after the signal date",
+    "holds": "calendar days",
+    "incomplete_horizons": "dropped; never shortened to the last available price",
+    "overlap": "one open trade per ticker per cell",
+    "costs": "gross; adjusted prices include dividend/split economics, but borrow fees, locate availability, slippage, commissions, margin and forced buy-ins are not modeled"
+  },
+  "families": {
+    "transition": {
+      "correction_scope": 12,
+      "holds": [
+        "30d",
+        "90d",
+        "180d"
+      ],
+      "signals": [
+        "sell_or_strong_sell",
+        "strong_sell_only"
+      ],
+      "outcomes": [
+        "raw_short",
+        "spy_hedged_short"
+      ],
+      "summary": {
+        "tests_total": 12,
+        "tests_testable": 12,
+        "tests_clearing_bar": 5
+      },
+      "top_candidate": {
+        "family": "transition",
+        "lookback": null,
+        "hold": "180d",
+        "signal": "sell_or_strong_sell",
+        "outcome": "raw_short",
+        "candidate_signals": 3263,
+        "incomplete_trades": 177,
+        "overlap_skipped": 2159,
+        "testable": true,
+        "mean": -0.14731167482197752,
+        "median": -0.12664411301676437,
+        "positive_rate": 0.24487594390507011,
+        "stock_fell_rate": 0.24487594390507011,
+        "underperformed_spy_rate": 0.48975188781014023,
+        "t": -13.378547608520376,
+        "p": 0.0002,
+        "n": 927,
+        "g": 468,
+        "ci_low": -0.1664001510135539,
+        "ci_high": -0.12944543685753665,
+        "holm_p": 0.0024000000000000002,
+        "bh_p": 0.00048000000000000007,
+        "discovered_rule": true,
+        "drop_reasons": {
+          "incomplete_horizon": 172,
+          "missing_benchmark_price": 4,
+          "no_next_session": 1
+        },
+        "placebo": {
+          "outcome": "raw_short_return",
+          "observed_mean": -0.14731167482197752,
+          "random_median": -0.16113680772501596,
+          "random_p5": -0.18331006080355877,
+          "random_p95": -0.14194328588115182,
+          "empirical_p": 0.25487256371814093,
+          "simulations": 2000
+        }
+      }
+    },
+    "persistence": {
+      "correction_scope": 48,
+      "lookbacks": [
+        "3mo",
+        "6mo",
+        "12mo",
+        "18mo"
+      ],
+      "holds": [
+        "30d",
+        "90d",
+        "180d"
+      ],
+      "signals": [
+        "sell_or_strong_sell",
+        "strong_sell_only"
+      ],
+      "outcomes": [
+        "raw_short",
+        "spy_hedged_short"
+      ],
+      "summary": {
+        "tests_total": 48,
+        "tests_testable": 18,
+        "tests_clearing_bar": 2
+      },
+      "top_candidate": {
+        "family": "persistence",
+        "lookback": "3mo",
+        "hold": "180d",
+        "signal": "sell_or_strong_sell",
+        "outcome": "raw_short",
+        "candidate_signals": 218,
+        "incomplete_trades": 15,
+        "overlap_skipped": 11,
+        "testable": true,
+        "mean": -0.15052430326643595,
+        "median": -0.127876992442437,
+        "positive_rate": 0.3229166666666667,
+        "stock_fell_rate": 0.3229166666666667,
+        "underperformed_spy_rate": 0.453125,
+        "t": -5.566481777558507,
+        "p": 0.0002,
+        "n": 192,
+        "g": 159,
+        "ci_low": -0.19823026009636063,
+        "ci_high": -0.10606814876159971,
+        "holm_p": 0.009600000000000001,
+        "bh_p": 0.0048000000000000004,
+        "discovered_rule": true,
+        "drop_reasons": {
+          "incomplete_horizon": 15
+        },
+        "placebo": {
+          "outcome": "raw_short_return",
+          "observed_mean": -0.15052430326643595,
+          "random_median": -0.12795009147502678,
+          "random_p5": -0.17717476145688615,
+          "random_p95": -0.09130409115440248,
+          "empirical_p": 0.4217891054472764,
+          "simulations": 2000
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="status" id="status" data-live="false">
+      <span class="lamp" aria-hidden="true"></span>
+      <span class="state" id="stateText">Idle</span>
+      <button class="power" id="toggle" type="button" aria-pressed="false">Start capture</button>
+    </header>
+
+    <main>
+      <section class="field">
+        <label class="cap" for="pattern">URL pattern</label>
+        <div class="literal">
+          <span class="slash">/</span>
+          <input id="pattern" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="api\.example\.com/v2/orders" />
+          <span class="slash">/</span>
+          <input id="flags" class="flags" type="text" spellcheck="false" maxlength="4" value="i" />
+        </div>
+        <p class="hint" id="hint">Matched against the full response URL.</p>
+      </section>
+
+      <section class="opts">
+        <label class="opt"><input type="checkbox" id="replaceOnRecapture" /><span>Replace rows when a key is captured again</span></label>
+        <label class="opt"><input type="checkbox" id="toast" /><span>Flash a confirmation on the page for each save</span></label>
+        <label class="opt"><input type="checkbox" id="autoDownload" /><span>Also drop a raw .json per capture in Downloads</span></label>
+        <label class="opt sub"><input type="checkbox" id="prettyPrint" /><span>Indent those files</span></label>
+      </section>
+
+      <section class="stats">
+        <div class="stat"><b id="rowCount">0</b><span class="cap">rows</span></div>
+        <div class="stat"><b id="tickerCount">0</b><span class="cap">tickers</span></div>
+        <div class="stat"><b id="keyCount">0</b><span class="cap">keys</span></div>
+      </section>
+
+      <section class="log">
+        <div class="logHead"><span class="cap">Captured</span></div>
+        <ul id="list" class="list"></ul>
+        <p class="empty" id="empty">Nothing yet. Turn capture on and browse.</p>
+      </section>
+    </main>
+
+    <footer>
+      <div class="btnrow">
+        <button class="ghost" id="exportCsv" type="button">CSV</button>
+        <button class="ghost" id="exportJson" type="button">Rows JSON</button>
+        <button class="ghost" id="exportRaw" type="button">Raw</button>
+        <button class="ghost danger" id="clear" type="button">Clear</button>
+      </div>
+      <p class="note" id="note"></p>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

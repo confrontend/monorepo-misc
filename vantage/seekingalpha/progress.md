@@ -662,3 +662,529 @@
 - Test result: `npx tsc -b` clean; `npx vite build` clean (197.97 kB / 60.09 kB gzip, unchanged). Live-server validation (via a scratch Vite config pointed at an alternate `cacheDir`, to route around this sandbox's known FUSE delete-lock on `node_modules/.vite`, not a code issue): cold `meta` request after a real fingerprint/methodology change returned in ~3.5s with `runId: null` (previously ~9.94s blocking) while the full snapshot wrote in the background; a request arriving *during* that background write queued as expected (~14.6s), confirming the documented residual limit; a later request returned the populated `runId`. Editing `data.ts` with real new content (not just a touch) produced a new `methodology_version` and a new run (`id 4`, same fingerprint as the still-`completed` `id 3`) without any input JSON file changing — confirms the staleness fix. `PRAGMA user_version` on the real, already-populated `.data/analysis.sqlite` (4 runs) read back as `1` after the migration ran, i.e. upgraded in place with no wipe. `src/data.ts` was restored byte-for-byte after the test edit (md5sum verified identical to the pre-test backup).
 - Errors or unresolved items: The 5 Medium/deployment findings from the same review (fingerprint is path/size/mtime not content, storage growth ~42MB/20MB WAL for a handful of runs, no DB close/checkpoint on shutdown, DB is write-only with no read API, dev-server-only integration plus `node:sqlite`'s `ExperimentalWarning`) were confirmed valid but intentionally left unfixed per the user's explicit scope choice (High findings only, this pass). Concurrent-request queuing during a background snapshot write is a known, documented residual limitation of the `setImmediate` approach, not a bug — resolving it fully would need `worker_threads` or moving persistence out of the Vite dev-server process entirely.
 - Next step: If/when the user wants the remaining 5 findings addressed: content-hash the input fingerprint, add a retention/pruning policy plus `points_json`/`detail_json` size reduction, add `close()`/`wal_checkpoint` on process shutdown signals, add read-only endpoints for listing/inspecting past runs, and reconsider deployment scope (or soften the `node:sqlite` stability language in comments) if the app ever needs to run outside `npm run dev`.
+
+- Date and time: 2026-08-04 (America/Vancouver)
+- Step completed: Evaluated a 13-phase methodology-rigor review (plus its underlying "Consolidated Methodology" research doc) end to end, recommended the highest-leverage subset for this app's actual scale (26 tickers), then implemented all 6 agreed items at the user's explicit direction: (1) market-adjust the event-based call test against SPY, (2) split "was the original rating right at a fixed horizon" (predictive accuracy) from "would a rating-follower's position have been right" (strategy-style, exits on rating change) into two separate tests instead of one hybrid, (3) ticker-cluster bootstrap confidence intervals as the primary interval (Wilson kept as descriptive-only), (4) per-rating-tier breakdown (Strong Buy/Buy/Hold/Sell/Strong Sell, never merged) plus a ticker-weighted hit rate, (5) Strong Buy outlier/concentration diagnostics (trimmed/winsorized/geometric mean, top 1%/5%/10% profit contribution, leave-one-ticker-out range, an explicit outlier-sensitivity flag), (6) a versioned, frozen `MethodologyConfig` object saved on every DB run alongside its methodology hash.
+- Files inspected or changed: `backtest/src/data.ts` (largest change — added `METHODOLOGY_CONFIG`/`getMethodologyConfig`, `marketReturnBetween`, seeded `mulberry32`/`bootstrapHitRateCI`, shared `buildEpisodeStarts`/`aggregateCallStats`, rewrote `buildRatingCallSummary`, added `buildPredictiveAccuracySummary`, rewrote `buildStrongBuyTrustResults`, added `buildStrongBuyOutlierAnalysis`, and replaced the O(n) linear-scan `quoteOnOrBefore` with a cached-timestamp binary search), `backtest/server/analysisModule.ts`, `backtest/vite.config.ts` (meta/accuracy/strongBuy action wiring), `backtest/server/db/schema.ts` (new migration: `methodology_config_json` column, `predictive_accuracy_results` + `strong_buy_outlier_results` tables, bootstrap/tier columns on `rating_call_results`), `backtest/server/db/runs.ts` (writeSnapshot persists both new tables + methodology config), `backtest/src/api.ts`, `backtest/src/App.tsx` (new `PredictiveAccuracyConclusion`, `TierBreakdownTable`, `StrongBuyOutlierPanel`, `MethodologyNote` components; reframed the existing conclusion as an explicitly secondary/exploratory strategy-style comparison), `backtest/src/styles.css`, `backtest/.gitignore`.
+- Decision made and reason: Recommended (and the user approved) all 6 items rather than a narrower subset, since they were flagged as the highest-accuracy-impact items in the review and reuse existing infrastructure (SPY benchmark lookups, the DB migration system built in the prior task) rather than requiring new dependencies or a service layer. Deliberately did NOT implement the review's other ~7 phases (wild cluster bootstrap-t, mixed-effects models, calendar-block bootstrap, Reality Check/SPA multi-strategy correction, full economic-strategy Sharpe/Sortino buildout, the 13-phase UI reorg, final-evidence-gates tab) — those add diminishing value at 26 tickers per the review's own power analysis, which was explicitly communicated to the user before implementation began.
+- Agent name and model: Claude Sonnet 5 (Cowork)
+- Test result: `npx tsc -b` clean; `npx vite build` clean (206.34 kB / 62.12 kB gzip, up from 197.97 kB pre-change). Live dev-server validation against the real 26-ticker dataset (via a scratch Vite config pointing `cacheDir` elsewhere, routing around this sandbox's known FUSE lock on `node_modules/.vite`): predictive-accuracy hit rate at 90 days is 51.9% (648 scored episodes, Wilson CI 48.0-55.7%, bootstrap CI 45.3-57.8% — visibly wider, confirming ticker clustering matters), while the market-adjusted strategy-style test dropped to 40.3% hit rate (655 calls) — a materially different and more informative result than the pre-change ~50.3% absolute-return figure, consistent with the review's core prediction that a rising market was inflating the old bullish hit rate. Per-tier breakdown correctly surfaced historical Buy (176 episodes/23 tickers) and Strong Sell (63 episodes/11 tickers) data even though no ticker is *currently* rated Buy or Strong Sell. Strong Buy outlier analysis on real data: raw mean +4.96% vs. 10% trimmed mean -0.04% (sign flip) and the top 10% of trades account for 84.5% of total profit — `outlierSensitive: true` with both reasons correctly triggered, closely matching (and formalizing) the by-hand spreadsheet check from an earlier review. Methodology config correctly served on `meta` and persisted per run.
+- Errors or unresolved items: Found and fixed a real performance bug introduced by items 1/2/5: `quoteOnOrBefore` (used by the new `marketReturnBetween` on every scored call/episode/trade) was an O(n) linear scan re-parsing date strings on every element, against SPY's full multi-year cached quote history — cheap when called a few times per window, but the accuracy endpoint hung/timed out once called hundreds of times per request. Replaced with a `WeakMap`-cached timestamp array plus binary search; confirmed via `curl` timing that this brought the endpoint back to sub-second once the background snapshot write had settled. The background full-snapshot persistence job itself (writeSnapshot in runs.ts, computing 2 call summaries with 6 bootstrap runs each across 4 horizons) is now noticeably slower than the ~10s baseline measured for the prior High-severity fix — a live request that lands *during* that window still queues behind it per the already-documented single-thread limitation; not re-measured precisely this session, flagged as a follow-up if it becomes noticeable in practice. `dist_verify`/`dist_verify2` build-validation folders hit the same pre-existing FUSE deletion quirk as `.data/` and could not be removed from this sandbox; added `dist_verify*/` to `.gitignore` and left them in place (harmless, not expected on the user's Windows machine).
+- Next step: If background-snapshot duration becomes a practical annoyance, consider reducing bootstrap repetitions for the snapshot-write path specifically (UI-facing requests could still use the full 5000) or moving persistence to `worker_threads` (previously flagged as out of scope). Otherwise, the natural next items from the original review are the ones already deferred: pre-registering a primary hypothesis family with Holm/Benjamini-Hochberg correction, and eventually the economic-strategy Sharpe/Sortino/turnover buildout if the "was it tradeable" question becomes a priority again.
+
+- Date and time: 2026-08-04 21:03 -07:00 (America/Vancouver)
+- Step completed: Added a standalone, idempotent importer for every JSON file under `backtest/input/3-year`. It recognizes the historical-price and ticker-change response formats, maps every currently observed field into typed columns, and also retains each raw record plus its complete included/meta payload and source-file SHA-256 so unanticipated fields are not lost.
+- Files inspected or changed: `backtest/input/3-year/*.json` (read-only shape/count audit), `backtest/scripts/import-3-year-data.mjs` (new importer and two-table schema), `backtest/package.json` (new `npm run import:3-year` command), `progress.md` (this entry).
+- Decision made and reason: Used two new tables in the existing local SQLite database, `historical_prices` and `ticker_changes`, as requested. The Seeking Alpha API record ID is each table's primary key and imports use upserts, making repeated runs safe while resolving duplicate records found across source files. Kept typed columns for convenient SQL analysis and JSON/provenance columns for lossless auditability.
+- Agent name and model: Codex (GPT-5)
+- Test result: Syntax check passed; dry-run validated all 360 JSON files (183 historical and 177 ticker-change), finding 135,929 historical source rows / 135,174 unique IDs and 4,605 ticker-change source rows / 4,584 unique IDs, with 3 valid empty ticker-change files and no ignored JSON files. Full import into a temporary SQLite database produced 135,174 historical rows across 182 ticker IDs and 4,584 ticker-change rows across 173 ticker IDs; running it a second time left counts unchanged. `npm.cmd run build` passed. The temporary verification database was removed after testing.
+- Errors or unresolved items: Node 22 prints its expected `node:sqlite` ExperimentalWarning. The production `backtest/.data/analysis.sqlite` was deliberately not modified during verification; the user must run the import command when ready.
+- Next step: Run `npm run import:3-year` from `backtest`; rerun the same command whenever source files are added or changed.
+
+- Date and time: 2026-08-04 (America/Vancouver)
+- Step completed: Reviewed `scripts/import-3-year-data.mjs` at the user's request ("look at ... import-3-year-data.mjs") and independently re-validated it against the real 360-file `input/3-year/` dataset, without being asked to build anything further yet.
+- Files inspected or changed: `backtest/scripts/import-3-year-data.mjs`, `backtest/package.json` (read-only review); ran `node scripts/import-3-year-data.mjs --dry-run` and a real import to a scratch DB path (`/tmp/fresh-import-test.sqlite`, removed after); no application files changed.
+- Decision made and reason: Confirmed the importer's design is sound: resolves ticker ID -> slug/name via each file's JSON:API `included` block rather than trusting filenames (correct, since ticker_change filenames are inconsistently truncated by the source tool, e.g. `...slugs-bma-f.json`), computes a SHA-256 of each source file's raw content for provenance, and upserts by the API's own record `id` so reruns are idempotent. Did not attempt to change or extend it since the user only asked to look at it.
+- Agent name and model: Claude Sonnet 5 (Cowork)
+- Test result: Dry-run reproduced Codex's numbers exactly: 183 historical-price files / 135,929 source rows / 135,174 unique IDs; 177 ticker-change files / 4,605 source rows / 4,584 unique IDs; 3 valid empty ticker-change files (tickers with zero rating changes across the 1,102-day window); 0 ignored files. A real import to a scratch DB path succeeded and spot-checked correctly: BMA alone has 21 real rating-change events between 2025-02-28 and 2026-06-05, oscillating across neutral/bullish/bearish/very_bullish/very_bearish, and 755 daily price rows from 2023-07-31 to 2026-08-03 -- roughly 3x the ~2-year window and 10x the ticker count (182 tickers with price history, 173 with rating-change history) of the original 26-ticker `input/` set.
+- Errors or unresolved items: Running the import against the real `backtest/.data/analysis.sqlite` failed with `disk I/O error` in this sandbox -- confirmed (via the same import succeeding immediately against a fresh path outside the FUSE-mounted project folder) that this is the same pre-existing FUSE/WAL limitation already on record for this environment, not a script defect; expected to work fine on the user's actual machine. Also worth noting for whoever writes the eventual `data.ts` consumer: `ticker_changes.new_rating`/`previous_rating` includes `null` and `"-"` values in addition to the 5 expected tiers (`very_bullish`/`bullish`/`neutral`/`bearish`/`very_bearish`) and will need the same kind of whitelist guard `isUsableRecord` already applies to the original dataset's "Not Covered" artifact. Separately, `backtest/.data/analysis.sqlite` has grown to ~346 MB (+216 MB WAL) from this session's repeated methodology-version churn during validation -- worth a fresh `.data/` (or at least a WAL checkpoint) before running the real 3-year import, unrelated to the importer itself.
+- Next step: This importer only stages the raw API data into two new SQLite tables (`historical_prices`, `ticker_changes`) -- it does not yet feed the app's `data.ts` analysis pipeline. If the 270-ticker dataset is meant to expand (or replace) the current 26-ticker sample used throughout the Rating-accuracy/Strong-Buy/tiers views, that is a separate, not-yet-started task: a new loader mapping the SA rating taxonomy to the app's `Rating` type and reconciling the rating-change event log against the daily price series into the existing episode model. Not started; awaiting direction.
+
+- Date and time: 2026-08-04 (America/Vancouver)
+- Step completed: Built the loader the previous entry described and wired it into the Rating accuracy and Strong Buy tabs only, per explicit user direction ("wire it into Rating accuracy + Strong Buy first"). `data.ts` now reads `input/3-year/*.json` directly (via `import.meta.glob`, the same pattern already used for `input/*.json` and `benchmark/*.json`) rather than depending on the separate SQLite staging tables from the prior entry's importer, so no extra manual step is needed to use it in the live app.
+- Files inspected or changed: `backtest/src/data.ts` (added the `input/3-year` loader: JSON:API parsing, ticker ID -> slug/name resolution via each file's `included` block, a `SA_RATING_MAP` for the `very_bullish...very_bearish` taxonomy, per-ticker rating-timeline forward-fill from the change-event log onto the daily `div_adj_factor`-adjusted price series, and `extendedDatasets` -- the original 27 tickers plus every 3-year ticker with usable rating-change history, deduped in favor of the 3-year version on overlap; `buildEpisodeStarts` now takes its dataset source as a parameter instead of a hardcoded reference; `buildTickerAccuracy`, `buildRatingCallSummary`, `buildPredictiveAccuracySummary`, and `buildStrongBuyTrustResults` now read `extendedDatasets`; `METHODOLOGY_CONFIG.minimumEvidenceNotes` is now computed from the real dataset sizes instead of a hardcoded "26 tickers" string), `backtest/vite.config.ts` (`input/3-year` added to `buildFingerprint()`'s watched directories, which previously only hashed `input/` and `benchmark/` non-recursively and would never have noticed 3-year files changing), `backtest/.gitignore` (added `probe-scratch*.mjs`, a validation-script pattern that hit the same FUSE deletion limitation as `dist_verify*/`).
+- Decision made and reason: Deliberately did NOT touch `buildTickerResults`, `buildAggregateResults`, `buildCohortResults`, `buildTickerCohortResults`, `buildTierWinRates`, or `buildScoreCorrelation` -- those still read the original, smaller `datasets` -- matching the user's explicit "Rating accuracy + Strong Buy first" scoping rather than silently expanding every tab at once. Tickers before a ticker's first recorded rating change are treated as left-truncated using that change's `previousRating` as a best-available stand-in (mirrors the existing left-truncation handling for the original dataset's first episode per ticker), since the change-event feed itself only covers a fixed ~3-year window and cannot say what the rating was before that. The 3 tickers with zero recorded changes in that window are excluded entirely (no rating information exists for them here). `null`/`"-"` rating values are filtered the same way the original dataset's "Not Covered" artifact already is.
+- Agent name and model: Claude Sonnet 5 (Cowork)
+- Test result: `npx tsc -b` clean; `npx vite build` clean (206.34 kB / 62.12 kB gzip, unchanged -- confirms `data.ts` is SSR-only and never reaches the client bundle). Live validation used a standalone script driving Vite's `createServer`/`ssrLoadModule` API directly (bypassing the HTTP layer and its DB persistence, to isolate the new data logic from an unrelated DB issue noted below): SSR module load with the 3-year data took ~3.6s (one-time cost per methodology/fingerprint change, already cached afterward); `extendedDatasets` resolved to 187 tickers (27 original + 160 net-new after dedup). `buildPredictiveAccuracySummary(90)` ran in 232ms over 2,995 scored episodes: 48.7% hit rate, bootstrap CI 46.1-51.4% (crosses 50%, still no demonstrated edge, but now with ~4.6x the scored episodes of the 27-ticker run). Per-tier breakdown, previously thin, is now well populated: Strong Buy 835 scored/154 tickers at 44.9% hit rate, Buy 1,126/158 tickers at 47.7%, Sell 773/124 tickers at 52.1%, Strong Sell 261/72 tickers at 55.6% -- bearish tiers modestly outperforming bullish tiers, market-adjusted, a pattern invisible in the original 27-ticker sample (which had almost no Strong Sell coverage). `buildRatingCallSummary(90)` (strategy-style): 3,145 calls, 40.4% hit rate, bootstrap CI 38.6-42.4% -- now decisively below 50% with the larger sample, versus a wider, less conclusive interval before. Strong Buy outlier analysis: 854 completed trades / 151 tickers, raw mean +1.23% vs. 10% trimmed mean -0.34% (sign flip persists), top 10% of trades = 81.8% of profit -- same outlier-sensitive conclusion as the 27-ticker run, now on a much larger base.
+- Errors or unresolved items: The real `backtest/.data/analysis.sqlite` in this sandbox now returns `disk I/O error` on open/read, not just write -- confirmed via the standalone SSR probe that this is unrelated to the new data logic (which works correctly) and is instead the same pre-existing FUSE limitation, likely compounded by an interrupted write from an earlier session in this same conversation (the direct `import-3-year-data.mjs` attempt against this file, and/or the file's ~560 MB accumulated size from repeated validation runs). This means `npm run dev` against the *current* `.data/analysis.sqlite` in this sandbox would currently 500 on every request until that file is reset; not expected to reproduce on the user's machine, but the user should delete `backtest/.data/` before their next `npm run dev` regardless, both for this reason and because of the size already flagged in the prior entry. `probe-scratch.mjs`, `probe-scratch2.mjs`, and `dist_verify3/` could not be removed from this sandbox (same FUSE deletion quirk documented repeatedly above) and are left in place, gitignored, harmless.
+- Next step: Delete `backtest/.data/` (or at minimum confirm it opens cleanly) before running `npm run dev` next. If the tier-level split found here (bearish tiers outperforming bullish tiers, market-adjusted) holds up, it's a more interesting and citable finding than anything the 27-ticker sample could show -- worth surfacing prominently in the UI once this data flows through to it (the UI itself was not touched this pass; `App.tsx`'s Rating accuracy/Strong Buy views will pick up the extended numbers automatically through the existing API actions, but have not been visually re-checked against them yet). Extending `buildTickerResults`/`buildAggregateResults`/`buildCohortResults`/`buildScoreCorrelation` to the same `extendedDatasets` set is the natural following step if/when requested.
+
+- Date and time: 2026-08-04 21:53 -07:00 (America/Vancouver)
+- Step completed: Extended the Rating tiers tab to use the same reconstructed 3-year Seeking Alpha price/rating dataset already used by Rating accuracy and Strong Buy, while retaining original-only captures as fallback coverage.
+- Files inspected or changed: `backtest/src/data.ts` (Rating-tier cohorts, per-ticker rows, tier win rates, score correlation, tier availability, and market date anchors now use `extendedDatasets`; added adjusted-return calculation from the 3-year API price records; full-history market comparisons now match each ticker's exact dates; updated methodology notes), `backtest/src/App.tsx` (updated Rating tiers source/scope wording), `progress.md` (this entry).
+- Decision made and reason: Used the 3-year JSON loader directly, matching the latest application integration, rather than requiring the SQLite import before the tab works. New tickers use Seeking Alpha's close multiplied by `div_adj_factor`; original-only captures retain the existing cached adjusted-price path. Per-ticker S&P comparisons use each ticker's own start/end dates because the expanded histories are not perfectly identical.
+- Agent name and model: Codex (GPT-5)
+- Test result: `npm.cmd run build` passed. Direct SSR calculation returned 187 unique Rating-tier tickers and 1,309 ticker/window rows across the seven tested windows; all 187 had usable returns in each tested window. Score correlation now contains 187 points. Full-history tier win-rate samples are Strong Buy 42, Buy 40, Hold 84, and Sell 21; no ticker's latest rating is Strong Sell in the current extended data.
+- Errors or unresolved items: The Rating tiers view remains intentionally grouped by each ticker's latest rating and trailing performance; it is not a historical prediction-accuracy test. The Rating accuracy tab remains the correct place for point-in-time rating calls. Browser rendering was not rechecked in this pass.
+- Next step: Refresh the dev app and open Rating tiers; a new methodology fingerprint will cause the expanded tier result snapshot to be persisted when the local SQLite database is healthy.
+- Date and time: 2026-08-06 13:17:45 -07:00 (America/Vancouver)
+- Step completed: Created a self-contained application/data interpretation manual for the backtest app, designed to let another agent explain screenshots without prior chat context.
+- Files inspected or changed: `backtest/README.md` (created); inspected `backtest/CLAUDE.md`, `backtest/AGENTS.md`, `backtest/docs/handover.md`, `backtest/research/README.md`, current report files, UI domain components, `src/data.ts`, API middleware, and SQLite ingestion/dataset/schema code; `progress.md` appended.
+- Decision made and reason: Documented the current implementation screen by screen, including exact metric definitions, timing rules, data lineage, benchmark differences, portfolio trade semantics, saved research findings, and known biases; kept chronological history in this progress log and stable interpretation guidance in README.
+- Agent name and model: Codex (GPT-5)
+- Test result: README encoding scan found no mojibake markers; `npm.cmd run build` passed (`tsc -b` and Vite production build).
+- Errors or unresolved items: Static `dist/` still has no backend; portfolio search still omits the manual 365-day hold option, transaction costs and point-in-time historical-universe coverage remain unmodeled, and the README must be updated whenever visible methodology changes.
+- Next step: Give `backtest/README.md` plus an application screenshot to another agent and ask it to identify the exact screen, controls, metric, baseline, timing rule, and limitation.
+## 2026-08-06 15:34:20 -07:00 — Bearish research implementation audit
+
+- Step completed: Read the project agent instructions and inspected the Python research pipeline, report API, React research view, existing report metadata, package scripts, and current worktree state.
+- Files inspected: `backtest/AGENTS.md`, `backtest/CLAUDE.md`, `backtest/research/pipeline.py`, `backtest/research/run_analysis.py`, `backtest/research/README.md`, `backtest/research/report/*`, `backtest/src/api.ts`, `backtest/src/domains/research/components/ResearchView.tsx`, `backtest/vite.config.ts`, `backtest/package.json`.
+- Decision: Keep the existing bullish persistence report unchanged and add bearish transition and bearish persistence as separate hypothesis families with separate Holm correction scopes. Write the methodology before running the new code, while identifying the previously shared bearish numbers as exploratory rather than untouched pre-registration.
+- Agent/model: Codex (GPT-5).
+- Test result: Static inspection complete. Native Windows `python` is not installed; the project WSL Python runtime exists but WSL execution is sandbox-blocked and will require an approved test run later.
+- Errors/open items: Dirty worktree contains many pre-existing changes and dataset moves; these will be preserved. No project-root `AGENTS.md` exists above `backtest/`.
+- Next step: Add `research/BEARISH_PRESPEC.md`, then implement the two bearish families and report files.
+
+## 2026-08-06 15:59:35 -07:00 - Bearish transition and persistence research implemented
+
+- Step completed: Added a frozen bearish methodology, implemented separately corrected transition (12 tests) and strict-persistence (48 tests) families, generated real report files, exposed them through `/api/research`, and added a plain-language Research lab UI with collapsible detailed tables and survivor-bias warnings.
+- Files changed/created: `backtest/research/BEARISH_PRESPEC.md`, `backtest/research/pipeline.py`, `backtest/research/run_analysis.py`, `backtest/research/test_bearish_pipeline.py`, `backtest/research/README.md`, `backtest/research/report/bearish_*`, `backtest/research/report/full_results.csv`, `backtest/research/report/run_meta.json`, `backtest/src/api.ts`, `backtest/vite.config.ts`, `backtest/src/domains/research/components/BearishResearchSection.tsx`, `backtest/src/domains/research/components/ResearchView.tsx`, `backtest/src/App.tsx`, `backtest/src/styles.css`, `backtest/README.md`, and `backtest/scripts/check-readme.mjs`.
+- Decision/reason: Treat transition and persistence as different hypotheses; enter on the next stock session; require a complete 30/90/180-calendar-day exit; skip overlapping same-ticker exposure; test raw and SPY-hedged short returns; keep every frozen cell in its family's Holm burden with untestable cells contributing p=1 only to correction; preserve the existing bullish family unchanged.
+- Agent/model: Codex (GPT-5).
+- Test result: Full 379-ticker analysis completed; 12 transition and 48 persistence rows generated. Five Python unit tests passed. `npm.cmd run build` passed. README audit passed 77/77. Browser QA confirmed the headline/table/collapsible persistence diagnostics and found no console warnings/errors. Encoding-marker scan and targeted `git diff --check` were clean.
+- Result: No profitable bearish rule cleared the corrected bar. Four transition and two persistence tests cleared it in the opposite direction. Strongest transition: 180-day raw short -13.28%, 442 complete trades / 236 tickers, Holm p=0.0024. Strongest persistence: 3-month Sell-or-Strong-Sell then 90-day raw short -11.76%, 152 trades / 117 tickers, Holm p=0.0096.
+- Errors/open items: Results are gross and survivor-only. Borrow availability/fees, slippage, margin, forced buy-ins, and a point-in-time universe/delisting returns remain unavailable. Only synthetic `zztest` ends more than 30 days before the dataset end; zero real early-ending series is evidence of filtering, not proof of provider policy. Prior exploratory bearish results were known before the new spec, so this run is not described as blind pre-registration.
+- Next step: Obtain point-in-time historical-universe/delisting data before using a negative or positive bearish result as a market-wide shorting conclusion.
+
+## 2026-08-06 - Bearish result-status legend clarified
+
+- Step completed: Added plain-language explanations for `Too thin`, `No reliable edge`, `Supports short`, and `Evidence against short` to the existing bearish research legend.
+- Files changed: `backtest/src/domains/research/components/BearishResearchSection.tsx`.
+- Decision/reason: Keep the status meanings beside the results so a status is not mistaken for a trading recommendation or stronger evidence than the test supports.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: None introduced by this UI copy change; the existing survivor-only and gross-return limitations remain documented.
+- Next step: Refresh the Research lab and expand “How to read the bearish tests” to see the status definitions.
+
+## 2026-08-06 - Portfolio backtest export fixed
+
+- Step completed: Connected the shared `Export table` button to the Portfolio backtest view.
+- Files changed: `backtest/src/App.tsx`, `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`.
+- Decision/reason: The button previously returned immediately for the portfolio view, so it produced no download. It now exports the current simulation as `portfolio-backtest.json`, or the tested configurations as `portfolio-tested-configurations.json`.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: None known for this change.
+- Next step: Run a portfolio simulation or test all combinations, then click `Export table` and verify the downloaded JSON matches the visible view.
+
+## 2026-08-06 - Prevented automatic Portfolio export
+
+- Step completed: Fixed the Portfolio export callback registration so opening the Portfolio tab no longer downloads a file automatically.
+- Files changed: `backtest/src/App.tsx`.
+- Decision/reason: React treats a function passed directly to a state setter as an updater and was executing the export function during tab mount. The callback is now stored as a function value and only runs from the header `Export table` button.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: None known for this fix.
+- Next step: Refresh the app, open Portfolio, confirm no download occurs, then click `Export table` to download intentionally.
+
+## 2026-08-06 - Hardened Portfolio export trigger
+
+- Step completed: Replaced the React state-based export callback bridge with a `useRef` registration.
+- Files changed: `backtest/src/App.tsx`.
+- Decision/reason: The export handler must be inert during child renders, effect registration, and button state changes. A ref stores the function without allowing React to interpret or invoke it as a state updater; only the header export click reads and calls it.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: None known for this fix.
+- Next step: Hard-refresh the browser and verify that Run simulation and Test all combinations do not create downloads; Export table should be the only download trigger.
+
+## 2026-08-06 - Added portfolio pattern finding
+
+- Step completed: Added a “What the better configurations have in common” analysis above the tested-configuration table.
+- Files changed: `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`, `backtest/src/styles.css`.
+- Decision/reason: Group all tested configurations by portfolio size, rating filter, rebalance cadence, weighting, sell rule, and maximum hold. Report each setting’s test count, beat-pool count, win rate, median/average excess over the pool, and appearances in the top 20. Use median and recurrence rather than presenting the single best configuration as a general rule.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: The pattern summary is still in-sample and survivor-only; it is a historical pattern summary, not an out-of-sample validation or current portfolio recommendation.
+- Next step: Run “Test all combinations” and review the pattern summary before interpreting the top configuration.
+
+## 2026-08-06 - Added portfolio failure analysis
+
+- Step completed: Added a bottom-20 failure table and worst-20 frequency counts to the Portfolio pattern analysis.
+- Files changed: `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`.
+- Decision/reason: Compare the weakest configurations against both the own-everything pool and drawdown. A negative “vs pool” means selection hurt relative to holding the whole candidate pool; a negative portfolio return means the strategy lost money outright. Each bottom configuration can be inspected with its full timeline through `Inspect`.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: Failure explanations are summary-level diagnostics, not causal attribution for individual stocks. Detailed trade inspection remains available through `Inspect`.
+- Next step: Run the full combination test and review both the recurring pattern table and the bottom-20 table.
+
+## 2026-08-06 - Added historical evidence scoring and collapsed portfolio analysis
+
+- Step completed: Added a 0–100 evidence score for each portfolio setting and a combined evidence score for the highest-scoring rule. Collapsed the pattern, failure, and all-tested-configuration tables by default.
+- Files changed: `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`, `backtest/src/styles.css`.
+- Decision/reason: Score settings using within-dimension median performance, beat-pool rate, top-20 recurrence, and a worst-20 penalty. Present it as historical consistency evidence, never as probability or a buy signal. Keep detailed tables available on demand without making the page noisy by default.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: The score is in-sample and survivor-only; it must not be interpreted as future-profit probability until validated on unseen data.
+- Next step: Run “Test all combinations,” expand the pattern summary, and compare the evidence score with the bottom-20 failure table.
+
+## 2026-08-06 - Added sortable Portfolio tables
+
+- Step completed: Added clickable ascending/descending sorting to every data column in the pattern summary, bottom-20 failure analysis, top configuration list, and final holdings table.
+- Files changed: `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`, `backtest/src/styles.css`.
+- Decision/reason: Preserve each table’s existing default order while allowing users to sort by numeric metrics, labels, dates, and holdings data. Action columns remain buttons rather than sortable values.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: None known for this change.
+- Next step: Open a Portfolio result and click headers such as Evidence score, Vs pool, Drawdown, or Since entry to verify the ordering.
+
+## 2026-08-06 - Clarified full search versus winner selection
+
+- Step completed: Renamed the search action to `Test all 288 combinations`, added an explicit `Best historical result` summary, and added `Use best historical result` to re-run the first-ranked configuration without repeating the grid search.
+- Files changed: `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`, `backtest/src/styles.css`.
+- Decision/reason: The full search already evaluates all 288 configurations and ranks them by excess over the own-everything pool. The winner action is now visibly separate and operates on the cached ranked result.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: The first-ranked result remains the best in-sample historical result, not a current recommendation.
+- Next step: Run the 288-case search, review the summary and pattern tables, then use the winner only if you intentionally want to inspect that historical rule in detail.
+
+## 2026-08-06 - Added per-table Portfolio exports
+
+- Step completed: Removed the shared Portfolio export button and added a small `Export table` button to the pattern summary, bottom-20 failures, tested configurations, and final holdings tables.
+- Files changed: `backtest/src/App.tsx`, `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`, `backtest/src/styles.css`.
+- Decision/reason: Each export should be scoped to the table the user is reading. Exports contain the current sorted rows for that table, with separate filenames.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: The activity timeline is not a table and therefore has no table export button.
+- Next step: Open each Portfolio table and verify that only its own `Export table` button downloads data.
+
+## 2026-08-06 - Added browser-history routing
+
+- Step completed: Added readable browser routes for all main tabs and signal subtabs, with History API navigation and `popstate` handling for Back/Forward.
+- Files changed: `backtest/src/App.tsx`.
+- Decision/reason: Keep the existing lightweight React state architecture while exposing stable paths: `/overview`, `/stocks`, `/signals/strong-buy`, `/signals/rating-groups`, `/signals/prediction-accuracy`, `/research`, `/portfolio`, and `/data`.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: Direct-link routing assumes the development/production web server falls back to `index.html` for these client routes.
+- Next step: Click several tabs and subtabs, confirm the address bar changes, then use Back and Forward to restore each view.
+
+## 2026-08-06 - Showed all portfolio configurations
+
+- Step completed: Removed the first-15 slice from the All tested configurations table. It now renders all configurations returned by the 288-case search.
+- Files changed: `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`.
+- Decision/reason: The full result set must be available for manual sorting, inspection, and external review/export; the table remains collapsed by default to avoid visual noise.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: Large result sets may require scrolling, but the table uses the existing scroll container and complete export.
+- Next step: Run the full search, expand All tested configurations, sort as needed, and use its table-level export.
+
+## 2026-08-06 - Added random ticker holdout validation
+
+- Step completed: Added `Validate on random holdouts` to the Portfolio workflow. Each of 20 deterministic random splits selects the best rule from 70% of tickers using the full 288-case search, then evaluates that frozen rule on the other 30% of tickers.
+- Files changed: `backtest/src/data.ts`, `backtest/src/api.ts`, `backtest/vite.config.ts`, `backtest/server/analysisModule.ts`, `backtest/src/domains/portfolio/components/PortfolioBacktestView.tsx`, `backtest/src/styles.css`.
+- Decision/reason: Validate whether a discovered rule generalizes to different names rather than treating its in-sample winner result as evidence. Report holdout beat-pool rate, median/range, per-split winner, and holdout drawdown. The random generator is seeded so reruns are reproducible.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed.
+- Errors/open items: This is ticker-level holdout validation within the same historical period and survivor-only universe. It does not yet provide a future-time holdout, transaction costs, delisted names, or a manual ticker-entry validator.
+- Next step: Run `Test all 288 combinations` first, then click `Validate on random holdouts` and judge the median/pass rate rather than one best split.
+
+## 2026-08-06 - Implemented Signal discovery menu and unseen-year rule search
+
+- Step completed: Added `/signal-discovery`, a main navigation item, a 24-rule bullish persistence engine, final-year validation, sortable/exportable results, and a ticker matcher that activates only when a rule survives.
+- Files changed: `backtest/src/data.ts`, `backtest/src/api.ts`, `backtest/vite.config.ts`, `backtest/server/analysisModule.ts`, `backtest/src/App.tsx`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/src/styles.css`, and `backtest/README.md`.
+- Decision/reason: Search two rating families × four persistence periods × three fixed holds on the first two years of the latest three-year window; rank using discovery-period median excess over the matching rating pool; select only the highest discovery-ranked rule that independently passes fixed final-year pool/SPY/breadth checks. Never choose the largest validation return.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed; live API returned 24 rules for 2023-08-06 through 2026-08-05 with split 2025-08-05; direct `/signal-discovery` returned HTTP 200; README audit passed 80/80; targeted `git diff --check` had only line-ending warnings.
+- Result: On the current imported data, no rule survived validation: 21 failed and 3 were too thin. The page correctly shows no winner and disables ticker matching.
+- Errors/open items: Still exploratory, gross of costs, and survivor-only. No transaction costs, delisted universe, or multiple-testing p-value correction is modeled; the unseen year is the primary guard against rule-selection leakage.
+- Next step: Open Signal discovery and inspect the failed/too-thin rules; import newer data before expecting the unseen validation period to change.
+
+## 2026-08-07 - Added ETF-only signal discovery
+
+- Step completed: Added `/etf-discovery`, a main ETF discovery tab that reuses the fixed 24-rule stock discovery workflow while strictly filtering to imported `fundType: "ETF"` records. Existing Signal discovery now explicitly excludes ETFs.
+- Files changed: `backtest/server/db/schema.ts`, `backtest/server/db/ingest.ts`, `backtest/server/db/datasets.ts`, `backtest/server/analysisModule.ts`, `backtest/vite.config.ts`, `backtest/src/data.ts`, `backtest/src/api.ts`, `backtest/src/App.tsx`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, and `backtest/README.md`.
+- Decision/reason: Preserve `fundType` in SQLite and reconstructed datasets before filtering the UI. Added parser-version tracking so unchanged source files are reprocessed when importer metadata support changes; ETF discovery never falls back to stock data.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed; README audit passed 81/81; 416 source files re-imported with 0 failures; live ETF API found 84 ETFs, ran 24 rules, and returned 6 validation survivors; stock discovery found 380 non-ETF instruments; ticker-match overlap was 0; `/etf-discovery` returned HTTP 200.
+- Errors/open items: The ETF result is still exploratory, gross of costs, and based on the locally imported survivor universe. Existing unrelated working-tree changes were preserved.
+- Next step: Open ETF discovery and inspect the winner and all-rule table; future files only need Data -> Import because `fundType` is now retained automatically.
+
+## 2026-08-07 - Made discovery pool comparisons leave-one-ticker-out
+
+- Step completed: Excluded each evaluated ticker from its own Signal discovery and ETF discovery rating-pool baseline, and included the ticker in the pool-cache key.
+- Files changed: `backtest/src/data.ts`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, and `backtest/README.md`.
+- Decision/reason: Including a ticker in its own comparison mean mechanically shrinks excess return toward zero. A ticker-specific cache key is required because each leave-one-out pool has a different membership.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed; README audit passed 81/81; live stock and ETF discovery both completed. Stock result remained 0 survivors (21 failed, 3 thin); ETF result remained 6 survivors (9 failed, 9 thin), with the best rule still Bullish+ / 90-day persistence / 180-day hold and 17.30pp validation median excess versus its leave-one-out pool.
+- Errors/open items: No dedicated unit-test harness exists for the in-memory discovery engine; verification used the live local API plus build and documentation audits.
+- Next step: Read all discovery `Vs pool` values as comparisons against other qualifying instruments, never a pool containing the evaluated ticker.
+
+## 2026-08-07 - Added verified cumulative-bundle consolidation
+
+- Step completed: Added `npm run consolidate:single` to merge cumulative `input/3-year/single` bundles into one importer-compatible, timestamped file with unique ticker/type wrappers and deduplicated API rows; generated and imported a verified consolidation without deleting originals.
+- Files changed: `backtest/scripts/consolidate-single-data.mjs`, `backtest/package.json`, `backtest/README.md`; generated `backtest/input/3-year/single/consolidated_unique_2026-08-08T04-27-01Z.json` and its `.manifest.txt`.
+- Decision/reason: A ticker needs separate prices and rating-change payloads, so uniqueness is enforced by ticker plus payload type and then by stable API row ID. Newer conflicting rows win by `_ts`, missing older rows are retained, explicit ETF metadata is not erased by missing price metadata, output is atomic and reread-verified, and sources are never deleted automatically.
+- Agent/model: Codex (GPT-5).
+- Test result: Two raw files (225.4 MB combined) consolidated to a verified 62.6 MB bundle: 314 unique tickers, 84 ETFs, 621 ticker/type payloads, and 240,705 unique rows. It collapsed 173,934 exact duplicate rows with 0 conflicting data rows. The real app importer accepted it as `bundle` with 228,207 price rows and 12,498 rating rows, 0 failures, and unchanged database totals. `npm.cmd run build` passed; README audit passed 84/84.
+- Errors/open items: Twelve ticker/type payloads for JRSH, LTH, LUV, NLST, NUE, and RSPG contained only upstream captcha/error pages and no usable rows in any source. They are omitted and listed in the manifest; `--strict` fails on such gaps.
+- Next step: Keep the verified consolidated JSON and manifest. The two older `raw_*.json` files may be removed after reviewing the manifest; future runs can use the retained consolidation plus new raw files.
+
+## 2026-08-07 - Made consolidation archival, single-file, and transactional
+
+- Step completed: Changed `consolidate:single` to maintain one stable `consolidated_unique.json`, ZIP each run's `raw_*.json` into `input/3-year/single/archive`, commit each ZIP through Git LFS, and remove raw/older consolidated files only after archive, Git, output, and source-stability verification.
+- Files changed: `backtest/scripts/consolidate-single-data.mjs`, `backtest/README.md`, and `vantage/.gitattributes`; generated the stable consolidated JSON/manifest and two committed LFS ZIP archives.
+- Decision/reason: Raw data must survive cleanup independently of SQLite. The script now checks raw hashes twice and checks that no new raw file appeared during the run, so an active upstream writer causes safe retention instead of partial cleanup. `--keep-sources`, `--no-git-commit`, `--dry-run`, and `--strict` remain available.
+- Agent/model: Codex (GPT-5).
+- Test result: Repeated-run workflow passed. Git archive commits are `b07f65ae9ed03ce2212e1b5f844f5fb5ddc39442` and `fbce4acb7f932278396efc1361cde4a3bef70f61`. The folder now contains one 94.6 MB consolidated JSON, one manifest, no raw JSON, and two LFS ZIPs. Final data contains 468 unique symbols including 238 ETFs and 360,483 market rows. The app imported the stable bundle with 340,130 price rows and 20,353 rating rows, zero failures, and zero pending files. Build passed; README audit passed 85/85.
+- Errors/open items: The first Git attempt was blocked by the sandbox index lock; it stopped before cleanup as designed. Its temporary output and duplicate uncommitted ZIP were removed after the committed archive was verified. Git commits are local until pushed to the remote.
+- Next step: Push the archive commits to the Git remote. On future upstream runs, execute `npm run consolidate:single`, then Data -> Import.
+
+## 2026-08-07 - Integrated consolidation into the Data UI
+
+- Step completed: Added a tracked `Consolidate, archive & import` operation to the Data tab. It now runs the cumulative-data consolidation script, archives and commits raw bundles, cleans verified sources, and automatically imports the stable consolidated file into SQLite without requiring a terminal command.
+- Files changed: `backtest/vite.config.ts`, `backtest/src/api.ts`, `backtest/src/App.tsx`, `backtest/src/domains/data/components/DataView.tsx`, `backtest/src/styles.css`, `backtest/scripts/consolidate-single-data.mjs`, `backtest/scripts/check-readme.mjs`, and `backtest/README.md`.
+- Decision/reason: Run the workflow as a server-side tracked job so the browser can display meaningful stages and percentage progress and can reconnect to the current result after the Data view reloads. Keep the ordinary Import button for non-cumulative files while preventing it from racing an active consolidation.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed. A live `POST /api/data/consolidate` run completed at 100%, returned 468 symbols, 238 ETFs, and 360,483 unique rows, then ran the database import with 0 failures. The `/data` screen rendered the action, completed-job summary, and progress bar with no browser console warnings or errors.
+- Errors/open items: The archive Git commit is created locally and still needs to be pushed. The current test had no new raw files, so it exercised the no-new-source path rather than creating another archive.
+- Next step: After the upstream service creates new `raw_*.json` files, open Data and click `Consolidate, archive & import`; review the final raw-archived count and Git commit shown in the result panel.
+
+## 2026-08-07 - Made the discovery winner concrete
+
+- Step completed: Replaced the discovery-rank explanation with the exact winning rating, persistence, and holding rule; added prominent Winner labels to the verdict and matching table row; and added a $100 historical median-return example.
+- Files changed: `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx` and `backtest/src/styles.css`.
+- Decision/reason: Discovery rank describes search order but does not tell the user what to do. The new example uses the independent validation period's median raw return and explicitly says that half of qualifying cases did worse and that it is not a forecast.
+- Agent/model: Codex (GPT-5).
+- Test result: `npm.cmd run build` passed. Live ETF discovery rendered the winner as `Strong Buy only for at least 1 month -> hold 30 days`, showed `$100 -> $109.14` from the +9.14% validation median, marked discovery table row 8 as Winner, and produced no browser warnings or errors.
+- Errors/open items: The $100 figure describes the median across historical qualifying ETF cases, not one specific ETF and not a guaranteed return.
+- Next step: Read the winner card as a tested historical rule, then use the ticker checker to see which currently imported ETFs satisfy that frozen rule.
+
+## 2026-08-07 - Made standalone ticker files safely removable
+
+- Step completed: Expanded Data -> Consolidate, archive & import to fold standalone `input/*.json` quant-history captures and standalone `input/3-year/*.json` price/rating responses into the stable consolidated bundle before archiving and cleanup. Benchmark files remain excluded.
+- Files changed: `backtest/scripts/consolidate-single-data.mjs`, `backtest/server/db/ingest.ts`, `backtest/src/domains/data/components/DataView.tsx`, and `backtest/README.md`.
+- Decision/reason: SQLite retaining rows after a source disappears is not a durable backup. The replacement bundle now has a third `quant` payload kind, so a clean database rebuild can recover all three ticker datasets from one file. Cleanup is allowed only after every original is hash-verified inside a Git-LFS ZIP, the archive commit succeeds, the replacement is reread, and the source set is unchanged.
+- Agent/model: Codex (GPT-5).
+- Test result: A dry run found 387 replaceable standalone ticker sources. A full non-destructive verification generated a 129.8 MB bundle with 638 tickers, 1,259 ticker/type payloads, and 509,155 rows; the importer parsed 455,306 prices, 24,077 rating events, and 29,772 quant snapshots. The verified ZIP contained all 387 originals. All 27 benchmark files were excluded. `npm.cmd run build` passed, README audit passed 87/87, and `git diff --check` passed.
+- Errors/open items: The existing database has 300 synthetic `zztest` prices and 2 synthetic rating rows whose source fixtures were previously removed; those intentionally do not appear in the physical-data replacement. The verification run kept all originals and its temporary artifacts were removed.
+- Next step: Open Data and click `Consolidate, archive & import 387 ticker sources`. After the UI reports a Git commit and successful import, only the stable consolidated JSON, manifest, archives, and untouched benchmark folder remain.
+
+## 2026-08-07 - Flattened the three-year data layout
+
+- Step completed: Updated consolidation, Data UI detection, research fallback paths, and documentation after `input/3-year/single/` was removed and its consolidated file, manifest, and archive were moved directly into `input/3-year/`.
+- Files changed: `backtest/scripts/consolidate-single-data.mjs`, `backtest/server/db/ingest.ts`, `backtest/src/domains/data/components/DataView.tsx`, `backtest/vite.config.ts`, `backtest/README.md`, `backtest/research/run_analysis.py`, `backtest/research/pipeline.py`, `backtest/research/README.md`, and `backtest/docs/unified-ingestion-plan.md`.
+- Decision/reason: The consolidated filename must be recognized as the stable bundle rather than as a standalone ticker file in the flattened folder. Raw/standalone discovery now excludes bundle filenames, benchmarks remain excluded, and the default archive is `input/3-year/archive/`.
+- Agent/model: Codex (GPT-5).
+- Test result: Flattened-layout dry run found exactly one source, zero files to archive, 638 tickers, 1,259 payloads, and 509,155 rows. The app imported `3-year/consolidated_unique.json` with zero failures and retained all 27 benchmarks: 455,606 prices, 24,079 ratings, 29,772 quant snapshots, and 150,508 benchmark rows. Pending files are 0. Build passed, README audit passed 87/87, and `git diff --check` passed.
+- Errors/open items: Two deliberately removed `zztest` fixture paths remain reported because they still own synthetic database rows. Hundreds of obsolete, unreferenced pre-consolidation source records were removed from SQLite provenance; no market rows were deleted.
+- Next step: Put future `raw_*.json` files directly in `input/3-year/`; Data -> Consolidate, archive & import will merge them into the stable file and archive them under `input/3-year/archive/`.
+
+## 2026-08-07 - Removed automatic Git commits from consolidation
+
+- Step completed: Removed all Git staging, LFS checking, and commit execution from Data consolidation. The workflow now creates and verifies a local ZIP, installs the consolidated bundle, removes only the locally archived source files, and imports SQLite.
+- Files changed: `backtest/scripts/consolidate-single-data.mjs`, `backtest/vite.config.ts`, `backtest/src/api.ts`, `backtest/src/domains/data/components/DataView.tsx`, and `backtest/README.md`.
+- Decision/reason: Local source archival is sufficient for the requested workflow; Git operations made Data consolidation depend on repository-index permissions. `--keep-sources` remains available when local archive verification should run without cleanup.
+- Agent/model: Codex (GPT-5).
+- Test result: The retained 63.3 MB raw bundle was merged and locally archived as `input/3-year/archive/raw_sources_2026-08-08T05-31-21Z.zip`; the source was removed only after ZIP verification. Automatic import completed with zero failures. The stable bundle now contains 711 tickers, 1,405 payloads, and 564,170 rows. A subsequent no-source run preserved the existing consolidated file and manifest byte-for-byte.
+- Errors/open items: Three older archives were manually moved into the flattened archive directory and remain local working-tree files. No Git operation is performed or required by the application.
+- Next step: Add future `raw_*.json` files to `input/3-year/` and use Data -> Consolidate, archive & import. When no replaceable source exists, the button is disabled as `Nothing to consolidate`.
+
+## 2026-08-07 - Added the matched ETF rating trust test
+
+- Step completed: Added a three-layer trust test to ETF Discovery that compares SPY, the leave-one-ticker-out matching bullish ETF pool, and the discovered persistence winner over identical unseen-period dates and holding windows.
+- Files changed: `backtest/src/data.ts`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/src/styles.css`, and `backtest/README.md`.
+- Decision/reason: A high raw return cannot show whether the Seeking Alpha rating helped. The new test separately judges whether the rating pool beats SPY and whether persistence adds value over the rating pool, using paired observations and the existing 15-ETF breadth floor.
+- Agent/model: Codex (GPT-5).
+- Test result: Current imported data produced 42 matched 30-day observations across 30 ETFs. Median returns were SPY +0.61%, non-bullish ETF control +4.72%, matching Strong Buy ETF pool +3.83%, and the 30-day persistence winner +9.14%. On paired observations, the bullish pool's median edge was +4.53pp versus SPY and +1.03pp versus non-bullish ETFs; it beat those controls in 71% and 55% of cases. The winner's paired median edge over the bullish pool was +0.62pp with a 57% win rate. The UI therefore renders `Both required checks passed, but narrowly`; the production build passed, and browser console warnings/errors were empty.
+- Errors/open items: This is historical evidence in the imported survivor universe, gross of costs. The displayed `$100` figures are separate matched-observation medians, not one continuously compounded portfolio.
+- Next step: Re-run ETF Discovery whenever the imported dataset changes; the trust verdict and all three baselines are recalculated from the new unseen-period observations.
+
+## 2026-08-08 11:15 -07:00 - Consolidated navigation into three top-level areas
+
+- Step completed: Reorganized the interface into Single Stocks, ETF discovery, and Data. Moved every non-ETF analysis into an eight-item Single Stocks subnavigation and changed its canonical routes to `/stocks/...`.
+- Files inspected or changed: `backtest/src/App.tsx`, `backtest/src/styles.css`, and `backtest/README.md`.
+- Decision/reason: Overview, signal analysis, stock discovery, research, and portfolio all analyze individual stocks and were misleading as peer top-level areas beside ETF discovery. Legacy URLs remain compatibility aliases and are replaced with canonical stock URLs so bookmarks continue to work.
+- Agent/model: Codex (GPT-5).
+- Test result: Production build passed. Browser verification showed exactly three main-area buttons, all eight stock subviews under Single Stocks, no stock subnavigation on ETF or Data, working Back navigation, `/portfolio` redirecting to `/stocks/portfolio`, and no console warnings or errors.
+- Errors/unresolved items: None for navigation behavior. Existing uncommitted application work was preserved.
+- Next step: Use `/stocks` as the stock landing page; direct links should use the new canonical routes documented in the README.
+
+## 2026-08-08 11:20 -07:00 - Made ETF Discovery methodology and export self-contained
+
+- Step completed: Replaced the abbreviated ETF Discovery README notes with a complete standalone analysis contract and changed the UI export from a bare rules array to a versioned analysis package.
+- Files inspected or changed: `backtest/src/data.ts`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/README.md`, and `progress.md`.
+- Decision/reason: An external agent could interpret the old headline but could not recover the exact episode, entry/exit, pool, ranking, trust, or export semantics. The export now carries periods, machine-readable methodology version 2, all rules, winner, trust test, current ticker matches, and display sort.
+- Agent/model: Codex (GPT-5).
+- Test result: Production build passed. The live ETF endpoint returned all 16 methodology fields, 24 rules, a winner, and a trust test. The UI rendered exactly one `Export analysis` button after loading, with no console warnings or errors.
+- Errors/unresolved items: The export is summary-complete but intentionally omits raw daily prices and observation-level trades. Full first-principles recomputation still requires the imported SQLite/input data; the README states this explicitly.
+- Next step: Give another agent `README.md` plus `etf-discovery-analysis.json` for interpretation or critique; include the database/input files only when independent numerical recomputation is required.
+
+## 2026-08-08 11:34 -07:00 - Added formal statistical controls to ETF Discovery
+
+- Step completed: Added ticker-cluster bootstrap intervals, Holm correction across all 24 discovery rules, earlier-period rule locking, a single untouched final-year confirmation, a matched-date random-ETF placebo, and concentration/leave-one-ETF-out diagnostics. The formal verdict is now the primary ETF conclusion; the older practical-gate winner remains visible but is explicitly exploratory.
+- Files inspected or changed: `backtest/src/data.ts`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/src/styles.css`, `backtest/README.md`, and `progress.md`.
+- Decision/reason: The ETF screen previously used a useful holdout gate but treated all 24 validation outcomes descriptively and lacked the statistical safeguards used elsewhere. The new path selects a candidate without final-year information and requires corrected discovery, independent confirmation, placebo success, and non-concentrated evidence before saying the signal is statistically confirmed.
+- Agent/model: Codex (GPT-5).
+- Test result: On the current data, 2 of 24 rules cleared corrected discovery. The locked rule was `Buy or Strong Buy for 3 months -> hold 30 days`, but its final-year median edge over the bullish pool was -0.39pp with clustered 95% CI -0.88pp to +0.33pp and p=0.186. It also failed the random-ETF placebo (+1.77% observed median versus +2.03% random median, p=0.787), so the UI correctly reports `Failed final confirmation`. Browser verification found no warnings or errors.
+- Errors/unresolved items: The formal controls reduce rule-search and repeated-observation bias but cannot repair survivor bias, uncertain capture-price adjustment, costs, liquidity, or provider publication timing. The exploratory +9.14% raw median remains descriptive and must not be presented as confirmed evidence.
+- Next step: Re-run ETF Discovery after materially expanding or refreshing the ETF universe; interpret `formalTest.verdict`, not the practical-gate winner, as the headline conclusion.
+
+## 2026-08-08 11:39 -07:00 - Added an upstream-fetch checkpoint to Data
+
+- Step completed: Added a Latest processed symbols panel to Data showing the four newest unique imported slugs, their stock/ETF classification, and local processing time.
+- Files inspected or changed: `backtest/server/db/ingest.ts`, `backtest/src/api.ts`, `backtest/src/domains/data/components/DataView.tsx`, `backtest/src/styles.css`, `backtest/README.md`, and `progress.md`.
+- Decision/reason: The consolidated bundle is alphabetically sorted, so physical row order cannot identify where an upstream traversal stopped. The panel instead ranks unique symbols by the retained wrapper `_ts` timestamp and caches the result by bundle file size/mtime to avoid repeatedly parsing the large file.
+- Agent/model: Codex (GPT-5).
+- Test result: Production build and README audit passed. Live Data UI rendered CLOU, TOK, XCEM, and IRESF newest first, all classified as ETFs, and browser console warnings/errors were empty.
+- Errors/unresolved items: This checkpoint describes the latest data already consolidated/imported. A newly downloaded raw file does not affect it until consolidation/import completes.
+- Next step: Use the first displayed symbol as the latest processed checkpoint when resuming the upstream fetch; refresh Data after the next consolidation/import.
+
+## 2026-08-08 11:40 -07:00 - Audited ETF statistical-rigor requirements
+
+- Step completed: Compared the proposed Python Research-lab ETF specification against the current ETF Discovery implementation requirement by requirement.
+- Files inspected or changed: `backtest/research/pipeline.py`, `backtest/research/run_analysis.py`, `backtest/research/BEARISH_PRESPEC.md`, `backtest/src/data.ts`, `backtest/src/domains/research/components/ResearchView.tsx`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/README.md`, and `progress.md`.
+- Decision/reason: Classify ETF-only universe, 24-cell grid, timing, breadth floor, Holm concept, placebo universe, documentation, and caveats separately from the required statistical implementation and placement.
+- Agent/model: Codex (GPT-5).
+- Test result: The current system fully meets the ETF universe/grid/timing and basic documentation requirements, but does not use the required Python wild cluster bootstrap-t, validation-only 24-cell testing, BH export, Research-lab outputs/UI, or frozen `ETF_PRESPEC.md`. The current TypeScript formal test is therefore related but not specification-compliant.
+- Errors/unresolved items: The underlying `tickers` table exposes `fund_type`, but the compatibility views do not; a Python ETF path would need an explicit join to `tickers`.
+- Next step: If this specification is adopted, freeze `research/ETF_PRESPEC.md` before generating results, then implement the ETF family by reusing the Python pipeline and leave the existing ETF Discovery gate/export unchanged from that point forward.
+
+## 2026-08-08 12:34 -07:00 - Implemented corrected ETF trust research
+
+- Step completed: Added two frozen Python ETF research families and rendered them in Research Lab: the primary bullish-rating-versus-SPY test and the secondary persistence-versus-matching-bullish-pool test. Removed the duplicate TypeScript formal test from ETF Discovery, which is now explicitly exploratory and links to Research Lab.
+- Files inspected or changed: `backtest/research/ETF_PRESPEC.md`, `backtest/research/pipeline.py`, `backtest/research/run_analysis.py`, `backtest/research/test_etf_pipeline.py`, `backtest/research/report/etf_*`, `backtest/src/api.ts`, `backtest/vite.config.ts`, `backtest/src/domains/research/components/EtfResearchSection.tsx`, `backtest/src/domains/research/components/ResearchView.tsx`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/src/data.ts`, `backtest/src/styles.css`, `backtest/src/App.tsx`, `backtest/README.md`, `backtest/research/README.md`, and `progress.md`.
+- Decision/reason: The prior implementation answered whether a persistence-qualified ETF beat other bullish ETFs, but the user's primary goal is whether Seeking Alpha bullish ETF ratings beat the market. The two questions now use separate benchmarks and correction families so a weak persistence result cannot invalidate rating trust.
+- Agent/model: Codex (GPT-5).
+- Test result: The saved validation-year report has 321 ETFs. Rating trust: 4/6 cells clear the corrected bar; strongest Bullish+ held 90 days returned +11.64% versus SPY +5.51%, an average +6.13pp edge (Holm p=0.0012, placebo p=0.0005). Persistence: 1/24 cells clears; Bullish+ persisted 30 days then held 30 days added +1.24pp over bullish peers (Holm p=0.0096, placebo p=0.0005). Nine Python unit tests, production build, and README audit (87/87) passed. Browser verification showed both tables and no console warnings/errors.
+- Errors/unresolved items: Results remain gross of costs and based on the imported survivor-filtered universe. Prior exploratory ETF evidence was known before the frozen specification, so this is a fixed auditable study rather than blind pre-registration.
+- Next step: Use Research Lab's first ETF family for the rating-trust conclusion and the second family only to judge whether waiting adds value; use ETF Discovery only to explore possible rules and current matches.
+
+## 2026-08-08 12:30 -07:00 - Fixed Research analysis Python launcher on Windows
+
+- Step completed: Replaced the Research button's `python3`/`python` fallback with platform-aware workspace virtual-environment selection. A Windows Vite server now prefers a native workspace venv and otherwise runs the existing `.venv/bin/python` through WSL before trying system launchers.
+- Files inspected or changed: `backtest/vite.config.ts`, `backtest/research/README.md`, and `progress.md`.
+- Decision/reason: Windows' `python` app-execution alias exists as a command but exits with code 9009 when Python is not installed natively. The project already has a working WSL virtual environment with pandas and NumPy, so the UI should invoke that environment directly.
+- Agent/model: Codex (GPT-5).
+- Test result: Production build passed; the exact WSL interpreter imported pandas and NumPy successfully. A real `/api/research/run` request now reports `running`, no error, and `Starting analysis with project WSL virtual environment.`
+- Errors/unresolved items: The full corrected research run is intentionally long and remains active as a background job; its progress is available on the Research page.
+- Next step: Leave the Research page open or return later; the UI will load the refreshed report when the background run completes.
+
+## 2026-08-08 12:38 -07:00 - Split stock and ETF research into separate routed pages
+
+- Step completed: Moved ETF research out of the long stock Research page. The ETFs top-level area now has Discovery and Research subviews; stock and ETF research have independent URLs and scope-specific exports while sharing the same background Python job.
+- Files inspected or changed: `backtest/src/App.tsx`, `backtest/src/domains/research/components/ResearchView.tsx`, `backtest/src/domains/signal-discovery/components/SignalDiscoveryView.tsx`, `backtest/README.md`, and `progress.md`.
+- Decision/reason: Stock bearish/bullish studies and ETF-vs-SPY studies answer different questions. Mixing all five families on one page made navigation and interpretation unnecessarily difficult.
+- Agent/model: Codex (GPT-5).
+- Test result: Production build and README audit (87/87) passed. Browser verification confirmed `/etfs/research` contains ETF tests but no bearish-stock section, `/stocks/research` contains stock studies but no ETF table, Back returns to the prior route, and browser warnings/errors are empty.
+- Errors/unresolved items: One Python run still generates every research report, so the same Run analysis job/status appears on both pages by design.
+- Next step: Use ETFs > Research for the rating-vs-SPY conclusion and Single Stocks > Research for bullish/bearish stock studies.
+
+## 2026-08-08 13:04 -07:00 - Added real ETF buy/sell examples to rating-trust research
+
+- Step completed: Added ten deterministic chronological completed trades from the strongest Bullish+ 90-day ETF-vs-SPY cell. The Research UI now explains when to buy, when to sell, buy/sell prices, days held, ETF return, same-period SPY return, and the resulting value of $100.
+- Files inspected or changed: `backtest/research/pipeline.py`, `backtest/research/run_analysis.py`, `backtest/research/report/etf_meta.json`, `backtest/src/api.ts`, `backtest/vite.config.ts`, `backtest/src/domains/research/components/EtfResearchSection.tsx`, `backtest/src/styles.css`, `backtest/README.md`, `backtest/research/README.md`, and `progress.md`.
+- Decision/reason: Aggregate percentages answer whether the rule worked overall but do not show how the rule would be applied to an individual ETF. Examples are spaced chronologically across the validation period instead of selected by return, so they explain the workflow without becoming a cherry-picked winners list.
+- Agent/model: Codex (GPT-5).
+- Test result: The regenerated report contains 10 examples; a fresh Vite server API returned all 10; browser verification rendered 10 example rows, buy instructions, and no console warnings/errors. Production build, README audit (87/87), and 9 research unit tests passed.
+- Errors/unresolved items: The already-running Vite process must be restarted (or `dev:all` restarted) before port 5173 serves the new API field; the source and report are ready.
+- Next step: Restart `dev:all`, open ETFs > Research, expand “Bullish ETF ratings versus SPY,” and read the “What following this rule looked like” table.
+
+## 2026-08-08 15:19 -07:00 - Ad hoc check: does anything predict which ETFs do best under the winning persistence rule
+
+- Step completed: One-off (not committed to the pipeline) check of whether rating strength, market cap, dividend yield, or analyst coverage at signal date correlate with excess-pool return within the already-selected `bullish_plus` / 30d-persistence / 30d-hold rule (n=387, g=254, from `etf_persistence_results.csv`). Reproduced the exact trade set via `pipeline.py`'s own `load_etf_tickers`, `build_rating_timeline`, and `_collect_etf_trades`, then joined each signal to the nearest prior `rating_changes` row.
+- Files inspected or changed: read-only against `.data/vantage.sqlite` and `research/pipeline.py`; wrote and then deleted a throwaway script `research/adhoc_quant_score_check.py` (not committed). No pipeline or report files were modified.
+- Decision made and reason: The hand-captured `quant_history` table (numeric quant_score, momentum/valuation/growth letter grades) covers only 27 tickers and none of them are ETFs (`fund_type` is Stock/Depository Receipt/null for all 27), so it can't be used for ETF-level analysis — used `rating_changes` (`rating_new`, `market_cap`, `div_yield`, `analysts`) instead, which does cover the ETF universe.
+- Test result: No meaningful correlation found for any of the four features against excess-pool return: rating_new pearson=-0.076/spearman=-0.031, market_cap pearson=-0.027/spearman=-0.021, div_yield pearson=0.135/spearman=-0.058 (sign disagrees between the two, likely outlier-driven), analysts pearson=0.037/spearman=0.104 (only 181/387 trades had a value, and the "more analysts" bucket was 24 trades). None showed a clean, monotonic quartile trend.
+- Agent name and model: Claude Sonnet 5.
+- Errors or unresolved items: This was descriptive only (no clustered bootstrap, no correction) and used data already spent on the frozen validation year, so it cannot be treated as a statistical finding either way — only as "no obvious secondary filter jumped out from what's available."
+- Next step: None planned. If a secondary filter is wanted later, it would need pre-registration and a fresh time split per `ETF_PRESPEC.md`'s discipline, not a rerun against the same validation year.
+
+## 2026-08-08 15:34 -07:00 - Ad hoc check: absolute loss rate under the winning ETF persistence rule
+
+- Step completed: Confirmed the ETF research pipeline reports only relative outcomes (`beat_spy_rate`, `beat_pool_rate` in `etf_persistence_results.csv` / `run_analysis.py` lines ~168-178) and never an absolute "did the ETF itself lose money" rate. Computed it directly via a throwaway script reusing `pipeline.py`'s own trade-collection functions, for the winning `bullish_plus` cell and its 30d-persistence neighbors.
+- Files inspected or changed: read-only against `.data/vantage.sqlite` and `research/pipeline.py`/`run_analysis.py`; wrote and deleted throwaway script `research/adhoc_loss_rate_check.py` (not committed). No pipeline or report files modified.
+- Decision made and reason: User asked whether the system checks how often ETFs meeting the rule actually lost value, not just underperformed SPY/the pool. It does not track this anywhere today.
+- Test result: For `bullish_plus`/30d-persistence/30d-hold (n=387, g=254): 23.3% of trades had negative absolute return, worst single trade -14.7%. Longer holds lose money less often (90d hold: 14.3%, 180d hold: 7.4%) since ETFs generally drift up with the market over time; 90d persistence/30d hold was worst at 37.4%.
+- Agent name and model: Claude Sonnet 5.
+- Errors or unresolved items: None; this is a real, reproducible number from the actual trade set, not an estimate.
+- Next step: If this metric is wanted permanently, add an `absolute_loss_rate` column to `run_analysis.py`'s ETF summary block (same pattern as `beat_spy_rate`) so it shows up in the CSVs and UI without needing an ad hoc script each time.
+
+## 2026-08-08 15:47 -07:00 - Added absolute_loss_rate as a permanent column across the ETF pipeline and UI
+
+- Step completed: Made the ad hoc loss-rate check permanent. `run_analysis.py` now computes `absolute_loss_rate` (fraction of trades where `ret < 0`) for every cell in both ETF families and includes it in each family's strongest-candidate summary. Regenerated all reports (stock, bearish, and ETF families) so the new column is live in the committed CSVs/JSON. Wired it through the TypeScript layer (`vite.config.ts`'s CSV/JSON parsers, `EtfResearchRow` type in `api.ts`) and added it to the ETF Research UI: a "Lost money outright" stat on each family's strongest-cell summary and a "Lost money" column in the per-cell grid table. Added one clarifying paragraph to `ETF_PRESPEC.md` §8 noting the field is purely descriptive and does not affect the discovery bar or correction.
+- Files inspected or changed: `research/run_analysis.py` (`_analyse_etf_family`, `_etf_family_diagnostics`), `research/ETF_PRESPEC.md`, `src/api.ts` (`EtfResearchRow`), `vite.config.ts` (`parseEtfRows`, `camelEtfCandidate`), `src/domains/research/components/EtfResearchSection.tsx`, and regenerated `research/report/etf_rating_trust_results.csv`, `research/report/etf_persistence_results.csv`, `research/report/etf_meta.json`, `research/report/full_results.csv`, `research/report/bearish_*` (all rewritten by the same `run_analysis.py` run), `research/report/run_meta.json`.
+- Decision made and reason: Reused the exact `beat_spy_rate`/`beat_pool_rate` pattern already in the codebase (a boolean-mean column computed inline) instead of introducing a new summary function, since it's the same shape of statistic and keeps the diff minimal.
+- Agent name and model: Claude Sonnet 5.
+- Test result: `npx tsc -b --noEmit` passed with no errors. Full `run_analysis.py` run completed (exit code 0); verified `absolute_loss_rate` present in both CSVs and in `etf_meta.json`'s `top_candidate` blocks, with the 30d/30d bullish_plus cell showing `0.23255813953488372`, matching the earlier ad hoc result. Started a throwaway dev server (port 5174, since 5173 was already in use by another process) and confirmed `GET /api/research` returns `absoluteLossRate` on both the persistence row and the family's `top_candidate`; server processes killed afterward.
+- Errors or unresolved items: None. UI visual appearance (table column width/wrapping, stat tile styling) was not checked in an actual browser render, only confirmed via the API JSON payload the UI consumes.
+- Next step: Restart `dev:all`/the normal dev workflow and visually confirm the new "Lost money" column and stat tile render correctly on both ETF Research family panels.
+## 2026-08-08 19:41 -07:00 - Investigated extension-to-backtest processed-symbol tracking
+
+- Step completed: Inspected the 3-year tab closer, the supplied Seeking Alpha screener HTML, the consolidation manifest/script, and the backtest data/API surface.
+- Files inspected or changed: `chrome-extensions/three-year-tab-closer/*`, `backtest/scripts/consolidate-single-data.mjs`, `backtest/input/3-year/consolidated_unique.manifest.txt`, `backtest/vite.config.ts`, `backtest/src/api.ts`, `backtest/src/domains/data/components/DataView.tsx`, and `progress.md`.
+- Decision made and reason: Treat a symbol as considered only when it exists in the backtest system's consolidated/imported data, and expose that canonical set through the local backtest API for the extension to sync. Seeking Alpha result tickers can be found via their stable `data-test-id` and `/symbol/{ticker}` link rather than fragile generated classes.
+- Agent name and model: Codex (GPT-5).
+- Test result: Inspection only; no implementation tests run yet.
+- Errors or unresolved items: The exact backtest endpoint and extension sync/highlight behavior still need implementation and verification.
+- Next step: Add the processed-symbol endpoint, extension sync/storage UI, and unprocessed-ticker highlighting, then run automated and browser checks.
+
+## 2026-08-08 19:49 -07:00 - Added consolidated-symbol coverage highlighting to the Chrome extension
+
+- Step completed: Added a provenance-scoped processed-symbol API, five-minute extension sync with last-good-state retention, popup controls/status, and red boxes for Seeking Alpha screener symbols absent from the consolidated backtest bundle.
+- Files inspected or changed: `backtest/server/db/ingest.ts`, `backtest/vite.config.ts`, `backtest/README.md`, `chrome-extensions/three-year-tab-closer/manifest.json`, `background.js`, `content.js`, `content.css`, `highlighting.js`, `popup.html`, `popup.js`, `popup.css`, `README.md`, `test/highlighting.test.mjs`, `test/highlighting-fixture.html`, and `progress.md`.
+- Decision made and reason: The API includes only rows whose source provenance is `3-year/consolidated_unique.json`; a live check found one residual SQLite test symbol (`ZZTEST`) that would have been a false processed result if all database tickers were returned. Sync happens in the extension service worker because Chrome content scripts remain subject to the page origin's same-origin policy.
+- Agent name and model: Codex (GPT-5).
+- Test result: Backtest production build passed; 4 highlighting unit tests passed; all extension scripts passed `node --check`; manifest JSON parsed; live endpoint returned exactly 721 consolidated symbols and excluded `ZZTEST`; browser fixture rendered no box for processed `AAAU` and a 2px solid red box plus explanatory title for unprocessed `SOXX`.
+- Errors or unresolved items: The unpacked extension must be reloaded in `chrome://extensions` before Chrome uses version 1.1.0. The backtest app must be running for a fresh sync, but the last successful list remains usable while it is offline.
+- Next step: Reload the extension, start the backtest app on port 5173, click `Sync now`, and open the Seeking Alpha ETF screener.
+
+## 2026-08-08 20:12 -07:00 - Hardened JSON Sniper for background and pre-existing tabs
+
+- Step completed: Buffered early bridge messages while settings load, added duplicate-injection guards, and attached the extension to already-open HTTP(S) tabs when capture starts, on install/update, and at browser startup.
+- Files inspected or changed: `chrome-extensions/json-sniper/bridge.js`, `inject.js`, `sw.js`, `manifest.json`, `README.md`, `test/bridge-init.test.mjs`, and `progress.md`.
+- Decision made and reason: Background tabs are not inherently unsupported for page-owned fetch/XHR, but Chrome can freeze/discard them and the existing extension previously did not inject into tabs opened before installation/reload. The new `scripting`-based attach handles the fixable case; service-worker/web-worker requests and discarded tabs remain platform/page-lifecycle limits.
+- Agent name and model: Codex (GPT-5).
+- Test result: Bridge buffering test passed; all JSON Sniper scripts passed `node --check`; manifest JSON parsed successfully.
+- Errors or unresolved items: Existing requests that happened before attachment cannot be recovered. Capturing worker/service-worker traffic still requires a debugger-based design with additional permission and visible debugging trade-offs.
+- Next step: Reload the unpacked JSON Sniper extension, set the pattern, click `Start capture`, and test an already-open background tab. If it still misses data, check `chrome://discards` and whether the matching request is made by a worker rather than page fetch/XHR.
+
+## 2026-08-08 - Audited JSON Sniper default matching pattern
+
+- Step completed: Confirmed the extension currently stores an empty default pattern in `popup.js`, `bridge.js`, and `sw.js`.
+- Decision made and reason: No earlier agreed regex was present in the project notes. The likely project-specific candidate is `api/v3/(ticker_changes|historical_prices)`, matching the two Seeking Alpha endpoint aliases already defined in `sw.js`; exact confirmation is still needed before changing capture scope.
+- Agent name and model: Codex (GPT-5).
+- Test result: No code changed; existing JSON Sniper checks remain passing.
+- Errors or unresolved items: The intended historical default regex is not recorded in the repository.
+
+## 2026-08-08 - Set JSON Sniper default Seeking Alpha matcher
+
+- Step completed: Set `api/v3/(ticker_changes|historical_prices)` as the default pattern in the popup, page bridge, and service worker; migrated existing empty patterns on extension update; bumped JSON Sniper to version 1.1.1 and documented the default.
+- Decision made and reason: Used the endpoint matcher requested by the user. The matcher selects the two relevant Seeking Alpha API families; date-range validation for distinguishing historical-price horizons remains a separate concern because the URL encodes dates rather than a duration label.
+- Agent name and model: Codex (GPT-5).
+- Test result: `node --check` passed for bridge, service worker, and popup; bridge initialization test passed; manifest JSON parsed successfully.
+
+## 2026-08-08 - Evaluated JSON Sniper raw capture
+
+- Step completed: Inspected `C:/Users/hamed/Downloads/raw_2026-08-09T03-13-58.json` for endpoint coverage, ticker counts, row counts, query ranges, and pagination metadata.
+- Result: 14 payloads across 12 tickers; 2 `ticker_changes` payloads and 12 `historical_prices` payloads. Historical prices cover only 2026-06-20 through 2026-08-08 (mostly 34 trading rows per ticker), not three years. PSI ticker changes report `meta.total=138` but only 100 rows were captured, so that response is paginated/incomplete.
+- Agent name and model: Codex (GPT-5).
+
+## 2026-08-08 19:58 -07:00 - Added "Check an ETF" advisor page (ETFs > Check an ETF)
+
+- Step completed: Built a new page that matches a specific ETF's *current* rating/streak against the already-confirmed ETF Research rules and reports either matching hold-period scenarios (with each rule's real historical edge/t/Holm p) or a plain "doesn't fit — skip it" verdict. Supports uploading real ETF JSON files via a native OS file picker (`<input type="file" multiple>`) or checking ticker symbols already in the database. Per user's explicit choices: (1) verdicts use only the frozen Research results, not the faster Discovery screen; (2) uploads permanently join the shared database, same writer as the Data page's Import button; (3) only hold periods that actually appear on a `discoveredRule` row are shown — nothing is hardcoded to 30/90/180, so a future validated hold period would appear automatically.
+- Files inspected or changed: `server/db/ingest.ts` (added `importUploadedFiles`, refactored the tail of `runImport` into a shared `finishImport`), `vite.config.ts` (new `POST /api/data/upload` route, a `readJsonBody` helper since no route previously read a request body, a new `etfCheck` action on `/api/analysis`), `server/analysisModule.ts` (added `buildEtfCheck` to the module type), `src/data.ts` (new `buildEtfCheck` builder reusing the same episode/streak logic as `buildSignalDiscovery`'s `tickerMatches`), `src/api.ts` (`uploadEtfFiles`, `fetchEtfCheck`, `EtfCheckResult`/`EtfCheckState` types), `src/domains/research/components/EtfResearchSection.tsx` (exported its `pp`/`returnPercent`/`percent`/`pValue`/`filterLabel` formatters for reuse), `src/domains/etf-check/components/EtfCheckView.tsx` (new), `src/App.tsx` (new `etf-check` view/route/nav entry, following the exact existing `ActiveView`/`ROUTES`/`VIEW_COPY` pattern; wired as a fully self-contained component like `PortfolioBacktestView`, not through App.tsx's central per-view fetch effect).
+- Decision made and reason: Reused `EtfResearchRow`'s already-parsed `discoveredRule`/`mean`/`t`/`holmP` fields from `/api/research` instead of re-deriving statistics; reused `detectKind`/`parseFile`/`writeParsed` from `ingest.ts` for uploads instead of writing a second parser. Matching logic treats "just turned bullish" (rating-trust family) as episode age ≤5 calendar days — a labeled, adjustable UI threshold, not a new statistical claim — versus persistence rules, which match on episode age ≥ the rule's own persistence window.
+- Agent name and model: Claude Sonnet 5.
+- Test result: `npx tsc -b --noEmit` passed with no errors both before and after a bug fix (see below). Manually verified the real HTTP flow end-to-end against the dev server (no browser UI rendering was performed — no browser tool was available in this environment): uploaded a real extracted ETF file (AAAU) through `POST /api/data/upload`, confirmed `filesImported: 1`; called `GET /api/analysis?action=etfCheck&tickers=AAAU` and got back its true current state (Hold, not qualifying — the "doesn't fit" path); called the same for `USO` (real Buy-rated ETF, 37-day bullish-plus streak) and independently confirmed against `GET /api/research` that this streak (37 days) correctly exceeds the one real persistence winner's window (30d), i.e. the client-side matching logic in `EtfCheckView.tsx` would surface exactly the `bullish_plus`/30d-persistence/30d-hold scenario and nothing else for that ETF — traced by hand against the live JSON, not by rendering the component.
+- **Bug found and fixed during manual testing:** the first `importUploadedFiles` implementation reused `runImport`'s "missing files" logic unchanged, which compared the upload's own file(s) against *every* previously known source file — so any upload made every real disk-imported file (including `benchmark/*.json` and the whole `3-year/consolidated_unique.json` bundle) appear as newly "missing" in the response and, had a normal import run afterward without the fix, would have queued them for deletion. Fixed by seeding `importUploadedFiles`'s `seen` set with every already-known `source_files` relPath up front, so an upload only ever adds to what's known rather than treating everything else as gone.
+- **Side effect from testing, now cleaned up:** the AAAU test upload (real content, already present via the existing 3-year bundle) reassigned AAAU's 756 price rows and 64 rating rows' `source_file_id` to the throwaway test upload row, and a normal re-import did not reclaim them (the bundle file's content hash was unchanged, so `runImport` correctly skipped re-parsing a 152 MB file it already had). Manually restored by re-pointing those rows back to the real `3-year/consolidated_unique.json` source file and deleting the orphaned test `source_files` row; verified afterward that zero `uploads/%` rows remain and AAAU's rows all point to the real bundle again. Ticker/price counts are unchanged from before testing.
+- Errors or unresolved items: No actual browser rendering of the new page was performed (file picker interaction, card layout, table wrapping) — only the underlying API responses and the matching logic were verified by hand. `EtfCheckView` was deliberately built as a fully self-contained component (own fetch/upload state) rather than wired into App.tsx's shared per-view state, matching the existing `PortfolioBacktestView` precedent — this was a judgment call, not something the user specified.
+- Next step: Open `/etfs/check` in a real browser, upload a real multi-year ETF export, and visually confirm the file picker, upload feedback, scenario cards, and "doesn't fit" message all render as intended.
+
+## 2026-08-09 (session continued) - Checked whether a per-ETF ranking score is feasible, ahead of a proposed design
+
+- Step completed: User asked how to pick among ~281 ETFs currently matching a confirmed rule with limited capital, and shared another agent's proposed fix: a new per-ETF score built from that ETF's own win rate, median return, worst drawdown, and "consistency." Before endorsing or rejecting that proposal, measured the real per-ETF episode counts behind each winning rule to check whether such a score would have enough observations per ETF to mean anything.
+- Files inspected or changed: read-only against `.data/vantage.sqlite` via `research/pipeline.py`; wrote and deleted a throwaway script `research/adhoc_episode_counts.py` (not committed). No pipeline or report files modified.
+- Test result: For the one persistence winner (`bullish_plus`/30d-persistence/30d-hold), 152 of 254 ETFs (59.8%) have exactly one historical episode in the validation window — a "win rate" for most of them would be a single coin flip reported as a percentage. The rating-trust transition rules are meaningfully better: only 16-26% of ETFs have a single episode; most have 3+ (up to 17 for the most volatile names) across the one-year validation window.
+- Decision made and reason: Told the user the per-ETF score idea is unsound for the persistence rule specifically (majority n=1) and, even where episode counts are higher (rating-trust), those episodes for one ETF overlap in time and share the same underlying price trend, so they aren't independent evidence the way 254 different ETFs are — a per-ETF score there would still overstate confidence. Recommended diversification across a chosen rule's current matches instead of trying to rank individual ETFs, plus a correlation/overlap check across selected ETFs (a portfolio-construction question, not a return-prediction one) as the one part of the proposal that is soundly buildable.
+- Agent name and model: Claude Sonnet 5.
+- Errors or unresolved items: No code was built yet — this was a design discussion. If the user wants the basket simulator or correlation-diversification tool discussed, that's unbuilt.
+- Next step: Awaiting user decision on whether to build the equal-weight basket simulator and/or a correlation-based diversification check across a rule's current ETF matches.
+
+## 2026-08-09 (session continued) - Reviewed and fixed the basket-simulator/diversification implementation
+
+- Step completed: User (or another agent, working from the ASCII sketches agreed above) implemented the basket simulator and correlation-clustering diversification check across `server/analysisModule.ts`, `src/api.ts`, `src/data.ts` (`buildEtfBasketAnalysis`, `simulateEqualWeightBasket`, `correlationBetween`), `src/domains/etf-check/components/EtfCheckView.tsx`, `src/styles.css`, and `vite.config.ts`. Ran a code review (via the `code-review` skill) against this implementation, independently verified all 7 reported findings by reading the actual code and, for the top 3, by hitting the running dev server, then fixed all 7.
+- Files inspected or changed: `src/data.ts` (rewrote `correlationBetween` to delegate to the existing `fitLine` instead of duplicating its math; `simulateEqualWeightBasket` now requires a majority of selected tickers present on a date instead of all of them; `buildEtfBasketAnalysis` now caches correlation results between the clustering pass and the warnings pass instead of recomputing, sorts cluster selection priority ascending by size so singleton/small clusters are kept first when `basketSize` forces a choice, and returns separate `clusterThreshold`/`warningsThreshold` fields instead of one field that only matched the clustering constant), `vite.config.ts` (added `basketSize` to the `/api/analysis` result cache key), `src/domains/etf-check/components/EtfCheckView.tsx` (an upload whose ticker can't be auto-detected now shows an error instead of silently calling `fetchEtfCheck([])`, which means "show every ETF"; the two hardcoded "95%" threshold mentions now read `basketAnalysis.warningsThreshold`).
+- Decision made and reason: All 7 findings were confirmed as real before fixing (not just plausible) — traced against the literal code, and for the 3 most severe, against real HTTP responses from a running dev server.
+- Test result: `npx tsc -b --noEmit` and `npx vite build` both passed clean after the fixes. Verified live against the dev server with 37 real currently-matching ETFs: `allBasket.observations` went from what would have collapsed toward 0 (old all-tickers-required rule) to 738 real observations; `diversifiedBasket` at `basketSize=5` now returns singleton-cluster tickers (`AIA, AIRR, AMDY, AMZA, AVDV`, all cluster size 1) instead of representatives of the largest clusters; requesting `basketSize=5` vs `basketSize=10` for the same tickers now correctly returns different-length, different-content baskets instead of a stale cached result.
+- Agent name and model: Claude Sonnet 5.
+- Errors or unresolved items: None outstanding from the review. Visual/browser rendering of the fixed UI (the two hardcoded-95%-text spots, the new upload error message) was not performed — only the underlying data was verified.
+- Next step: Open `/etfs` (Current ETF candidates section) in a real browser and visually confirm the basket comparison and cluster/warnings panel render correctly with the fixed numbers.
+
+## 2026-08-09 (session continued) - Rebuilt "Current ETF candidates" around a single selected strategy instead of pooling every matching rule
+
+- Step completed: Rewrote `src/domains/etf-check/components/EtfCheckView.tsx` so the page answers "using one specific validated rule, which ETFs qualify and how should I split money across them" instead of blending every confirmed rule together. Added an explicit strategy selector (grouped by family: "Just turned bullish · vs SPY" / "Stayed bullish · vs bullish pool"), each option showing its own t-stat and edge. Default selection follows the frozen `ETF_PRESPEC.md` hierarchy: the strongest rating-trust rule by |t| (tie-break Holm p) is preferred over persistence rules even if a persistence rule scored a marginally larger |t|, since the spec states rating-trust "owns the main verdict" and persistence "may not override it." The default is labeled exactly `Strongest validated rule in this research run` (not "best"/"guaranteed") per explicit instruction; manually switching to a different rule shows `Not the strongest rule — switched manually` instead. Candidate matching, the basket's hold period (now locked to the selected rule's own tested hold, no longer a free 30/90/180 dropdown), and the correlation clustering are now all scoped to the one active rule. Removed the old `equalWeightHorizonSummaries`/`scenariosFor` multi-rule-per-ETF logic and the "if you bought every matching ETF, here's 30/90/180-day returns" card panel, since those mixed different rules' hold periods together — replaced with a single evidence panel showing the active rule's own real stats (edge, t, Holm p, n trades, tickers) pulled directly from the Research report, not recomputed. Added a "No rule has cleared the statistical bar yet" state and a per-rule "No ETFs currently match this strategy" note.
+- Files inspected or changed: `src/domains/etf-check/components/EtfCheckView.tsx` (full rewrite of the matching/rendering logic; upload and ticker-check flow left unchanged), `src/styles.css` (added `.etf-rule-panel`, `.etf-rule-evidence`, `.etf-no-match-note`, `.etf-basket-locked-hold`, reusing existing `.data-badge`/`.muted`/`.conclusion-stats`/`.etf-basket-controls` elsewhere).
+- Decision made and reason: Matches the design agreed in conversation across several turns, including the explicit caution that auto-picking "whichever rule scored best" is itself another selection step and must be labeled as such rather than implied to be provably optimal.
+- Test result: `npx tsc -b --noEmit` and `npx vite build` both passed clean. Verified live against the dev server: the default-selection algorithm picks `bullish_plus / 90d hold` (t=9.29) over the four other confirmed rules, correctly preferring rating-trust over the persistence rule per the family-hierarchy rule (not just raw |t|, though in this dataset they happen to agree); 12 ETFs currently match that specific rule's "newly bullish, <=5 days" condition; `USO` (37-day bullish streak) correctly does NOT match the default rating-trust rule but would match the persistence rule instead, confirming per-rule scoping now works as intended; the basket endpoint correctly returns non-empty results (699 observations) for the scoped 12-ETF candidate list at the rule's own locked 90-day hold.
+- Agent name and model: Claude Sonnet 5.
+- Errors or unresolved items: No browser rendering performed (no browser tool available this session) — only the underlying data/logic was verified via direct API calls, not the actual rendered dropdown, evidence panel, or table layout.
+- Next step: Open `/etfs` in a real browser, confirm the strategy dropdown, evidence panel, and per-rule candidate table/basket render correctly, and try switching rules manually to confirm the "switched manually" label appears and the candidate list/basket update accordingly.

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "3-Year Chart Tab Closer",
+  "version": "1.1.0",
+  "description": "Highlights Seeking Alpha symbols missing from the local backtest and automates 3Y chart downloads.",
+  "permissions": ["storage", "tabs", "downloads", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "3-Year Chart Tab Closer",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["highlighting.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

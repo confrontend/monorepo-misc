@@ -1,0 +1,20 @@
+body {
+  width: 320px;
+  margin: 0;
+  color: #202124;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+main { padding: 16px; }
+h1 { margin: 0 0 14px; font-size: 16px; }
+h2 { margin: 0 0 12px; font-size: 14px; }
+.toggle-row { display: flex; gap: 9px; align-items: center; font-weight: 600; }
+.status { margin: 8px 0; color: #5f6368; }
+.status.error { color: #b3261e; }
+.help { margin: 14px 0 0; color: #5f6368; font-size: 12px; }
+.backtest-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid #dadce0; }
+.url-field { display: grid; gap: 5px; margin-top: 14px; color: #5f6368; font-size: 12px; }
+.url-field input { box-sizing: border-box; width: 100%; padding: 7px 8px; border: 1px solid #bdc1c6; border-radius: 4px; color: #202124; }
+button { margin-top: 9px; padding: 7px 11px; border: 1px solid #bdc1c6; border-radius: 4px; background: #fff; color: #1a73e8; font-weight: 600; cursor: pointer; }
+button:hover { background: #f8fafd; }
+button:disabled { color: #9aa0a6; cursor: wait; }

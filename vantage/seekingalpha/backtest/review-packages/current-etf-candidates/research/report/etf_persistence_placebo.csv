@@ -1,0 +1,2 @@
+filter,persistence,hold,observed_mean,random_median,random_p5,random_p95,empirical_p,simulations
+bullish_plus,30d,30d,0.012388880246843962,-5.9729762107679044e-05,-0.005770308264027225,0.005723597338343388,0.0004997501249375312,2000

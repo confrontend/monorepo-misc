@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-08-08T22:41:06+00:00",
+  "input_path": "C:\\Code\\monorepo-misc\\vantage\\seekingalpha\\backtest\\.data\\vantage.sqlite",
+  "spy_path": "C:\\Code\\monorepo-misc\\vantage\\seekingalpha\\backtest\\.data\\vantage.sqlite",
+  "dataset": {
+    "tickers": 700,
+    "price_rows": 515174,
+    "rating_events": 27475,
+    "price_start": "2023-07-31",
+    "price_end": "2026-08-07",
+    "spy_start": "1993-01-29",
+    "spy_end": "2026-08-03",
+    "spy_days": 8434
+  },
+  "thresholds": {
+    "min_clusters": 15,
+    "discovery_t": 3.0,
+    "alpha": 0.05,
+    "bootstrap_reps": 4999
+  },
+  "grid": {
+    "lookbacks": [
+      "3mo",
+      "6mo",
+      "12mo",
+      "18mo"
+    ],
+    "holds": [
+      "6mo",
+      "12mo",
+      "18mo"
+    ],
+    "floors": [
+      "bullish_plus",
+      "very_bullish_only"
+    ],
+    "dip_tolerances": [
+      "0pct_strict",
+      "1pct_dip"
+    ]
+  },
+  "summary": {
+    "cuts_total": 48,
+    "cuts_testable": 28,
+    "discovered_rules": 8
+  },
+  "top_candidate": {
+    "lookback": "3mo",
+    "hold": "6mo",
+    "floor": "bullish_plus",
+    "dip_tolerance": "0pct_strict",
+    "n": 588,
+    "g": 360,
+    "mean": 0.07164762910139229,
+    "t": 5.929000730697893,
+    "p": 0.0002,
+    "holm_p": 0.0056,
+    "bh_p": 0.0009333333333333333,
+    "discovered_rule": true,
+    "placebo_sims": 2000,
+    "placebo": {
+      "observed_mean": 0.07164762910139229,
+      "random_median": 0.08306991948596748,
+      "random_p5": 0.0557973214156373,
+      "random_p95": 0.11639134942460137,
+      "empirical_p": 0.732
+    }
+  },
+  "bearish_report": "bearish_meta.json",
+  "etf_report": "etf_meta.json"
+}

@@ -12,7 +12,12 @@ import { applySchema } from './schema.js';
 // This file lives at <project>/server/db/client.ts, so the project root is three levels up.
 const projectRoot = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const dataDir = path.join(projectRoot, '.data');
-const dbPath = path.join(dataDir, 'analysis.sqlite');
+// Deliberately not the old `analysis.sqlite`. That file stored a verbatim copy of every source
+// JSON record alongside the parsed columns and reached 640 MB, which is what made it slow and,
+// on at least one machine, unopenable ("disk I/O error"). The ingestion schema keeps only a
+// source_file_id per row, so a fresh filename is both a clean break from the corrupt file and a
+// guarantee that nobody is silently reading half-migrated data out of the old one.
+export const dbPath = path.join(dataDir, 'vantage.sqlite');
 
 let db: DatabaseSync | null = null;
 

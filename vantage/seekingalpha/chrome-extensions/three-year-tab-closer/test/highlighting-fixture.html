@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Backtest coverage highlighting fixture</title>
+    <link rel="stylesheet" href="../content.css">
+  </head>
+  <body>
+    <table data-test-id="table">
+      <tbody>
+        <tr>
+          <td><a data-test-id="top-rated-ticker-link" href="/symbol/AAAU"><span data-test-id="top-rated-ticker-name">AAAU</span></a></td>
+          <td>Goldman Sachs Physical Gold ETF</td>
+        </tr>
+        <tr>
+          <td><a data-test-id="top-rated-ticker-link" href="/symbol/SOXX"><span data-test-id="top-rated-ticker-name">SOXX</span></a></td>
+          <td>iShares Semiconductor ETF</td>
+        </tr>
+      </tbody>
+    </table>
+    <script src="../highlighting.js"></script>
+    <script>SABacktestHighlights.applyHighlights(document, new Set(['AAAU']), true);</script>
+  </body>
+</html>

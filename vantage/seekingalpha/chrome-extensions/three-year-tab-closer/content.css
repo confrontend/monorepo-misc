@@ -1,0 +1,15 @@
+.sa-backtest-unprocessed {
+  outline: 2px solid #dc2626 !important;
+  outline-offset: 2px !important;
+  border-radius: 3px !important;
+  background: rgba(220, 38, 38, 0.12) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sa-backtest-unprocessed {
+    outline-color: #f87171 !important;
+    background: rgba(248, 113, 113, 0.18) !important;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65) !important;
+  }
+}

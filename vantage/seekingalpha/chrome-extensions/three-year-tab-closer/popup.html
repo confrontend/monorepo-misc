@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>3-Year Tab Closer</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>3-Year Tab Closer</h1>
+      <label class="toggle-row">
+        <input id="enabled" type="checkbox">
+        <span>Automate 3Y downloads</span>
+      </label>
+      <p id="automation-status" class="status">Off</p>
+      <p class="help">Finds the 3Y interval, clicks it, then closes the tab after the download starts.</p>
+
+      <section class="backtest-section" aria-labelledby="backtest-title">
+        <h2 id="backtest-title">Backtest coverage</h2>
+        <label class="toggle-row">
+          <input id="highlight-enabled" type="checkbox">
+          <span>Box unprocessed symbols in red</span>
+        </label>
+        <label class="url-field" for="backtest-url">
+          <span>Backtest address</span>
+          <input id="backtest-url" type="url" spellcheck="false" value="http://localhost:5173">
+        </label>
+        <button id="sync" type="button">Sync now</button>
+        <p id="sync-status" class="status" aria-live="polite">Not synced yet</p>
+        <p class="help">Keep the local backtest app running. A successful list is kept if the app later goes offline.</p>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+body {
+  width: 260px;
+  margin: 0;
+  color: #202124;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+main { padding: 16px; }
+h1 { margin: 0 0 14px; font-size: 16px; }
+button { width: 100%; margin: 4px 0; padding: 8px; cursor: pointer; }
+#status { margin: 10px 0 0; color: #3c4043; }
+.help { margin: 12px 0 0; color: #5f6368; font-size: 12px; }

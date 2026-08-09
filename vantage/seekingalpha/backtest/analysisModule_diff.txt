@@ -1,0 +1,28 @@
+warning: in the working copy of 'vantage/seekingalpha/backtest/server/analysisModule.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/vantage/seekingalpha/backtest/server/analysisModule.ts b/vantage/seekingalpha/backtest/server/analysisModule.ts
+index 5afe17c..b5ba803 100644
+--- a/vantage/seekingalpha/backtest/server/analysisModule.ts
++++ b/vantage/seekingalpha/backtest/server/analysisModule.ts
+@@ -5,6 +5,8 @@
+ // imported here directly — same tradeoff vite.config.ts already made for its own AnalysisModule
+ // type before this file existed.
+ export type AnalysisModule = {
++  initialiseDatasets: (payload: { datasets: any[]; benchmarks: Array<[string, any[]]>; universe: any }) => void;
++  getUniverseSummary: () => { total: number; reconstructed: number; snapshotOnly: number };
+   getAvailableHistoryWindows: () => string[];
+   getAvailableRatingTiers: () => string[];
+   getAvailableAccuracyHorizons: () => number[];
+@@ -17,4 +19,13 @@ export type AnalysisModule = {
+   buildScoreCorrelation: () => any;
+   buildTickerAccuracy: (horizonDays: number) => any[];
+   buildRatingCallSummary: (horizonDays: number) => any;
++  buildPredictiveAccuracySummary: (horizonDays: number) => any;
++  buildStrongBuyOutlierAnalysis: () => any;
++  buildPortfolioBacktest: (config: any) => any;
++  buildBestPortfolioBacktests: (config: any) => any[];
++  buildPortfolioHoldoutValidation: (config: any, options?: any) => any;
++  buildSignalDiscovery: (universe?: 'stocks' | 'etf') => any;
++  buildEtfCheck: (tickers?: string[]) => any;
++  buildEtfBasketAnalysis: (tickers: string[], horizonDays?: number, basketSize?: number) => any;
++  getMethodologyConfig: () => any;
+ };

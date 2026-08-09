@@ -1,0 +1,911 @@
+warning: in the working copy of 'vantage/seekingalpha/backtest/vite.config.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/vantage/seekingalpha/backtest/vite.config.ts b/vantage/seekingalpha/backtest/vite.config.ts
+index 259828f..647d5de 100644
+--- a/vantage/seekingalpha/backtest/vite.config.ts
++++ b/vantage/seekingalpha/backtest/vite.config.ts
+@@ -1,5 +1,6 @@
+-import { createHash } from 'node:crypto';
+-import { readdir, stat } from 'node:fs/promises';
++import { spawn } from 'node:child_process';
++import { existsSync, readFileSync, writeFileSync } from 'node:fs';
++import { readFile } from 'node:fs/promises';
+ import path from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { defineConfig, type Plugin } from 'vite';
+@@ -7,31 +8,23 @@ import react from '@vitejs/plugin-react';
+ import type { AnalysisModule } from './server/analysisModule';
+ import { ensureRunForFingerprint, findExistingRun } from './server/db/runs';
+ import { getMethodologyVersion, invalidateMethodologyVersionCache } from './server/db/methodologyVersion';
++import { getDataVersion } from './server/db/ingest';
+ 
+ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+-const dataDirectories = [path.join(projectRoot, 'input'), path.join(projectRoot, 'benchmark')];
+ // The two files whose content determines "what gets computed and how it's stored" -- watched
+ // directly (rather than relying on buildFingerprint(), which only looks at input/benchmark) so
+ // that editing calculation or persistence logic invalidates the methodology identity even when no
+ // input JSON file changed. See methodologyVersion.ts, which hashes these same two files.
+ const methodologyWatchPaths = [path.join(projectRoot, 'src', 'data.ts'), path.join(projectRoot, 'server', 'db', 'runs.ts')];
+ 
++// Replaces the old buildFingerprint(), which hashed the size and mtime of every JSON file in
++// input/ and benchmark/ on every single request. The importer now owns "has the data changed":
++// it bumps data_version when, and only when, an import actually wrote something. That is both
++// cheaper and more honest — touching a file no longer invalidates anything, and editing one
++// genuinely does.
+ const buildFingerprint = async () => {
+-  const entries: string[] = [];
+-  for (const directory of dataDirectories) {
+-    let names: string[] = [];
+-    try {
+-      names = (await readdir(directory)).filter((name) => name.endsWith('.json')).sort();
+-    } catch {
+-      // A missing benchmark directory is a valid empty-data state.
+-    }
+-    for (const name of names) {
+-      const filePath = path.join(directory, name);
+-      const metadata = await stat(filePath);
+-      entries.push(`${filePath}|${metadata.size}|${metadata.mtimeMs}`);
+-    }
+-  }
+-  return createHash('sha1').update(entries.join('\n')).digest('hex');
++  const { getDataVersion } = await import('./server/db/ingest.js');
++  return `data-v${getDataVersion().version}`;
+ };
+ 
+ const sendJson = (response: import('node:http').ServerResponse, status: number, payload: unknown) => {
+@@ -41,11 +34,748 @@ const sendJson = (response: import('node:http').ServerResponse, status: number,
+   response.end(JSON.stringify(payload));
+ };
+ 
++// No route reads a request body elsewhere in this file -- every other POST here needs no payload.
++// Uploads are the first exception, so this is the first place a body actually needs collecting.
++const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
++const readJsonBody = (request: import('node:http').IncomingMessage): Promise<unknown> =>
++  new Promise((resolve, reject) => {
++    let bytes = 0;
++    const chunks: Buffer[] = [];
++    request.on('data', (chunk: Buffer) => {
++      bytes += chunk.length;
++      if (bytes > MAX_UPLOAD_BYTES) {
++        reject(new Error(`Upload exceeds the ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB limit`));
++        request.destroy();
++        return;
++      }
++      chunks.push(chunk);
++    });
++    request.on('end', () => {
++      try {
++        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
++      } catch (cause) {
++        reject(cause instanceof Error ? cause : new Error(String(cause)));
++      }
++    });
++    request.on('error', reject);
++  });
++
+ const compactTicker = (result: any) => ({
+   ...result,
+   detail: { ...result.detail, events: [], ratingDistribution: [] },
+ });
+ 
++// ---------------------------------------------------------------------------
++// Research report API (/api/research)
++//
++// Deliberately separate from /api/analysis rather than another action on it.
++// The analysis endpoint caches by a fingerprint of input/ + benchmark/, which
++// says nothing about when research/report/ was last regenerated -- a run of
++// run_analysis.py would be invisible to that cache. These files are ~5 KB
++// total, so they're just re-read per request instead, and the page picks up a
++// re-run on refresh with no code change and no server restart.
++// ---------------------------------------------------------------------------
++const researchReportDir = path.join(projectRoot, 'research', 'report');
++const researchDataVersionPath = path.join(researchReportDir, '.data-version');
++
++const currentResearchStatus = () => {
++  const currentDataVersion = getDataVersion().version;
++  let reportDataVersion: number | null = null;
++  try {
++    const parsed = Number.parseInt(readFileSync(researchDataVersionPath, 'utf8').trim(), 10);
++    reportDataVersion = Number.isFinite(parsed) ? parsed : null;
++  } catch { /* no marker means an old or externally-created report */ }
++  return {
++    currentDataVersion,
++    reportDataVersion,
++    current: existsSync(path.join(researchReportDir, 'full_results.csv'))
++      && reportDataVersion !== null && reportDataVersion === currentDataVersion,
++  };
++};
++
++// The pipeline writes plain pandas CSV: no embedded newlines, but quoting is
++// still handled so a future sector/company column with a comma can't silently
++// shift every field after it.
++const parseCsv = (text: string): Array<Record<string, string>> => {
++  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
++  if (lines.length === 0) return [];
++  const splitRow = (line: string) => {
++    const cells: string[] = [];
++    let cell = '';
++    let quoted = false;
++    for (let index = 0; index < line.length; index += 1) {
++      const character = line[index];
++      if (quoted) {
++        if (character === '"' && line[index + 1] === '"') { cell += '"'; index += 1; }
++        else if (character === '"') quoted = false;
++        else cell += character;
++      } else if (character === '"') quoted = true;
++      else if (character === ',') { cells.push(cell); cell = ''; }
++      else cell += character;
++    }
++    cells.push(cell);
++    return cells;
++  };
++  const header = splitRow(lines[0]);
++  return lines.slice(1).map((line) => {
++    const cells = splitRow(line);
++    return Object.fromEntries(header.map((name, index) => [name, cells[index] ?? '']));
++  });
++};
++
++// Empty cells are genuinely absent values (an untestable cut has no t-stat at
++// all), so they become null rather than 0 -- the difference between "no edge
++// measured" and "an edge measured at zero" is the whole point of this page.
++const numberOrNull = (value: string | undefined) => {
++  if (value === undefined || value.trim() === '') return null;
++  const parsed = Number(value);
++  return Number.isFinite(parsed) ? parsed : null;
++};
++const pythonBool = (value: string | undefined) => (value ?? '').trim().toLowerCase() === 'true';
++
++const readResearchReport = async () => {
++  const readIfPresent = async (name: string) => {
++    try {
++      return await readFile(path.join(researchReportDir, name), 'utf8');
++    } catch {
++      return null;
++    }
++  };
++
++  const [
++    resultsCsv, concentrationCsv, placeboCsv, metaJson,
++    bearishTransitionCsv, bearishPersistenceCsv, bearishTransitionConcentrationCsv,
++    bearishPersistenceConcentrationCsv, bearishTransitionPlaceboCsv,
++    bearishPersistencePlaceboCsv, bearishMetaJson,
++    etfRatingCsv, etfPersistenceCsv, etfRatingConcentrationCsv,
++    etfPersistenceConcentrationCsv, etfRatingPlaceboCsv,
++    etfPersistencePlaceboCsv, etfMetaJson,
++  ] = await Promise.all([
++    readIfPresent('full_results.csv'),
++    readIfPresent('top_candidate_concentration.csv'),
++    readIfPresent('top_candidate_placebo.csv'),
++    readIfPresent('run_meta.json'),
++    readIfPresent('bearish_transition_results.csv'),
++    readIfPresent('bearish_persistence_results.csv'),
++    readIfPresent('bearish_transition_concentration.csv'),
++    readIfPresent('bearish_persistence_concentration.csv'),
++    readIfPresent('bearish_transition_placebo.csv'),
++    readIfPresent('bearish_persistence_placebo.csv'),
++    readIfPresent('bearish_meta.json'),
++    readIfPresent('etf_rating_trust_results.csv'),
++    readIfPresent('etf_persistence_results.csv'),
++    readIfPresent('etf_rating_trust_concentration.csv'),
++    readIfPresent('etf_persistence_concentration.csv'),
++    readIfPresent('etf_rating_trust_placebo.csv'),
++    readIfPresent('etf_persistence_placebo.csv'),
++    readIfPresent('etf_meta.json'),
++  ]);
++
++  if (!resultsCsv) {
++    return {
++      available: false,
++      reason: 'No research/report/full_results.csv found. Run: cd research && python run_analysis.py '
++        + '--input ../input/3-year --spy spy_series_2023-07-31_2026-08-03.csv --out report/',
++      meta: null, rows: [], concentration: [], placebo: null,
++      bearish: {
++        available: false, meta: null, transitionRows: [], persistenceRows: [],
++        transitionConcentration: [], persistenceConcentration: [],
++        transitionPlacebo: null, persistencePlacebo: null,
++      },
++      etf: {
++        available: false, meta: null, ratingRows: [], persistenceRows: [],
++        ratingConcentration: [], persistenceConcentration: [],
++        ratingPlacebos: [], persistencePlacebos: [],
++      },
++      researchStatus: currentResearchStatus(),
++    };
++  }
++
++  const rows = parseCsv(resultsCsv).map((row) => ({
++    lookback: row.lookback, hold: row.hold, floor: row.floor, dipTolerance: row.dip_tolerance,
++    testable: pythonBool(row.testable),
++    discoveredRule: pythonBool(row.discovered_rule),
++    mean: numberOrNull(row.mean),
++    t: numberOrNull(row.t),
++    p: numberOrNull(row.p),
++    holmP: numberOrNull(row.holm_p),
++    bhP: numberOrNull(row.bh_p),
++    n: numberOrNull(row.n) ?? 0,
++    tickers: numberOrNull(row.g) ?? 0,
++    meanReturn: numberOrNull(row.mean_ret),
++    medianReturn: numberOrNull(row.median_ret),
++    meanSpyReturn: numberOrNull(row.mean_spy_ret),
++    winRateVsSpy: numberOrNull(row.win_rate_vs_spy),
++    winRateAbsolute: numberOrNull(row.win_rate_absolute),
++    returnCiLow: numberOrNull(row.ret_ci_low),
++    returnCiHigh: numberOrNull(row.ret_ci_high),
++    excessCiLow: numberOrNull(row.bhar_ci_low),
++    excessCiHigh: numberOrNull(row.bhar_ci_high),
++  }));
++
++  const concentration = concentrationCsv ? parseCsv(concentrationCsv).map((row) => ({
++    topK: numberOrNull(row.top_k) ?? 0,
++    percentOfTotal: numberOrNull(row.pct_of_total_bhar),
++    meanExcluding: numberOrNull(row.mean_bhar_excl),
++  })) : [];
++
++  // pandas writes a Series as a two-column, effectively unheadered CSV
++  // (blank first header cell, "0" for the values) -- read it positionally.
++  const parseSeriesCsv = (text: string | null) => {
++    if (!text) return null;
++    const entries = text.split(/\r?\n/).filter((line) => line.includes(','))
++      .map((line) => line.split(','))
++      .filter(([key]) => key && key.trim().length > 0);
++    return entries.length
++      ? Object.fromEntries(entries.map(([key, value]) => [key.trim(), numberOrNull(value)]))
++      : null;
++  };
++  const placebo = parseSeriesCsv(placeboCsv);
++
++  let meta: any = null;
++  if (metaJson) {
++    try { meta = JSON.parse(metaJson); } catch { meta = null; }
++  }
++  // run_meta.json mirrors the CSV's snake_case column names for the top
++  // candidate; rename to the same camelCase shape as `rows` so the page has
++  // one row type instead of two near-identical ones.
++  if (meta?.top_candidate) {
++    const candidate = meta.top_candidate;
++    meta.top_candidate = {
++      lookback: candidate.lookback, hold: candidate.hold, floor: candidate.floor,
++      dipTolerance: candidate.dip_tolerance,
++      testable: true,
++      discoveredRule: Boolean(candidate.discovered_rule),
++      mean: candidate.mean ?? null, t: candidate.t ?? null, p: candidate.p ?? null,
++      holmP: candidate.holm_p ?? null, bhP: candidate.bh_p ?? null,
++      n: candidate.n ?? 0, tickers: candidate.g ?? 0,
++      placebo: candidate.placebo ?? null,
++      placebo_sims: candidate.placebo_sims ?? null,
++    };
++  }
++
++  const parseJsonObject = (value: string | undefined) => {
++    if (!value) return {};
++    try {
++      const parsed = JSON.parse(value);
++      return parsed && typeof parsed === 'object' ? parsed : {};
++    } catch {
++      return {};
++    }
++  };
++  const parseBearishRows = (text: string | null) => text ? parseCsv(text).map((row) => ({
++    family: row.family,
++    lookback: row.lookback || null,
++    hold: row.hold,
++    signal: row.signal,
++    outcome: row.outcome,
++    candidateSignals: numberOrNull(row.candidate_signals) ?? 0,
++    incompleteTrades: numberOrNull(row.incomplete_trades) ?? 0,
++    overlapSkipped: numberOrNull(row.overlap_skipped) ?? 0,
++    dropReasons: parseJsonObject(row.drop_reasons),
++    testable: pythonBool(row.testable),
++    discoveredRule: pythonBool(row.discovered_rule),
++    mean: numberOrNull(row.mean),
++    median: numberOrNull(row.median),
++    positiveRate: numberOrNull(row.positive_rate),
++    stockFellRate: numberOrNull(row.stock_fell_rate),
++    underperformedSpyRate: numberOrNull(row.underperformed_spy_rate),
++    t: numberOrNull(row.t),
++    p: numberOrNull(row.p),
++    holmP: numberOrNull(row.holm_p),
++    bhP: numberOrNull(row.bh_p),
++    n: numberOrNull(row.n) ?? 0,
++    tickers: numberOrNull(row.g) ?? 0,
++    ciLow: numberOrNull(row.ci_low),
++    ciHigh: numberOrNull(row.ci_high),
++  })) : [];
++  const parseBearishConcentration = (text: string | null) => text ? parseCsv(text).map((row) => ({
++    topK: numberOrNull(row.top_k) ?? 0,
++    percentOfTotal: numberOrNull(row.pct_of_total_outcome),
++    meanExcluding: numberOrNull(row.mean_outcome_excl),
++  })) : [];
++  const camelBearishCandidate = (candidate: any) => candidate ? {
++    family: candidate.family,
++    lookback: candidate.lookback ?? null,
++    hold: candidate.hold,
++    signal: candidate.signal,
++    outcome: candidate.outcome,
++    candidateSignals: candidate.candidate_signals ?? 0,
++    incompleteTrades: candidate.incomplete_trades ?? 0,
++    overlapSkipped: candidate.overlap_skipped ?? 0,
++    dropReasons: candidate.drop_reasons ?? {},
++    testable: Boolean(candidate.testable),
++    discoveredRule: Boolean(candidate.discovered_rule),
++    mean: candidate.mean ?? null,
++    median: candidate.median ?? null,
++    positiveRate: candidate.positive_rate ?? null,
++    stockFellRate: candidate.stock_fell_rate ?? null,
++    underperformedSpyRate: candidate.underperformed_spy_rate ?? null,
++    t: candidate.t ?? null,
++    p: candidate.p ?? null,
++    holmP: candidate.holm_p ?? null,
++    bhP: candidate.bh_p ?? null,
++    n: candidate.n ?? 0,
++    tickers: candidate.g ?? 0,
++    ciLow: candidate.ci_low ?? null,
++    ciHigh: candidate.ci_high ?? null,
++    placebo: candidate.placebo ?? null,
++  } : null;
++
++  let bearishMeta: any = null;
++  if (bearishMetaJson) {
++    try { bearishMeta = JSON.parse(bearishMetaJson); } catch { bearishMeta = null; }
++  }
++  if (bearishMeta?.families) {
++    bearishMeta.families.transition.top_candidate = camelBearishCandidate(
++      bearishMeta.families.transition.top_candidate);
++    bearishMeta.families.persistence.top_candidate = camelBearishCandidate(
++      bearishMeta.families.persistence.top_candidate);
++  }
++  const bearish = {
++    available: Boolean(bearishTransitionCsv && bearishPersistenceCsv && bearishMeta),
++    meta: bearishMeta,
++    transitionRows: parseBearishRows(bearishTransitionCsv),
++    persistenceRows: parseBearishRows(bearishPersistenceCsv),
++    transitionConcentration: parseBearishConcentration(bearishTransitionConcentrationCsv),
++    persistenceConcentration: parseBearishConcentration(bearishPersistenceConcentrationCsv),
++    transitionPlacebo: parseSeriesCsv(bearishTransitionPlaceboCsv),
++    persistencePlacebo: parseSeriesCsv(bearishPersistencePlaceboCsv),
++  };
++
++  const parseEtfRows = (text: string | null) => text ? parseCsv(text).map((row) => ({
++    family: row.family,
++    filter: row.filter,
++    persistence: row.persistence || null,
++    hold: row.hold,
++    candidateSignals: numberOrNull(row.candidate_signals) ?? 0,
++    incompleteTrades: numberOrNull(row.incomplete_trades) ?? 0,
++    dropReasons: parseJsonObject(row.drop_reasons),
++    outcome: row.outcome,
++    testable: pythonBool(row.testable),
++    discoveredRule: pythonBool(row.discovered_rule),
++    meanReturn: numberOrNull(row.mean_return),
++    medianReturn: numberOrNull(row.median_return),
++    meanSpyReturn: numberOrNull(row.mean_spy_return),
++    meanExcessSpy: numberOrNull(row.mean_excess_spy),
++    beatSpyRate: numberOrNull(row.beat_spy_rate),
++    meanPoolReturn: numberOrNull(row.mean_pool_return),
++    meanExcessPool: numberOrNull(row.mean_excess_pool),
++    beatPoolRate: numberOrNull(row.beat_pool_rate),
++    absoluteLossRate: numberOrNull(row.absolute_loss_rate),
++    mean: numberOrNull(row.mean),
++    t: numberOrNull(row.t),
++    p: numberOrNull(row.p),
++    holmP: numberOrNull(row.holm_p),
++    bhP: numberOrNull(row.bh_p),
++    n: numberOrNull(row.n) ?? 0,
++    tickers: numberOrNull(row.g) ?? 0,
++    ciLow: numberOrNull(row.ci_low),
++    ciHigh: numberOrNull(row.ci_high),
++  })) : [];
++  const parseEtfConcentration = (text: string | null) => text ? parseCsv(text).map((row) => ({
++    filter: row.filter,
++    persistence: row.persistence || null,
++    hold: row.hold,
++    topK: numberOrNull(row.top_k) ?? 0,
++    percentOfTotal: numberOrNull(row.pct_of_total_bhar),
++    meanExcluding: numberOrNull(row.mean_bhar_excl),
++  })) : [];
++  const parseEtfPlacebos = (text: string | null) => text ? parseCsv(text).map((row) => ({
++    filter: row.filter,
++    persistence: row.persistence || null,
++    hold: row.hold,
++    observed_mean: numberOrNull(row.observed_mean),
++    random_median: numberOrNull(row.random_median),
++    random_p5: numberOrNull(row.random_p5),
++    random_p95: numberOrNull(row.random_p95),
++    empirical_p: numberOrNull(row.empirical_p),
++    simulations: numberOrNull(row.simulations) ?? 0,
++  })) : [];
++  // Keep the example trades in the live API response so the ETF Research page can explain the
++  // strongest cell without requiring the browser to load raw trade data.
++  const camelEtfCandidate = (candidate: any) => candidate ? {
++    family: candidate.family,
++    filter: candidate.filter,
++    persistence: candidate.persistence ?? null,
++    hold: candidate.hold,
++    candidateSignals: candidate.candidate_signals ?? 0,
++    incompleteTrades: candidate.incomplete_trades ?? 0,
++    dropReasons: candidate.drop_reasons ?? {},
++    outcome: candidate.family === 'rating_trust' ? 'bhar' : 'excess_pool',
++    testable: Boolean(candidate.testable),
++    discoveredRule: Boolean(candidate.discovered_rule),
++    meanReturn: candidate.mean_return ?? null,
++    medianReturn: candidate.median_return ?? null,
++    meanSpyReturn: candidate.mean_spy_return ?? null,
++    meanExcessSpy: candidate.mean_excess_spy ?? null,
++    beatSpyRate: candidate.beat_spy_rate ?? null,
++    meanPoolReturn: candidate.mean_pool_return ?? null,
++    meanExcessPool: candidate.mean_excess_pool ?? null,
++    beatPoolRate: candidate.beat_pool_rate ?? null,
++    absoluteLossRate: candidate.absolute_loss_rate ?? null,
++    mean: candidate.mean ?? null,
++    t: candidate.t ?? null,
++    p: candidate.p ?? null,
++    holmP: candidate.holm_p ?? null,
++    bhP: candidate.bh_p ?? null,
++    n: candidate.n ?? 0,
++    tickers: candidate.g ?? 0,
++    ciLow: candidate.ci_low ?? null,
++    ciHigh: candidate.ci_high ?? null,
++    examples: Array.isArray(candidate.examples) ? candidate.examples : [],
++    placebo: candidate.placebo ?? null,
++  } : null;
++  let etfMeta: any = null;
++  if (etfMetaJson) {
++    try { etfMeta = JSON.parse(etfMetaJson); } catch { etfMeta = null; }
++  }
++  if (etfMeta?.families) {
++    etfMeta.families.rating_trust.top_candidate = camelEtfCandidate(
++      etfMeta.families.rating_trust.top_candidate);
++    etfMeta.families.persistence.top_candidate = camelEtfCandidate(
++      etfMeta.families.persistence.top_candidate);
++  }
++  const etf = {
++    available: Boolean(etfRatingCsv && etfPersistenceCsv && etfMeta),
++    meta: etfMeta,
++    ratingRows: parseEtfRows(etfRatingCsv),
++    persistenceRows: parseEtfRows(etfPersistenceCsv),
++    ratingConcentration: parseEtfConcentration(etfRatingConcentrationCsv),
++    persistenceConcentration: parseEtfConcentration(etfPersistenceConcentrationCsv),
++    ratingPlacebos: parseEtfPlacebos(etfRatingPlaceboCsv),
++    persistencePlacebos: parseEtfPlacebos(etfPersistencePlaceboCsv),
++  };
++
++  return { available: true, meta, rows, concentration, placebo, bearish, etf,
++    researchStatus: currentResearchStatus() };
++};
++
++// ---------------------------------------------------------------------------
++// Ingestion API (/api/data)
++//
++// GET  /api/data/status — what is in input/ versus what is in the database
++// POST /api/data/import — parse everything new or changed into the database
++//
++// This is the only writer of the raw tables. Nothing else in the app touches
++// the input folder.
++// ---------------------------------------------------------------------------
++type DataConsolidationJob = {
++  id: number;
++  status: 'running' | 'completed' | 'failed';
++  stage: string;
++  message: string;
++  progress: number;
++  startedAt: string;
++  finishedAt: string | null;
++  error: string | null;
++  summary: any | null;
++  importSummary: any | null;
++  dataStatus: any | null;
++};
++
++let dataConsolidationJob: DataConsolidationJob | null = null;
++let nextDataConsolidationJobId = 1;
++
++const startDataConsolidation = (): DataConsolidationJob => {
++  if (dataConsolidationJob?.status === 'running') return dataConsolidationJob;
++  const job: DataConsolidationJob = {
++    id: nextDataConsolidationJobId += 1,
++    status: 'running',
++    stage: 'starting',
++    message: 'Starting consolidation.',
++    progress: 1,
++    startedAt: new Date().toISOString(),
++    finishedAt: null,
++    error: null,
++    summary: null,
++    importSummary: null,
++    dataStatus: null,
++  };
++  dataConsolidationJob = job;
++
++  const scriptPath = path.join(projectRoot, 'scripts', 'consolidate-single-data.mjs');
++  const child = spawn(process.execPath, [scriptPath], { cwd: projectRoot });
++  let stdout = '';
++  let stderr = '';
++  let progressBuffer = '';
++  const consumeProgress = (chunk: string, flush = false) => {
++    progressBuffer += chunk;
++    const lines = progressBuffer.split(/\r?\n/);
++    progressBuffer = flush ? '' : (lines.pop() ?? '');
++    for (const line of lines) {
++      if (!line.startsWith('CONSOLIDATE_PROGRESS ')) { if (line.trim()) stderr += `${line}\n`; continue; }
++      try {
++        const update = JSON.parse(line.slice('CONSOLIDATE_PROGRESS '.length));
++        job.progress = Number(update.progress) || job.progress;
++        job.stage = String(update.stage ?? job.stage);
++        job.message = String(update.message ?? job.message);
++      } catch { stderr += `${line}\n`; }
++    }
++  };
++  child.stdout.on('data', (chunk) => { stdout += String(chunk); });
++  child.stderr.on('data', (chunk) => consumeProgress(String(chunk)));
++  child.on('error', (error) => {
++    job.status = 'failed';
++    job.error = error.message;
++    job.message = 'Could not start consolidation.';
++    job.finishedAt = new Date().toISOString();
++  });
++  child.on('close', async (code) => {
++    consumeProgress('', true);
++    if (job.status === 'failed') return;
++    if (code !== 0) {
++      job.status = 'failed';
++      job.error = stderr.trim().split(/\r?\n/).slice(-4).join(' ') || `Consolidation exited with code ${code}.`;
++      job.message = 'Consolidation stopped safely; source files were retained.';
++      job.finishedAt = new Date().toISOString();
++      return;
++    }
++    try {
++      const manifestPath = path.join(projectRoot, 'input', '3-year', 'consolidated_unique.manifest.txt');
++      job.summary = JSON.parse(await readFile(manifestPath, 'utf8'));
++      job.stage = 'importing';
++      job.message = 'Archive is safe. Importing the stable bundle into SQLite.';
++      job.progress = 94;
++      const { getDataStatus, runImport } = await import('./server/db/ingest.js');
++      job.importSummary = await runImport();
++      job.dataStatus = await getDataStatus();
++      job.status = 'completed';
++      job.stage = 'complete';
++      job.message = 'Consolidation, local archival, cleanup, and database import completed.';
++      job.progress = 100;
++      job.finishedAt = new Date().toISOString();
++    } catch (error) {
++      job.status = 'failed';
++      job.error = error instanceof Error ? error.message : String(error);
++      job.message = 'The source archive is safe, but the automatic database import failed. Use Import to retry.';
++      job.finishedAt = new Date().toISOString();
++    }
++    void stdout;
++  });
++  return job;
++};
++
++const dataApiPlugin = (): Plugin => ({
++  name: 'local-data-api',
++  configureServer(server) {
++    server.middlewares.use('/api/data', async (request, response) => {
++      try {
++        const url = new URL(request.url ?? '/', 'http://localhost');
++        const { getDataStatus, getProcessedSymbols, runImport, importUploadedFiles } = await import('./server/db/ingest.js');
++        if (url.pathname.endsWith('/processed-symbols') && request.method === 'GET') {
++          sendJson(response, 200, getProcessedSymbols());
++          return;
++        }
++        if (url.pathname.endsWith('/upload') && request.method === 'POST') {
++          if (dataConsolidationJob?.status === 'running') {
++            sendJson(response, 409, { error: 'Consolidation is already running; try again after it finishes.' });
++            return;
++          }
++          let body: unknown;
++          try {
++            body = await readJsonBody(request);
++          } catch (error) {
++            sendJson(response, 413, { error: error instanceof Error ? error.message : String(error) });
++            return;
++          }
++          const files = Array.isArray((body as { files?: unknown })?.files) ? (body as { files: unknown[] }).files : null;
++          if (!files || !files.every((file) => typeof (file as any)?.name === 'string' && typeof (file as any)?.content === 'string')) {
++            sendJson(response, 400, { error: 'Expected { files: [{ name, content }] }' });
++            return;
++          }
++          const summary = await importUploadedFiles(files as Array<{ name: string; content: string }>);
++          sendJson(response, 200, { summary, status: await getDataStatus() });
++          return;
++        }
++        if (url.pathname.endsWith('/consolidate/job')) {
++          sendJson(response, 200, { job: dataConsolidationJob });
++          return;
++        }
++        if (url.pathname.endsWith('/consolidate') && request.method === 'POST') {
++          sendJson(response, 202, { job: startDataConsolidation() });
++          return;
++        }
++        if (url.pathname.endsWith('/import') && request.method === 'POST') {
++          if (dataConsolidationJob?.status === 'running') {
++            sendJson(response, 409, { error: 'Consolidation is already running; its final stage imports automatically.' });
++            return;
++          }
++          const summary = await runImport();
++          sendJson(response, 200, { summary, status: await getDataStatus() });
++          return;
++        }
++        sendJson(response, 200, await getDataStatus());
++      } catch (error) {
++        sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
++      }
++    });
++  },
++});
++
++// The persistence-screen statistics stay in Python: a wild cluster bootstrap, Holm correction and
++// placebo test that have been validated against this dataset and should not be re-derived in
++// another language just to remove a runtime dependency. Instead the server spawns them, so there
++// is still no command to type. It runs as a tracked job rather than inside the request because it
++// takes about a minute, and this dev server is single-threaded — a blocking handler would freeze
++// every other request for its whole duration.
++type ResearchJob = {
++  id: number;
++  status: 'running' | 'completed' | 'failed';
++  startedAt: string;
++  finishedAt: string | null;
++  error: string | null;
++  log: string;
++};
++let researchJob: ResearchJob | null = null;
++let nextJobId = 1;
++
++const startResearchJob = (): ResearchJob => {
++  if (researchJob?.status === 'running') return researchJob;
++  const status = currentResearchStatus();
++  if (status.current) {
++    const now = new Date().toISOString();
++    return researchJob = {
++      id: nextJobId += 1,
++      status: 'completed',
++      startedAt: now,
++      finishedAt: now,
++      error: null,
++      log: `Report is already current for data version ${status.currentDataVersion}; no analysis was run.\n`,
++    };
++  }
++  const job: ResearchJob = {
++    id: nextJobId += 1,
++    status: 'running',
++    startedAt: new Date().toISOString(),
++    finishedAt: null,
++    error: null,
++    log: '',
++  };
++  researchJob = job;
++
++  const researchDir = path.join(projectRoot, 'research');
++  const finish = (status: ResearchJob['status'], error: string | null) => {
++    job.status = status;
++    job.error = error;
++    job.finishedAt = new Date().toISOString();
++  };
++
++  // Prefer the workspace virtual environment so the UI uses the same pandas/numpy runtime as
++  // development. On a Windows-hosted Vite server that environment is a WSL venv, so launch it
++  // through wsl.exe instead of falling into the Microsoft Store `python` app-execution alias.
++  type PythonLaunch = { command: string; args: string[]; label: string };
++  // Unbuffered output lets the UI receive stage updates while Python is still running.
++  const analysisArgs = ['-u', 'run_analysis.py', '--out', 'report/'];
++  const workspaceRoot = path.resolve(projectRoot, '..', '..');
++  const windowsPython = path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe');
++  const unixPython = path.join(workspaceRoot, '.venv', 'bin', 'python');
++  const toWslPath = (value: string) => {
++    const match = /^([A-Za-z]):[\\/](.*)$/.exec(value);
++    return match ? `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll('\\', '/')}` : value.replaceAll('\\', '/');
++  };
++  const launches: PythonLaunch[] = process.platform === 'win32'
++    ? [
++        ...(existsSync(windowsPython) ? [{ command: windowsPython, args: analysisArgs, label: 'project Windows virtual environment' }] : []),
++        // Windows cannot reliably stat a Linux venv's `bin/python` symlink even though WSL can
++        // execute it, so this candidate must not be hidden behind existsSync().
++        ...([{
++          command: 'wsl.exe',
++          args: ['--cd', toWslPath(researchDir), '-e', toWslPath(unixPython), ...analysisArgs],
++          label: 'project WSL virtual environment',
++        }]),
++        { command: 'py', args: ['-3', ...analysisArgs], label: 'Windows Python launcher' },
++        { command: 'python', args: analysisArgs, label: 'system Python' },
++      ]
++    : [
++        ...(existsSync(unixPython) ? [{ command: unixPython, args: analysisArgs, label: 'project virtual environment' }] : []),
++        { command: 'python3', args: analysisArgs, label: 'system python3' },
++        { command: 'python', args: analysisArgs, label: 'system python' },
++      ];
++
++  const run = (index: number) => {
++    const launch = launches[index];
++    if (!launch) {
++      finish('failed', 'Python was not found. Expected the workspace virtual environment at .venv, or a working Python 3 installation.');
++      return;
++    }
++    job.log += `Starting analysis with ${launch.label}.\n`;
++    let retrying = false;
++    const child = spawn(launch.command, launch.args, { cwd: researchDir });
++    child.stdout.on('data', (chunk) => { job.log += String(chunk); });
++    child.stderr.on('data', (chunk) => { job.log += String(chunk); });
++    child.on('error', (error: NodeJS.ErrnoException) => {
++      if (error.code === 'ENOENT' && index + 1 < launches.length) {
++        retrying = true;
++        run(index + 1);
++        return;
++      }
++      finish('failed', error.code === 'ENOENT'
++        ? 'Python was not found. Expected the workspace virtual environment at .venv, or a working Python 3 installation.'
++        : error.message);
++    });
++    child.on('close', (code) => {
++      if (retrying || job.status !== 'running') return; // an error handler already retried/finished this job
++      if (code === 0) {
++        writeFileSync(researchDataVersionPath, String(currentResearchStatus().currentDataVersion), 'utf8');
++        finish('completed', null);
++        return;
++      }
++      if ((code === 9009 || code === 127) && index + 1 < launches.length) { run(index + 1); return; }
++      const missingModule = /ModuleNotFoundError: No module named '(\w+)'/.exec(job.log);
++      finish('failed', missingModule
++        ? `Python is installed but "${missingModule[1]}" is missing. Install it with: pip install pandas numpy`
++        : `Analysis exited with code ${code}. ${job.log.trim().split('\n').slice(-3).join(' ')}`);
++    });
++  };
++  run(0);
++  return job;
++};
++
++const researchApiPlugin = (): Plugin => ({
++  name: 'local-research-api',
++  configureServer(server) {
++    server.middlewares.use('/api/research', async (request, response) => {
++      try {
++        const url = new URL(request.url ?? '/', 'http://localhost');
++        if (url.pathname.endsWith('/run') && request.method === 'POST') {
++          sendJson(response, 200, { job: startResearchJob() });
++          return;
++        }
++        if (url.pathname.endsWith('/job')) {
++          sendJson(response, 200, { job: researchJob });
++          return;
++        }
++        if (url.pathname.endsWith('/export')) {
++          const report = await readResearchReport();
++          const methodology = await readFile(path.join(projectRoot, 'research', 'ETF_PRESPEC.md'), 'utf8');
++          sendJson(response, 200, {
++            format: 'seeking-alpha-etf-research-report',
++            formatVersion: 1,
++            exportedAt: new Date().toISOString(),
++            reportStatus: report.researchStatus,
++            job: researchJob,
++            methodology: {
++              file: 'research/ETF_PRESPEC.md',
++              text: methodology,
++            },
++            report: report.etf,
++            interpretation: {
++              primaryQuestion: 'Do bullish-rated ETFs outperform SPY over the same entry and exit dates?',
++              secondaryQuestion: 'After an ETF is already bullish, does waiting for persistence add value versus other bullish ETFs?',
++              importantCaveat: 'This is a historical research report, not a guaranteed future return or a buy recommendation.',
++            },
++          });
++          return;
++        }
++        sendJson(response, 200, { ...await readResearchReport(), job: researchJob });
++      } catch (error) {
++        sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
++      }
++    });
++  },
++});
++
+ const analysisApiPlugin = (): Plugin => ({
+   name: 'local-analysis-api',
+   configureServer(server) {
+@@ -79,7 +809,17 @@ const analysisApiPlugin = (): Plugin => ({
+     // thread, so a request arriving *during* that background write still waits its turn) -- it only
+     // moves the cost off the triggering request. True concurrency would need worker_threads, which
+     // is deliberately out of scope here.
++    // Off by default. This snapshot layer has always been write-only — nothing in src/, server/ or
++    // this file ever selects from ticker_strategy_results or any of its siblings; /api/analysis
++    // serves from the in-memory cache instead. That was affordable at 27 tickers. Now that every
++    // tab reads all 379, one snapshot is 29,562 rows carrying full per-event JSON: it took the
++    // database from 62 MB to 553 MB and added ~40 s of background work per data version, to
++    // produce rows no reader has. Set VANTAGE_PERSIST_RESULTS=1 to turn it back on if a consumer
++    // ever appears.
++    const persistenceEnabled = process.env.VANTAGE_PERSIST_RESULTS === '1';
++
+     const schedulePersistence = (analysis: AnalysisModule, fingerprint: string) => {
++      if (!persistenceEnabled) return;
+       let methodologyVersion: string;
+       try {
+         methodologyVersion = getMethodologyVersion();
+@@ -116,6 +856,14 @@ const analysisApiPlugin = (): Plugin => ({
+         resultCache.clear();
+         server.moduleGraph.invalidateAll();
+         analysisModule = await server.ssrLoadModule(`/src/data.ts?dataset=${fingerprint}`) as AnalysisModule;
++        // data.ts no longer reads the filesystem. It is handed its datasets here, once per
++        // (re)load, straight out of the raw tables the Import button populated.
++        const { loadDatasetsFromDb } = await import('./server/db/datasets.js');
++        const loaded = loadDatasetsFromDb();
++        analysisModule.initialiseDatasets(loaded);
++        console.log(`[analysis] loaded ${loaded.datasets.length} tickers from the database `
++          + `(${loaded.universe.reconstructed} reconstructed from change events, `
++          + `${loaded.universe.snapshotOnly} daily-snapshot only), data version ${loaded.dataVersion}`);
+ 
+         // Write-through persistence: durably snapshot every tab's results for this exact
+         // (fingerprint, methodology) pair into SQLite, alongside (not instead of) the existing
+@@ -141,16 +889,27 @@ const analysisApiPlugin = (): Plugin => ({
+         const window = url.searchParams.get('window') ?? '7d';
+         const policy = url.searchParams.get('policy') ?? 'long-exit-hold';
+         const ticker = (url.searchParams.get('ticker') ?? '').toUpperCase();
++        const portfolioConfig = url.searchParams.get('config') ?? '';
++        const basketSize = Number.parseInt(url.searchParams.get('basketSize') ?? '10', 10);
++        const tickersParam = (url.searchParams.get('tickers') ?? '')
++          .split(',').map((value) => value.trim()).filter(Boolean);
+ 
+         if (action === 'meta') {
+           const { analysis, fingerprint, runId } = await loadAnalysis();
+-          sendJson(response, 200, { fingerprint, runId, windows: analysis.getAvailableHistoryWindows(), tiers: analysis.getAvailableRatingTiers(), accuracyHorizons: analysis.getAvailableAccuracyHorizons() });
++          sendJson(response, 200, {
++            fingerprint,
++            runId,
++            windows: analysis.getAvailableHistoryWindows(),
++            tiers: analysis.getAvailableRatingTiers(),
++            accuracyHorizons: analysis.getAvailableAccuracyHorizons(),
++            methodology: analysis.getMethodologyConfig(),
++          });
+           return;
+         }
+ 
+         const horizon = Number.parseInt(url.searchParams.get('horizon') ?? '90', 10);
+ 
+-        const result = await cached(`${action}|${window}|${policy}|${ticker}|${horizon}`, (analysis) => {
++        const result = await cached(`${action}|${window}|${policy}|${ticker}|${horizon}|${portfolioConfig}|${tickersParam.join(',')}`, (analysis) => {
+           if (action === 'tickerRows') return analysis.buildTickerResults(window, policy).map(compactTicker);
+           if (action === 'tickerDetail') return analysis.buildTickerResults(window, policy).find((row) => row.ticker === ticker) ?? null;
+           if (action === 'tickerMatrix') {
+@@ -161,7 +920,12 @@ const analysisApiPlugin = (): Plugin => ({
+               }).filter(Boolean));
+           }
+           if (action === 'aggregate') return analysis.buildAggregateResults(analysis.getAvailableHistoryWindows(), ['long-exit-hold', 'long-hold-through', 'long-short']);
+-          if (action === 'strongBuy') return analysis.buildStrongBuyTrustResults().map(({ trades: _trades, ...summary }) => summary);
++          if (action === 'strongBuy') {
++            return {
++              tickers: analysis.buildStrongBuyTrustResults().map(({ trades: _trades, ...summary }) => summary),
++              outliers: analysis.buildStrongBuyOutlierAnalysis(),
++            };
++          }
+           if (action === 'strongBuyTrades') return analysis.buildStrongBuyTrustResults().find((row) => row.ticker === ticker) ?? null;
+           if (action === 'tiers') {
+             const tierWindows = analysis.getAvailableHistoryWindows().filter((candidate) => candidate === '7d' || candidate === 'all' || Number.parseInt(candidate, 10) <= 24);
+@@ -178,8 +942,21 @@ const analysisApiPlugin = (): Plugin => ({
+             return {
+               tickerAccuracy: analysis.buildTickerAccuracy(horizon),
+               ratingCalls: analysis.buildRatingCallSummary(horizon),
++              predictiveAccuracy: analysis.buildPredictiveAccuracySummary(horizon),
+             };
+           }
++          if (action === 'signalDiscovery') return analysis.buildSignalDiscovery();
++          if (action === 'etfSignalDiscovery') return analysis.buildSignalDiscovery('etf');
++          if (action === 'etfCheck') return analysis.buildEtfCheck(tickersParam.length ? tickersParam : undefined);
++          if (action === 'etfBasket') return analysis.buildEtfBasketAnalysis(tickersParam, horizon, basketSize);
++          if (action === 'portfolio' || action === 'portfolioBest' || action === 'portfolioValidate') {
++            if (!portfolioConfig) throw new Error('Portfolio configuration is required.');
++            const config = JSON.parse(portfolioConfig);
++            if (action === 'portfolio') return analysis.buildPortfolioBacktest(config);
++            if (action === 'portfolioBest') return analysis.buildBestPortfolioBacktests(config);
++            const { repetitions, holdoutFraction, seed, ...base } = config;
++            return analysis.buildPortfolioHoldoutValidation(base, { repetitions, holdoutFraction, seed });
++          }
+           throw new Error(`Unknown analysis action: ${action}`);
+         });
+         sendJson(response, 200, result);
+@@ -192,7 +969,7 @@ const analysisApiPlugin = (): Plugin => ({
+ });
+ 
+ export default defineConfig({
+-  plugins: [react(), analysisApiPlugin()],
++  plugins: [react(), dataApiPlugin(), analysisApiPlugin(), researchApiPlugin()],
+   server: {
+     watch: {
+       usePolling: true,

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Screener Quant Link Traverser",
+  "version": "1.0.0",
+  "description": "Opens every Quant Rating link from a screener results table in background tabs.",
+  "permissions": ["storage", "alarms", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Screener Quant Link Traverser",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

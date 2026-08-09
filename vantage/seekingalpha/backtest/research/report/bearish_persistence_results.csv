@@ -1,0 +1,49 @@
+family,lookback,hold,signal,outcome,outcome_column,candidate_signals,incomplete_trades,overlap_skipped,drop_reasons,testable,mean,t,p,n,g,median,positive_rate,stock_fell_rate,underperformed_spy_rate,ci_low,ci_high,holm_p,bh_p,discovered_rule
+persistence,3mo,90d,sell_or_strong_sell,raw_short,raw_short_return,218,6,0,"{""incomplete_horizon"": 6}",True,-0.11114550313361185,-5.297098684714662,0.0002,212,165,-0.07853953095086907,0.30660377358490565,0.30660377358490565,0.4716981132075472,-0.14628844472597397,-0.07841041285502737,0.009600000000000001,0.0048000000000000004,True
+persistence,3mo,180d,sell_or_strong_sell,raw_short,raw_short_return,218,15,11,"{""incomplete_horizon"": 15}",True,-0.15052430326643595,-5.566481777558507,0.0002,192,159,-0.127876992442437,0.3229166666666667,0.3229166666666667,0.453125,-0.19823026009636063,-0.10606814876159971,0.009600000000000001,0.0048000000000000004,True
+persistence,3mo,90d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,218,6,0,"{""incomplete_horizon"": 6}",True,-0.052517236403223096,-2.5753922498895787,0.0054,212,165,-0.011930946749621363,0.4716981132075472,0.30660377358490565,0.4716981132075472,-0.08769085263352261,-0.021346681589004077,0.2484,0.08639999999999999,False
+persistence,3mo,30d,sell_or_strong_sell,raw_short,raw_short_return,218,1,0,"{""incomplete_horizon"": 1}",True,-0.03900173352271961,-1.8289899015891464,0.0088,217,165,-0.021672463482858007,0.41935483870967744,0.41935483870967744,0.5253456221198156,-0.07814660885922105,-0.010402101433335061,0.396,0.1056,False
+persistence,6mo,180d,sell_or_strong_sell,raw_short,raw_short_return,58,6,0,"{""incomplete_horizon"": 6}",True,-0.17073644390187415,-2.324231687794371,0.018,52,49,-0.16288283624461442,0.34615384615384615,0.34615384615384615,0.38461538461538464,-0.2992543971961703,-0.059752756111025235,0.7919999999999999,0.17279999999999998,False
+persistence,3mo,180d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,218,15,11,"{""incomplete_horizon"": 15}",True,-0.05904767093005802,-2.2293068882612364,0.03,192,159,-0.034520955135189824,0.453125,0.3229166666666667,0.453125,-0.10382899522699161,-0.015742915897206708,1.0,0.23725714285714286,False
+persistence,3mo,180d,strong_sell_only,raw_short,raw_short_return,55,3,4,"{""incomplete_horizon"": 3}",True,-0.151310505739741,-2.2120531614289605,0.0346,48,47,-0.17133587267355865,0.3125,0.3125,0.3958333333333333,-0.2626820235667857,-0.038798695441396636,1.0,0.23725714285714286,False
+persistence,3mo,90d,strong_sell_only,raw_short,raw_short_return,55,2,0,"{""incomplete_horizon"": 2}",True,-0.1189582905364063,-1.7013486478207724,0.0982,53,48,-0.022244691607684386,0.4716981132075472,0.4716981132075472,0.4716981132075472,-0.2306754305175249,-0.008804524116069811,1.0,0.5892,False
+persistence,6mo,90d,sell_or_strong_sell,raw_short,raw_short_return,58,4,0,"{""incomplete_horizon"": 4}",True,-0.06626409443795875,-1.6023480309781004,0.1194,54,51,-0.03159414175885755,0.46296296296296297,0.46296296296296297,0.5,-0.13133987927325175,-0.0009764489607411665,1.0,0.6368,False
+persistence,3mo,30d,strong_sell_only,raw_short,raw_short_return,55,0,0,{},True,-0.09884768652890025,-1.2218940023779232,0.1766,55,50,-0.0315533980582523,0.43636363636363634,0.43636363636363634,0.5272727272727272,-0.2522191443884106,0.002913484000674791,1.0,0.8476800000000001,False
+persistence,3mo,90d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,55,2,0,"{""incomplete_horizon"": 2}",True,-0.08986101998402432,-1.325159325747416,0.1978,53,48,-0.015944673346490634,0.4716981132075472,0.4716981132075472,0.4716981132075472,-0.2009834220311662,0.017647788574935958,1.0,0.8631272727272727,False
+persistence,6mo,180d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,58,6,0,"{""incomplete_horizon"": 6}",True,-0.08189730220746651,-1.1596485271861083,0.2674,52,49,-0.07901140101569026,0.38461538461538464,0.34615384615384615,0.38461538461538464,-0.2076124124961893,0.024568381585536037,1.0,1.0,False
+persistence,3mo,180d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,55,3,4,"{""incomplete_horizon"": 3}",True,-0.05945677336898658,-0.8702985807091458,0.4056,48,47,-0.09933362362483,0.3958333333333333,0.3125,0.3958333333333333,-0.17193507617555193,0.054169414907021284,1.0,1.0,False
+persistence,3mo,30d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,55,0,0,{},True,-0.08060159182968034,-0.9993283735829045,0.4436,55,50,0.008107562056418383,0.5272727272727272,0.43636363636363634,0.5272727272727272,-0.23365938724220464,0.020398415928509012,1.0,1.0,False
+persistence,6mo,90d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,58,4,0,"{""incomplete_horizon"": 4}",True,-0.025311525774856247,-0.6262316689964389,0.5264,54,51,0.0008404340121848097,0.5,0.46296296296296297,0.5,-0.0874181414988301,0.03738750380415484,1.0,1.0,False
+persistence,6mo,30d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,58,3,0,"{""incomplete_horizon"": 3}",True,0.009600326920676994,0.49320699369837034,0.642,55,52,0.00362016065330395,0.5272727272727272,0.43636363636363634,0.5272727272727272,-0.0239259847281869,0.03933225427458232,1.0,1.0,False
+persistence,3mo,30d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,218,1,0,"{""incomplete_horizon"": 1}",True,-0.015473106002496436,-0.7310667243554546,0.7132,217,165,0.00457378512290596,0.5253456221198156,0.41935483870967744,0.5253456221198156,-0.05373633174872215,0.012579173962991618,1.0,1.0,False
+persistence,6mo,30d,sell_or_strong_sell,raw_short,raw_short_return,58,3,0,"{""incomplete_horizon"": 3}",True,-0.004152542335668408,-0.20470328332161433,0.838,55,52,-0.014632173468170695,0.43636363636363634,0.43636363636363634,0.5272727272727272,-0.03844848080047493,0.027736637635018515,1.0,1.0,False
+persistence,6mo,30d,strong_sell_only,raw_short,raw_short_return,10,0,0,{},False,-0.08205043661870248,,,10,10,-0.05962662642472527,0.4,0.4,0.5,,,,,False
+persistence,6mo,30d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,10,0,0,{},False,-0.04944944287051968,,,10,10,-0.004939352652553852,0.5,0.4,0.5,,,,,False
+persistence,6mo,90d,strong_sell_only,raw_short,raw_short_return,10,0,0,{},False,-0.20014488322400564,,,10,10,-0.14508661979634796,0.4,0.4,0.5,,,,,False
+persistence,6mo,90d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,10,0,0,{},False,-0.12259428444497415,,,10,10,-0.10405630108292774,0.5,0.4,0.5,,,,,False
+persistence,6mo,180d,strong_sell_only,raw_short,raw_short_return,10,0,0,{},False,-0.1558632144819954,,,10,10,-0.1837307994414381,0.3,0.3,0.4,,,,,False
+persistence,6mo,180d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,10,0,0,{},False,-0.010744215479901975,,,10,10,-0.03335224368908429,0.4,0.3,0.4,,,,,False
+persistence,12mo,30d,sell_or_strong_sell,raw_short,raw_short_return,4,0,0,{},False,-0.2011796353374753,,,4,4,-0.16083375964210123,0.0,0.0,0.0,,,,,False
+persistence,12mo,30d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,4,0,0,{},False,-0.18969941763394785,,,4,4,-0.15229108403350183,0.0,0.0,0.0,,,,,False
+persistence,12mo,90d,sell_or_strong_sell,raw_short,raw_short_return,4,1,0,"{""incomplete_horizon"": 1}",False,-0.6254708714465903,,,3,3,-0.3743793445878847,0.0,0.0,0.0,,,,,False
+persistence,12mo,90d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,4,1,0,"{""incomplete_horizon"": 1}",False,-0.5720038034741483,,,3,3,-0.3124854584703656,0.0,0.0,0.0,,,,,False
+persistence,12mo,180d,sell_or_strong_sell,raw_short,raw_short_return,4,2,0,"{""incomplete_horizon"": 2}",False,-0.4014032270508141,,,2,2,-0.4014032270508141,0.5,0.5,0.5,,,,,False
+persistence,12mo,180d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,4,2,0,"{""incomplete_horizon"": 2}",False,-0.3829739754551735,,,2,2,-0.3829739754551735,0.5,0.5,0.5,,,,,False
+persistence,12mo,30d,strong_sell_only,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,12mo,30d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,12mo,90d,strong_sell_only,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,12mo,90d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,12mo,180d,strong_sell_only,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,12mo,180d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,30d,sell_or_strong_sell,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,30d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,90d,sell_or_strong_sell,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,90d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,180d,sell_or_strong_sell,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,180d,sell_or_strong_sell,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,30d,strong_sell_only,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,30d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,90d,strong_sell_only,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,90d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,180d,strong_sell_only,raw_short,raw_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False
+persistence,18mo,180d,strong_sell_only,spy_hedged_short,spy_hedged_short_return,0,0,0,{},False,,,,0,0,,,,,,,,,False

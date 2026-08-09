@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-08-09T05:37:42.420Z",
+  "inputDirectory": "C:\\Code\\monorepo-misc\\vantage\\seekingalpha\\backtest\\input\\3-year",
+  "outputFile": "C:\\Code\\monorepo-misc\\vantage\\seekingalpha\\backtest\\input\\3-year\\consolidated_unique.json",
+  "sourceFiles": [
+    {
+      "file": "3-year/consolidated_unique.json",
+      "archived": false,
+      "bytes": 153901741,
+      "sha256": "b9ad3b518f2bd5c22669e53d51340804879d6b8b119b898ca82c6803ce4bee25",
+      "wrapperEntries": 1517
+    },
+    {
+      "file": "3-year/raw_2026-08-09T05-37-12.json",
+      "archived": true,
+      "bytes": 2021264,
+      "sha256": "644beca1f10dc033cf88d28501caf16959c4fa3184c2067991dcc22c972c3780",
+      "wrapperEntries": 96
+    }
+  ],
+  "sourceFileCount": 2,
+  "uniqueTickers": 801,
+  "etfTickers": 333,
+  "nonEtfOrUnknownTickers": 468,
+  "uniqueTickerKindPayloads": 1517,
+  "mergedDataRows": 575551,
+  "wrapperEntriesRead": 1613,
+  "duplicateWrappersCollapsed": 96,
+  "dataRowsRead": 578896,
+  "duplicateDataRowsCollapsed": 3345,
+  "conflictingDataRowsResolved": 0,
+  "includedRowsRead": 2331,
+  "duplicateIncludedRowsCollapsed": 109,
+  "conflictingIncludedRowsResolved": 0,
+  "invalidUpstreamWrappersSkipped": 0,
+  "invalidUpstreamWrappers": [],
+  "conflictPolicy": "For the same API row identity, the wrapper with the greatest _ts wins; ties use the later source filename. Rows absent from newer cumulative files are retained.",
+  "completePayloadCoverage": true,
+  "payloadsWithNoUsableUpstreamData": [],
+  "rawFilesArchived": [
+    "3-year/raw_2026-08-09T05-37-12.json"
+  ],
+  "standaloneFilesArchived": [],
+  "archiveFile": "C:\\Code\\monorepo-misc\\vantage\\seekingalpha\\backtest\\input\\3-year\\archive\\raw_sources_2026-08-09T05-37-42Z.zip",
+  "removedSourceFiles": [
+    "3-year/raw_2026-08-09T05-37-12.json"
+  ],
+  "verified": true,
+  "archiveBytes": 124778,
+  "archiveSha256": "2ba3efe8c957c674742ae7352f0cadfbbb42fdfefec084c3cdfb25f2855a7ad6",
+  "archiveEntries": 2,
+  "outputBytes": 153901741,
+  "outputSha256": "b9ad3b518f2bd5c22669e53d51340804879d6b8b119b898ca82c6803ce4bee25"
+}

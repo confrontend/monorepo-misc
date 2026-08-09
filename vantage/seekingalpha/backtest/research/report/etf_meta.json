@@ -1,0 +1,300 @@
+{
+  "generated_at": "2026-08-08T22:41:06+00:00",
+  "spec": "research/ETF_PRESPEC.md",
+  "prior_exploratory_evidence_known": true,
+  "dataset": {
+    "etfs": 321,
+    "price_rows": 232765,
+    "rating_events": 16758,
+    "price_start": "2023-08-02",
+    "price_end": "2026-08-07",
+    "validation_start": "2025-08-07",
+    "validation_end": "2026-08-07"
+  },
+  "thresholds": {
+    "min_clusters": 15,
+    "discovery_t": 3.0,
+    "alpha": 0.05,
+    "bootstrap_reps": 4999
+  },
+  "execution": {
+    "entry": "first usable ETF record strictly after the signal date",
+    "exit": "closest usable ETF record within +/-7 calendar days of entry plus hold_days",
+    "incomplete_horizons": "dropped; never shortened",
+    "costs": "gross of commissions, spread, slippage, taxes, liquidity constraints and market impact"
+  },
+  "families": {
+    "rating_trust": {
+      "question": "Do bullish-rated ETFs outperform SPY?",
+      "benchmark": "ETF adjusted return minus SPY adjusted return",
+      "correction_scope": 6,
+      "filters": [
+        "strong_buy",
+        "bullish_plus"
+      ],
+      "holds": [
+        "30d",
+        "90d",
+        "180d"
+      ],
+      "summary": {
+        "tests_total": 6,
+        "tests_testable": 6,
+        "tests_clearing_bar": 4,
+        "positive_tests_clearing_bar": 4,
+        "negative_tests_clearing_bar": 0
+      },
+      "top_candidate": {
+        "family": "rating_trust",
+        "filter": "bullish_plus",
+        "persistence": null,
+        "hold": "90d",
+        "candidate_signals": 1347,
+        "incomplete_trades": 285,
+        "testable": true,
+        "mean_return": 0.11638219787112365,
+        "median_return": 0.08617244325519047,
+        "mean_spy_return": 0.05512987206157335,
+        "mean_excess_spy": 0.061252325809550305,
+        "beat_spy_rate": 0.7033898305084746,
+        "mean_pool_return": null,
+        "mean_excess_pool": null,
+        "beat_pool_rate": null,
+        "absolute_loss_rate": 0.07532956685499058,
+        "mean": 0.061252325809550305,
+        "t": 9.285339689660043,
+        "p": 0.0002,
+        "n": 1062,
+        "g": 240,
+        "ci_low": 0.04871830599486196,
+        "ci_high": 0.07425491756364029,
+        "holm_p": 0.0012000000000000001,
+        "bh_p": 0.00030000000000000003,
+        "discovered_rule": true,
+        "drop_reasons": {
+          "incomplete_horizon": 252,
+          "missing_benchmark_price": 31,
+          "no_next_session": 2
+        },
+        "placebo": {
+          "observed_mean": 0.061252325809550305,
+          "random_median": 0.04596222185352464,
+          "random_p5": 0.03901683258886534,
+          "random_p95": 0.05347426110436546,
+          "empirical_p": 0.0004997501249375312,
+          "simulations": 2000
+        },
+        "examples": [
+          {
+            "ticker": "cibr",
+            "signal_date": "2025-08-07",
+            "buy_date": "2025-08-08",
+            "sell_date": "2025-11-06",
+            "days_held": 90,
+            "buy_price": 70.739997,
+            "sell_price": 74.221885,
+            "etf_return": 0.049220923772445246,
+            "spy_return": 0.05491135190177854,
+            "excess_spy": -0.0056904281293332915,
+            "dollar_start": 100.0,
+            "dollar_end": 104.92209237724452
+          },
+          {
+            "ticker": "lctu",
+            "signal_date": "2025-09-10",
+            "buy_date": "2025-09-11",
+            "sell_date": "2025-12-10",
+            "days_held": 90,
+            "buy_price": 70.900513,
+            "sell_price": 74.11805,
+            "etf_return": 0.04538101155911223,
+            "spy_return": 0.048425787261203945,
+            "excess_spy": -0.0030447757020917177,
+            "dollar_start": 100.0,
+            "dollar_end": 104.53810115591122
+          },
+          {
+            "ticker": "sbio",
+            "signal_date": "2025-10-23",
+            "buy_date": "2025-10-24",
+            "sell_date": "2026-01-22",
+            "days_held": 90,
+            "buy_price": 42.4844,
+            "sell_price": 54.18,
+            "etf_return": 0.2752916364595004,
+            "spy_return": 0.02032614592240356,
+            "excess_spy": 0.25496549053709683,
+            "dollar_start": 100.0,
+            "dollar_end": 127.52916364595004
+          },
+          {
+            "ticker": "sdci",
+            "signal_date": "2025-12-02",
+            "buy_date": "2025-12-03",
+            "sell_date": "2026-03-03",
+            "days_held": 90,
+            "buy_price": 22.43891,
+            "sell_price": 24.67,
+            "etf_return": 0.09942951774395459,
+            "spy_return": -0.0022659484309335287,
+            "excess_spy": 0.10169546617488812,
+            "dollar_start": 100.0,
+            "dollar_end": 109.94295177439545
+          },
+          {
+            "ticker": "rzv",
+            "signal_date": "2026-01-09",
+            "buy_date": "2026-01-12",
+            "sell_date": "2026-04-13",
+            "days_held": 91,
+            "buy_price": 126.366134,
+            "sell_price": 130.380364,
+            "etf_return": 0.03176665988689642,
+            "spy_return": -0.010337537361110094,
+            "excess_spy": 0.042104197248006514,
+            "dollar_start": 100.0,
+            "dollar_end": 103.17666598868965
+          },
+          {
+            "ticker": "uso",
+            "signal_date": "2026-02-04",
+            "buy_date": "2026-02-05",
+            "sell_date": "2026-05-06",
+            "days_held": 90,
+            "buy_price": 76.69,
+            "sell_price": 133.95,
+            "etf_return": 0.7466423262485329,
+            "spy_return": 0.08590965965490094,
+            "excess_spy": 0.660732666593632,
+            "dollar_start": 100.0,
+            "dollar_end": 174.6642326248533
+          },
+          {
+            "ticker": "rdiv",
+            "signal_date": "2026-02-27",
+            "buy_date": "2026-03-02",
+            "sell_date": "2026-06-01",
+            "days_held": 91,
+            "buy_price": 55.671774,
+            "sell_price": 57.818078,
+            "etf_return": 0.0385528221177216,
+            "spy_return": 0.10814928817675762,
+            "excess_spy": -0.06959646605903602,
+            "dollar_start": 100.0,
+            "dollar_end": 103.85528221177216
+          },
+          {
+            "ticker": "alai",
+            "signal_date": "2026-03-12",
+            "buy_date": "2026-03-13",
+            "sell_date": "2026-06-11",
+            "days_held": 90,
+            "buy_price": 33.59,
+            "sell_price": 43.03,
+            "etf_return": 0.2810360226257813,
+            "spy_return": 0.11699535993508747,
+            "excess_spy": 0.16404066269069384,
+            "dollar_start": 100.0,
+            "dollar_end": 128.10360226257814
+          },
+          {
+            "ticker": "vgfpf",
+            "signal_date": "2026-04-10",
+            "buy_date": "2026-04-13",
+            "sell_date": "2026-07-13",
+            "days_held": 91,
+            "buy_price": 131.6433,
+            "sell_price": 145.4534,
+            "etf_return": 0.10490545284112418,
+            "spy_return": 0.09473842590961601,
+            "excess_spy": 0.010167026931508172,
+            "dollar_start": 100.0,
+            "dollar_end": 110.49054528411241
+          },
+          {
+            "ticker": "vgddf",
+            "signal_date": "2026-05-07",
+            "buy_date": "2026-05-08",
+            "sell_date": "2026-08-03",
+            "days_held": 87,
+            "buy_price": 146.9935,
+            "sell_price": 150.055,
+            "etf_return": 0.020827451553980136,
+            "spy_return": 0.029828244502788648,
+            "excess_spy": -0.009000792948808511,
+            "dollar_start": 100.0,
+            "dollar_end": 102.08274515539802
+          }
+        ]
+      }
+    },
+    "persistence": {
+      "question": "Does bullish-rating persistence improve on matching bullish ETFs?",
+      "benchmark": "ETF adjusted return minus matching bullish ETF pool return",
+      "correction_scope": 24,
+      "filters": [
+        "strong_buy",
+        "bullish_plus"
+      ],
+      "persistence": [
+        "30d",
+        "60d",
+        "90d",
+        "180d"
+      ],
+      "holds": [
+        "30d",
+        "90d",
+        "180d"
+      ],
+      "summary": {
+        "tests_total": 24,
+        "tests_testable": 16,
+        "tests_clearing_bar": 1,
+        "positive_tests_clearing_bar": 1,
+        "negative_tests_clearing_bar": 0
+      },
+      "top_candidate": {
+        "family": "persistence",
+        "filter": "bullish_plus",
+        "persistence": "30d",
+        "hold": "30d",
+        "candidate_signals": 458,
+        "incomplete_trades": 71,
+        "testable": true,
+        "mean_return": 0.043398221738450794,
+        "median_return": 0.027516635002049483,
+        "mean_spy_return": 0.021453352833390494,
+        "mean_excess_spy": 0.021944868905060304,
+        "beat_spy_rate": 0.6330749354005168,
+        "mean_pool_return": 0.031009341491606834,
+        "mean_excess_pool": 0.012388880246843962,
+        "beat_pool_rate": 0.5219638242894057,
+        "absolute_loss_rate": 0.23255813953488372,
+        "mean": 0.012388880246843962,
+        "t": 3.589452966306496,
+        "p": 0.0004,
+        "n": 387,
+        "g": 254,
+        "ci_low": 0.005851932614507091,
+        "ci_high": 0.019677353364661632,
+        "holm_p": 0.009600000000000001,
+        "bh_p": 0.009600000000000001,
+        "discovered_rule": true,
+        "drop_reasons": {
+          "incomplete_horizon": 45,
+          "missing_benchmark_price": 17,
+          "no_next_session": 9
+        },
+        "placebo": {
+          "observed_mean": 0.012388880246843962,
+          "random_median": -5.9729762107679044e-05,
+          "random_p5": -0.005770308264027225,
+          "random_p95": 0.005723597338343388,
+          "empirical_p": 0.0004997501249375312,
+          "simulations": 2000
+        }
+      }
+    }
+  }
+}

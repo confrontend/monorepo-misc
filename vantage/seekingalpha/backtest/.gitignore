@@ -1,1 +1,10 @@
 .data/
+dist_verify*/
+probe-scratch*.mjs
+research/__pycache__/
+research/report/.data-version
+
+# Large generated/raw datasets stay local and are not committed to GitHub.
+archived-data/raw_2026-08-06T06-55-02.json
+archived-data/raw_2026-08-08T04-00-35.json
+input/3-year/consolidated_unique.json

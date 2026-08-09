@@ -1,0 +1,8 @@
+,0
+outcome,raw_short_return
+observed_mean,-0.15052430326643595
+random_median,-0.12795009147502678
+random_p5,-0.17717476145688615
+random_p95,-0.09130409115440248
+empirical_p,0.4217891054472764
+simulations,2000

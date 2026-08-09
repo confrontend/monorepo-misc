@@ -164,8 +164,16 @@ const writeSnapshot = (db: DatabaseSync, runId: number, analysis: AnalysisModule
   const insertCalls = db.prepare(`
     INSERT INTO rating_call_results
       (run_id, horizon_days, scored_calls, correct_calls, incorrect_calls, hit_rate, hit_rate_low,
-       hit_rate_high, average_return, median_return, open_calls, neutral_calls, calls_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       hit_rate_high, hit_rate_bootstrap_low, hit_rate_bootstrap_high, ticker_weighted_hit_rate,
+       average_return, median_return, open_calls, unenterable_calls, neutral_calls, by_tier_json, calls_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertPredictive = db.prepare(`
+    INSERT INTO predictive_accuracy_results
+      (run_id, horizon_days, scored_calls, correct_calls, incorrect_calls, hit_rate, hit_rate_low,
+       hit_rate_high, hit_rate_bootstrap_low, hit_rate_bootstrap_high, ticker_weighted_hit_rate,
+       average_return, median_return, censored_calls, neutral_calls, by_tier_json, outcomes_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   analysis.getAvailableAccuracyHorizons().forEach((horizonDays) => {
     analysis.buildTickerAccuracy(horizonDays).forEach((row) => {
@@ -179,10 +187,41 @@ const writeSnapshot = (db: DatabaseSync, runId: number, analysis: AnalysisModule
     insertCalls.run(
       runId, horizonDays, callSummary.scoredCalls, callSummary.correctCalls,
       callSummary.incorrectCalls, callSummary.hitRate, callSummary.hitRateLow,
-      callSummary.hitRateHigh, callSummary.averageReturn, callSummary.medianReturn,
-      callSummary.openCalls, callSummary.neutralCalls, JSON.stringify(callSummary.calls),
+      callSummary.hitRateHigh, callSummary.hitRateBootstrapLow, callSummary.hitRateBootstrapHigh,
+      callSummary.tickerWeightedHitRate, callSummary.averageReturn, callSummary.medianReturn,
+      callSummary.openCalls, callSummary.unenterableCalls, callSummary.neutralCalls,
+      JSON.stringify(callSummary.byTier), JSON.stringify(callSummary.calls),
+    );
+
+    const predictiveSummary = analysis.buildPredictiveAccuracySummary(horizonDays);
+    insertPredictive.run(
+      runId, horizonDays, predictiveSummary.scoredCalls, predictiveSummary.correctCalls,
+      predictiveSummary.incorrectCalls, predictiveSummary.hitRate, predictiveSummary.hitRateLow,
+      predictiveSummary.hitRateHigh, predictiveSummary.hitRateBootstrapLow,
+      predictiveSummary.hitRateBootstrapHigh, predictiveSummary.tickerWeightedHitRate,
+      predictiveSummary.averageReturn, predictiveSummary.medianReturn,
+      predictiveSummary.censoredCalls, predictiveSummary.neutralCalls,
+      JSON.stringify(predictiveSummary.byTier), JSON.stringify(predictiveSummary.outcomes),
     );
   });
+
+  const outliers = analysis.buildStrongBuyOutlierAnalysis();
+  db.prepare(`
+    INSERT INTO strong_buy_outlier_results
+      (run_id, completed_trades, tickers, raw_mean_return, median_return, trimmed_mean_return,
+       winsorized_mean_return, geometric_mean_return, largest_winner_return, largest_loser_return,
+       top1_percent_contribution_percent, top5_percent_contribution_percent,
+       top10_percent_contribution_percent, leave_one_out_min_mean_return,
+       leave_one_out_max_mean_return, outlier_sensitive, outlier_sensitive_reasons_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    runId, outliers.completedTrades, outliers.tickers, outliers.rawMeanReturn, outliers.medianReturn,
+    outliers.trimmedMeanReturn, outliers.winsorizedMeanReturn, outliers.geometricMeanReturn,
+    outliers.largestWinnerReturn, outliers.largestLoserReturn, outliers.top1PercentContributionPercent,
+    outliers.top5PercentContributionPercent, outliers.top10PercentContributionPercent,
+    outliers.leaveOneTickerOutMinMeanReturn, outliers.leaveOneTickerOutMaxMeanReturn,
+    outliers.outlierSensitive ? 1 : 0, JSON.stringify(outliers.outlierSensitiveReasons),
+  );
 };
 
 // The core flow: has this exact (fingerprint, methodology_version) pair already produced a
@@ -204,10 +243,13 @@ export const ensureRunForFingerprint = (analysis: AnalysisModule, fingerprint: s
   const startedAt = new Date().toISOString();
   const inputSummary = buildInputSummary(analysis);
   const insertRun = db.prepare(`
-    INSERT INTO analysis_runs (fingerprint, methodology_version, application_version, status, started_at, input_summary_json)
-    VALUES (?, ?, ?, 'running', ?, ?)
+    INSERT INTO analysis_runs (fingerprint, methodology_version, application_version, status, started_at, input_summary_json, methodology_config_json)
+    VALUES (?, ?, ?, 'running', ?, ?, ?)
   `);
-  const info = insertRun.run(fingerprint, methodologyVersion, getApplicationVersion(), startedAt, JSON.stringify(inputSummary));
+  const info = insertRun.run(
+    fingerprint, methodologyVersion, getApplicationVersion(), startedAt,
+    JSON.stringify(inputSummary), JSON.stringify(analysis.getMethodologyConfig()),
+  );
   const runId = Number(info.lastInsertRowid);
 
   try {
