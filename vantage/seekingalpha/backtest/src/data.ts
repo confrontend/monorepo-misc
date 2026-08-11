@@ -20,6 +20,7 @@ type Capture = {
     quantRating: Rating;
     quantScore: number;
     fundType: string | null;
+    sector: string | null;
   };
   quantRatingHistory: { records: CaptureRecord[] };
 };
@@ -2651,10 +2652,11 @@ export const buildSignalDiscovery = (universe: SignalDiscoveryUniverse = 'stocks
 // already-confirmed Research rule? This does not re-run any statistics -- it only reports the
 // ETF's live rating streak per filter; the caller matches that against the Research page's
 // discoveredRule rows to decide whether it fits.
-export type EtfCheckFilterState = { qualifiesNow: boolean; episodeAgeDays: number };
+export type EtfCheckFilterState = { qualifiesNow: boolean; episodeAgeDays: number; censored: boolean };
 export type EtfCheckResult = {
   ticker: string;
   company: string;
+  currentPrice: number | null;
   latestDate: string;
   latestRating: Rating;
   states: Record<SignalDiscoveryFilter, EtfCheckFilterState | null>;
@@ -2670,6 +2672,7 @@ export type EtfBasketSummary = {
 
 export type EtfCorrelationPair = { left: string; right: string; correlation: number; observations: number };
 export type EtfCorrelationCluster = { id: number; representative: string; members: string[]; size: number };
+export type EtfSectorExposure = { sector: string; tickers: string[]; percentage: number };
 export type EtfBasketAnalysis = {
   horizonDays: number;
   clusterThreshold: number;
@@ -2678,6 +2681,7 @@ export type EtfBasketAnalysis = {
   priceEligibleCount: number;
   allBasket: EtfBasketSummary;
   diversifiedBasket: EtfBasketSummary;
+  sectorExposure: EtfSectorExposure[];
   clusters: EtfCorrelationCluster[];
   warnings: EtfCorrelationPair[];
 };
@@ -2759,6 +2763,24 @@ const simulateEqualWeightBasket = (recordsByTicker: Map<string, CaptureRecord[]>
 const CLUSTER_THRESHOLD = 0.9;
 const WARNINGS_THRESHOLD = 0.95;
 
+// Some historical ETF captures do not include the issuer's sector metadata. These are coarse
+// portfolio-exposure labels, not a claim that every holding inside the ETF belongs to one sector.
+// They are used only for the basket exposure chart; research returns and rule qualification never
+// use this map. Unknown tickers remain explicitly labelled rather than being guessed from a name.
+const STATIC_ETF_SECTORS: Record<string, string> = {
+  CLOU: 'Technology / cloud computing', FCLD: 'Technology / cloud computing', AGIX: 'Technology / AI',
+  GDMN: 'Materials / gold miners', COPP: 'Materials / copper miners', RNIN: 'Energy / nuclear',
+  UDIV: 'U.S. equity / dividend tilt',
+  SPY: 'U.S. large-cap equity', VOO: 'U.S. large-cap equity', IVV: 'U.S. large-cap equity',
+  SPLG: 'U.S. large-cap equity', SPTM: 'U.S. broad equity', QQQ: 'U.S. technology / growth', QQQM: 'U.S. technology / growth',
+  XLK: 'Technology', VGT: 'Technology', FTEC: 'Technology', XLE: 'Energy', VDE: 'Energy',
+  XLF: 'Financials', VFH: 'Financials', XLI: 'Industrials', XLB: 'Materials',
+  XLV: 'Healthcare', VHT: 'Healthcare', XLP: 'Consumer staples', VDC: 'Consumer staples',
+  XLY: 'Consumer discretionary', XLU: 'Utilities', VPU: 'Utilities',
+  GLD: 'Gold / precious metals', IAU: 'Gold / precious metals', TLT: 'U.S. bonds', AGG: 'U.S. bonds', BND: 'U.S. bonds',
+  VXUS: 'International equity', IXUS: 'International equity',
+};
+
 export const buildEtfBasketAnalysis = (tickers: string[], horizonDays = 30, basketSize = 10): EtfBasketAnalysis => {
   const requested = new Set(tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean));
   const datasets = extendedDatasets.filter((dataset) => dataset.capture.source.fundType?.toUpperCase() === 'ETF'
@@ -2806,6 +2828,20 @@ export const buildEtfBasketAnalysis = (tickers: string[], horizonDays = 30, bask
   const diversifiedTickers = clustersBySelectionPriority
     .slice(0, Math.max(1, Math.min(basketSize, clustersBySelectionPriority.length)))
     .map((cluster) => cluster.representative);
+  const sectorByTicker = new Map(datasets.map((dataset) => [
+    dataset.capture.source.ticker,
+    dataset.capture.source.sector?.trim() || STATIC_ETF_SECTORS[dataset.capture.source.ticker.toUpperCase()] || 'Unknown / not provided',
+  ]));
+  const sectorGroups = new Map<string, string[]>();
+  diversifiedTickers.forEach((ticker) => {
+    const sector = sectorByTicker.get(ticker) ?? 'Unknown / not provided';
+    const members = sectorGroups.get(sector) ?? [];
+    members.push(ticker);
+    sectorGroups.set(sector, members);
+  });
+  const sectorExposure = [...sectorGroups.entries()]
+    .map(([sector, members]) => ({ sector, tickers: members, percentage: members.length / Math.max(1, diversifiedTickers.length) }))
+    .sort((left, right) => right.percentage - left.percentage || left.sector.localeCompare(right.sector));
   return {
     horizonDays,
     clusterThreshold: CLUSTER_THRESHOLD,
@@ -2814,6 +2850,7 @@ export const buildEtfBasketAnalysis = (tickers: string[], horizonDays = 30, bask
     priceEligibleCount: usableByTicker.size,
     allBasket: simulateEqualWeightBasket(usableByTicker, [...usableByTicker.keys()], horizonDays),
     diversifiedBasket: simulateEqualWeightBasket(usableByTicker, diversifiedTickers, horizonDays),
+    sectorExposure,
     clusters: orderedClusters,
     warnings: pairs.sort((left, right) => right.correlation - left.correlation).slice(0, 25),
   };
@@ -2825,11 +2862,17 @@ export const buildEtfBasketAnalysis = (tickers: string[], horizonDays = 30, bask
 const currentEpisodeState = (records: CaptureRecord[], filter: SignalDiscoveryFilter): EtfCheckFilterState | null => {
   if (!records.length) return null;
   const latest = records[records.length - 1];
-  if (!signalAllowed(latest.quantRating, filter)) return { qualifiesNow: false, episodeAgeDays: 0 };
+  if (!signalAllowed(latest.quantRating, filter)) return { qualifiesNow: false, episodeAgeDays: 0, censored: false };
   let startIndex = records.length - 1;
   while (startIndex > 0 && signalAllowed(records[startIndex - 1].quantRating, filter)) startIndex -= 1;
+  // startIndex reaching 0 means the walk hit the start of this ETF's captured history without ever
+  // observing a non-qualifying predecessor -- the true episode start is unknown (left-censored), not
+  // necessarily "starts here." Mirrors the same guard etf_rating_transition_events uses in the Python
+  // pipeline (requires a real prior observation before counting a transition); episodeAgeDays below is
+  // then only a lower bound, not a confirmed age.
+  const censored = startIndex === 0;
   const episodeAgeDays = Math.max(0, Math.round((Date.parse(latest.date) - Date.parse(records[startIndex].date)) / 86_400_000));
-  return { qualifiesNow: true, episodeAgeDays };
+  return { qualifiesNow: true, episodeAgeDays, censored };
 };
 
 const ETF_CHECK_FILTERS: SignalDiscoveryFilter[] = ['strong-buy', 'bullish-plus'];
@@ -2847,9 +2890,46 @@ export const buildEtfCheck = (tickers?: string[]): EtfCheckResult[] => {
     return {
       ticker: dataset.capture.source.ticker,
       company: dataset.capture.source.companyName,
+      currentPrice: Number.isFinite(dataset.capture.source.currentPrice) && dataset.capture.source.currentPrice > 0
+        ? dataset.capture.source.currentPrice
+        : (latest?.price && latest.price > 0 ? latest.price : null),
       latestDate: latest?.date ?? '',
       latestRating: latest?.quantRating ?? dataset.capture.source.quantRating,
       states,
     };
   }).sort((left, right) => left.ticker.localeCompare(right.ticker));
+};
+
+export type EtfEpisodeFixtureRow = {
+  ticker: string;
+  filter: SignalDiscoveryFilter;
+  latestDate: string;
+  qualifiesNow: boolean;
+  episodeAgeDays: number;
+  censored: boolean;
+};
+
+// Flat, independently-verifiable dump of exactly what currentEpisodeState() computed for every ETF
+// and filter -- consumed by research/verify_episode_state.py, which recomputes the same thing from
+// the Python side (build_rating_timeline) and diffs the two. This exists because the historical
+// signal definition (Python, research/pipeline.py) and the live signal detection here (TypeScript)
+// are two independent implementations with no shared code path; nothing else catches them drifting
+// apart. See progress.md for the cross-validation this feeds.
+export const buildEpisodeFixture = (): EtfEpisodeFixtureRow[] => {
+  const etfDatasets = extendedDatasets.filter((dataset) => dataset.capture.source.fundType?.toUpperCase() === 'ETF');
+  return etfDatasets.flatMap((dataset) => {
+    const records = dataset.records.filter(isUsableRecord);
+    const latest = records[records.length - 1];
+    return ETF_CHECK_FILTERS.map((filter): EtfEpisodeFixtureRow => {
+      const state = currentEpisodeState(records, filter);
+      return {
+        ticker: dataset.capture.source.ticker,
+        filter,
+        latestDate: latest?.date ?? '',
+        qualifiesNow: state?.qualifiesNow ?? false,
+        episodeAgeDays: state?.episodeAgeDays ?? 0,
+        censored: state?.censored ?? false,
+      };
+    });
+  }).sort((left, right) => left.ticker.localeCompare(right.ticker) || left.filter.localeCompare(right.filter));
 };

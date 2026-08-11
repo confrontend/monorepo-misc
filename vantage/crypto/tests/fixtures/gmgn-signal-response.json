@@ -1,0 +1,16 @@
+[
+  {
+    "id": "fixture-event-001",
+    "token_address": "FixtureToken1111111111111111111111111111111111",
+    "signal_type": 12,
+    "trigger_at": 1772359200,
+    "trigger_mc": 25000,
+    "first_trigger_mc": 20000,
+    "market_cap": 30000,
+    "ath": 32000,
+    "signal_times": 2,
+    "signal_times_by_type": { "12": 2 },
+    "cur_data": { "liquidity": 9000, "holder_count": 42 },
+    "data": { "fixture": true }
+  }
+]

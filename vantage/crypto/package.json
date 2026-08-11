@@ -1,0 +1,40 @@
+{
+  "name": "vantage-crypto-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Append-only local data collection for Solana token cohorts and GMGN signals.",
+  "bin": {
+    "crypto-research": "dist/src/scripts/cli.js"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:ui",
+    "build:server": "tsc -p tsconfig.json",
+    "build:ui": "vite build --config vite.config.ts",
+    "dev": "concurrently -k -n api,ui -c green,cyan \"npm run dev:api\" \"npm run dev:ui\"",
+    "dev:api": "tsx watch src/scripts/server.ts",
+    "dev:ui": "vite --config vite.config.ts --host localhost",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "import-dune": "npm run build --silent && node dist/src/scripts/cli.js import-dune",
+    "db-stats": "npm run build:server --silent && node dist/src/scripts/cli.js db-stats",
+    "start": "npm run build && node dist/src/scripts/server.js"
+  },
+  "dependencies": {
+    "gmgn-cli": "^1.5.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

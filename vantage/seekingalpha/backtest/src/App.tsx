@@ -15,10 +15,10 @@ import { LoadingState } from './shared/components/LoadingState';
 import { LegendPanel } from './shared/components/LegendPanel';
 
 type SortKey = 'ticker' | 'signals' | 'hitRate' | 'averageReturn';
-type ActiveView = 'data' | 'tickers' | 'overall' | 'strong-buy' | 'tiers' | 'accuracy' | 'discovery' | 'etfs' | 'etf-discovery' | 'etf-candidates' | 'etf-research' | 'research' | 'portfolio';
+type ActiveView = 'data' | 'tickers' | 'overall' | 'strong-buy' | 'tiers' | 'accuracy' | 'discovery' | 'etfs' | 'etf-discovery' | 'etf-candidates' | 'etf-research' | 'etf-portfolios' | 'research' | 'portfolio';
 type PrimaryArea = 'stocks' | 'etfs' | 'data';
 
-const ACTIVE_VIEWS: ActiveView[] = ['data', 'tickers', 'overall', 'strong-buy', 'tiers', 'accuracy', 'discovery', 'etfs', 'etf-discovery', 'etf-candidates', 'etf-research', 'research', 'portfolio'];
+const ACTIVE_VIEWS: ActiveView[] = ['data', 'tickers', 'overall', 'strong-buy', 'tiers', 'accuracy', 'discovery', 'etfs', 'etf-discovery', 'etf-candidates', 'etf-research', 'etf-portfolios', 'research', 'portfolio'];
 
 const ROUTES: Record<ActiveView, string> = {
   data: '/data',
@@ -32,13 +32,14 @@ const ROUTES: Record<ActiveView, string> = {
   'etf-discovery': '/etfs/discovery',
   'etf-candidates': '/etfs/candidates',
   'etf-research': '/etfs/research',
+  'etf-portfolios': '/etfs/portfolios',
   research: '/stocks/research',
   portfolio: '/stocks/portfolio',
 };
 const routeForView = (view: ActiveView) => ROUTES[view];
 
 const ROUTE_VIEWS: Record<string, ActiveView> = {
-  '/': 'etf-discovery',
+  '/': 'etf-candidates',
   '/data': 'data',
   '/stocks': 'tickers',
   '/stocks/overview': 'overall',
@@ -50,6 +51,7 @@ const ROUTE_VIEWS: Record<string, ActiveView> = {
   '/etfs/discovery': 'etf-discovery',
   '/etfs/candidates': 'etf-candidates',
   '/etfs/research': 'etf-research',
+  '/etfs/portfolios': 'etf-portfolios',
   '/etfs/check': 'etf-candidates',
   '/stocks/research': 'research',
   '/stocks/portfolio': 'portfolio',
@@ -69,7 +71,7 @@ const areaForView = (view: ActiveView): PrimaryArea => {
   if (view === 'etfs' || view.startsWith('etf-')) return 'etfs';
   return 'stocks';
 };
-const isEtfView = (view: ActiveView) => view === 'etfs' || view === 'etf-discovery' || view === 'etf-candidates' || view === 'etf-research';
+const isEtfView = (view: ActiveView) => view === 'etfs' || view === 'etf-discovery' || view === 'etf-candidates' || view === 'etf-research' || view === 'etf-portfolios';
 
 const VIEW_COPY: Record<ActiveView, { title: string; subtitle: string }> = {
   data: { title: 'Data', subtitle: 'One folder in, one database out — every analysis reads what you import here' },
@@ -83,6 +85,7 @@ const VIEW_COPY: Record<ActiveView, { title: string; subtitle: string }> = {
   'etf-discovery': { title: 'Discover ETF rules', subtitle: 'Find patterns in the data and test them on the unseen period' },
   'etf-candidates': { title: 'Current ETF candidates', subtitle: 'See which imported ETFs currently match a validated rule' },
   'etf-research': { title: 'ETF evidence', subtitle: 'Inspect SPY comparisons, placebo tests, bootstrap results, and methodology' },
+  'etf-portfolios': { title: 'Build and track portfolios', subtitle: 'Check out a confirmed rule as a real portfolio, then track it against Seeking Alpha snapshots' },
   research: { title: 'Stock research', subtitle: 'Corrected bullish and bearish studies using the imported single-stock universe' },
   portfolio: { title: 'Portfolio backtest', subtitle: 'Test how groups of historically selected stocks performed together' },
 };
@@ -90,7 +93,7 @@ const VIEW_COPY: Record<ActiveView, { title: string; subtitle: string }> = {
 const DEFAULT_HISTORY_WINDOW: HistoryWindow = '7d';
 const DEFAULT_POLICY: SignalPolicy = 'long-exit-hold';
 const DEFAULT_SORT_KEY: SortKey = 'hitRate';
-const DEFAULT_ACTIVE_VIEW: ActiveView = 'etf-discovery';
+const DEFAULT_ACTIVE_VIEW: ActiveView = 'etf-candidates';
 const DEFAULT_ACCURACY_HORIZON = 90;
 const UI_STATE_STORAGE_KEY = 'seeking-alpha-backtest-ui-state';
 
@@ -254,7 +257,7 @@ function App() {
     // consume the analysis metadata. Avoid issuing a background metadata request every
     // two seconds while those long-running views are open.
     const metaPollingViews = new Set<ActiveView>([
-      'research', 'etfs', 'etf-discovery', 'etf-candidates', 'etf-research', 'data', 'portfolio',
+      'research', 'etfs', 'etf-discovery', 'etf-candidates', 'etf-research', 'etf-portfolios', 'data', 'portfolio',
     ]);
     if (metaPollingViews.has(activeView)) return () => { cancelled = true; };
     void refreshMeta();
@@ -306,6 +309,11 @@ function App() {
           if (activeView === 'etf-discovery') {
             const discoveryResponse = await fetchEtfSignalDiscovery();
             if (!cancelled) setEtfSignalDiscovery(discoveryResponse.data);
+          } else if (activeView === 'etf-portfolios') {
+            // PortfolioTrackerView fetches its own rules, ETF matches, and tracked checkouts --
+            // nothing here for App.tsx to preload.
+            if (!cancelled) setLoading(false);
+            return;
           } else {
             const researchResponse = await fetchResearchReport();
             if (!cancelled) {
@@ -541,9 +549,8 @@ function App() {
 
       {activeArea === 'etfs' && <nav className="subsection-nav" aria-label="ETF workspace">
         <span className="subsection-label">ETFs</span>
-        <button className={activeView === 'etf-discovery' ? 'subsection-button active' : 'subsection-button'} type="button" onClick={() => selectView('etf-discovery')}>Discover rules</button>
         <button className={activeView === 'etf-candidates' ? 'subsection-button active' : 'subsection-button'} type="button" onClick={() => selectView('etf-candidates')}>Current candidates</button>
-        <button className={activeView === 'etf-research' ? 'subsection-button active' : 'subsection-button'} type="button" onClick={() => selectView('etf-research')}>Evidence &amp; diagnostics</button>
+        <button className={activeView === 'etf-portfolios' ? 'subsection-button active' : 'subsection-button'} type="button" onClick={() => selectView('etf-portfolios')}>Portfolios</button>
       </nav>}
 
 
@@ -559,7 +566,7 @@ function App() {
       {activeView === 'portfolio' ? (
         <PortfolioBacktestView />
       ) : isEtfView(activeView) ? (
-        <EtfHubView section={activeView === 'etf-candidates' ? 'candidates' : activeView === 'etf-research' ? 'research' : activeView === 'etf-discovery' ? 'discovery' : 'all'} discovery={etfSignalDiscovery} researchReport={researchReport} researchJob={researchJob} onRunDiscovery={() => void runEtfSignalDiscovery()} onRunResearch={() => void handleResearchRun()} onExportResearch={() => void handleEtfResearchExport()} />
+        <EtfHubView section={activeView === 'etf-candidates' ? 'candidates' : activeView === 'etf-research' ? 'research' : activeView === 'etf-discovery' ? 'discovery' : activeView === 'etf-portfolios' ? 'portfolios' : 'all'} discovery={etfSignalDiscovery} researchReport={researchReport} researchJob={researchJob} onRunDiscovery={() => void runEtfSignalDiscovery()} onRunResearch={() => void handleResearchRun()} onExportResearch={() => void handleEtfResearchExport()} />
       ) : activeView === 'discovery' ? (
         <SignalDiscoveryView result={signalDiscovery} onRun={() => void runSignalDiscovery()} universe="stocks" />
       ) : activeView === 'data' ? (

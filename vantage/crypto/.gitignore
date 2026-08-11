@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-ui/
+.data/
+.secrets/
+*.pem
+*.key
+gmgn-api-key.txt
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal

@@ -14,7 +14,11 @@ const projectRoot = path.dirname(path.dirname(path.dirname(fileURLToPath(import.
 // rel_path. That is the whole reason the previous importer's `filename.includes('_historical_
 // prices_')` check had to go: renaming a file made its contents silently invisible.
 export const INPUT_DIR = path.join(projectRoot, 'input');
-const PARSER_VERSION = 3;
+// Bumping this forces every already-imported file to be reread and reparsed on the next Import
+// click, even though its bytes (and therefore sha256) haven't changed -- see the `parser_version`
+// checks below. That is what makes a parser fix like the ETF sector/industry backfill (v4) a
+// one-time, no-new-files-needed operation instead of requiring every raw export to be re-downloaded.
+const PARSER_VERSION = 4;
 
 export type FileKind = 'capture' | 'api_prices' | 'api_changes' | 'bundle' | 'benchmark' | 'unknown';
 export type FileStatus = 'new' | 'changed' | 'imported' | 'failed';
@@ -243,19 +247,29 @@ const resolveIncludedTicker = (included: Json[] | undefined, tickerId: unknown) 
   return included?.find((entry) => entry?.type === 'ticker' && String(entry.id) === String(tickerId)) ?? null;
 };
 
+// A stock ticker carries its GICS sector as a `relationships.sector` pointer into `included`. An
+// ETF never has that relationship at all -- Seeking Alpha classifies funds along a completely
+// different axis -- but every sampled ETF's own `attributes` carries `industryDisplay` (e.g.
+// "Information Technology", "Commodity Energy") and the coarser `sectorDisplay` (e.g. "Sector
+// Equity", "Commodities") as plain strings, no relationship lookup required. One ticker is never
+// both a stock and a fund, so a single `sector` column can hold whichever of these applies without
+// a schema change: the GICS name when present, else the ETF's own industry/sector label.
 const tickerRowFrom = (included: Json[] | undefined, entry: Json): TickerRow | null => {
   const attributes = entry?.attributes;
   const slug = typeof attributes?.slug === 'string' ? attributes.slug.toLowerCase() : null;
   if (!slug) return null;
   const sectorId = entry?.relationships?.sector?.data?.id;
   const sector = included?.find((item) => item?.type === 'sector' && String(item.id) === String(sectorId));
+  const etfCategory = typeof attributes.industryDisplay === 'string' && attributes.industryDisplay.trim()
+    ? attributes.industryDisplay
+    : (typeof attributes.sectorDisplay === 'string' && attributes.sectorDisplay.trim() ? attributes.sectorDisplay : null);
   return {
     slug,
     name: attributes.name ?? null,
     companyName: attributes.companyName ?? attributes.company ?? null,
     exchange: attributes.exchange ?? null,
     currency: attributes.currency ?? null,
-    sector: sector?.attributes?.name ?? null,
+    sector: sector?.attributes?.name ?? etfCategory,
     fundType: typeof attributes.fundType === 'string' ? attributes.fundType : null,
   };
 };

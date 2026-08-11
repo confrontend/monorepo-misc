@@ -412,6 +412,48 @@ export const fetchEtfBasketAnalysis = (tickers: string[], horizonDays: number, b
     action: 'etfBasket', tickers: tickers.join(','), horizon: String(horizonDays), basketSize: String(basketSize),
   }));
 
+// ---------------------------------------------------------------------------
+// Portfolio tracker (/api/portfolio-tracker) — real checkouts against a confirmed rule, tracked
+// independently of every research table above. Never derived from input/, never wiped by Import.
+// ---------------------------------------------------------------------------
+export type TrackedPortfolioLot = { ticker: string; quantity: number; entryPrice: number };
+export type TrackedPortfolioSnapshot = { capturedAt: string; totalValue: number; totalChangePercent: number | null };
+export type TrackedPortfolio = {
+  id: number;
+  name: string;
+  family: string;
+  filter: string;
+  persistence: string | null;
+  hold: string;
+  entryDate: string;
+  createdAt: string;
+  lots: TrackedPortfolioLot[];
+  costBasis: number;
+  latestSnapshot: TrackedPortfolioSnapshot | null;
+  snapshots: TrackedPortfolioSnapshot[];
+  spyReturnSinceEntry: number | null;
+};
+
+const portfolioTrackerRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`/api/portfolio-tracker${path}`, { cache: 'no-store', ...init });
+  const payload = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? `Portfolio tracker request failed (${response.status})`);
+  return payload;
+};
+
+export const fetchTrackedPortfolios = () => portfolioTrackerRequest<{ portfolios: TrackedPortfolio[] }>('/list');
+export const createTrackedPortfolio = (input: {
+  name: string; family: string; filter: string; persistence: string | null; hold: string;
+  entryDate: string; lots: TrackedPortfolioLot[];
+}) => portfolioTrackerRequest<{ id: number }>('/create', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+});
+export const saveTrackedPortfolioSnapshots = (entries: Array<{
+  name: string; capturedAt: string; totalValue: number; totalChangePercent: number | null;
+}>) => portfolioTrackerRequest<{ outcomes: Array<{ name: string; matched: boolean }> }>('/snapshot', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries }),
+});
+
 export const fetchAnalysis = <T>(action: string, options: { window?: HistoryWindow; policy?: SignalPolicy; ticker?: string; horizon?: number } = {}) => {
   const params = new URLSearchParams({ action });
   if (options.window) params.set('window', options.window);

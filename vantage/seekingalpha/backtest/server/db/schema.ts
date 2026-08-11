@@ -223,6 +223,51 @@ CREATE TABLE IF NOT EXISTS strong_buy_outlier_results (
 CREATE INDEX IF NOT EXISTS idx_strong_buy_outlier_run ON strong_buy_outlier_results (run_id);
 `;
 
+// Real, tracked buy-list checkouts against a confirmed research rule -- not a research output, so
+// it lives alongside the ingestion tables rather than the run-scoped result tables above. One row
+// per checkout; frozen at creation time and never edited, matching the "freeze the purchase date,
+// holdings, and entry prices" requirement -- otherwise later drift in the live rule/basket would
+// make the comparison against this specific purchase meaningless.
+const CREATE_TRACKED_PORTFOLIOS = `
+CREATE TABLE IF NOT EXISTS tracked_portfolios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  family TEXT NOT NULL,
+  filter TEXT NOT NULL,
+  persistence TEXT,
+  hold TEXT NOT NULL,
+  entry_date TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
+// One row per ETF in the checkout. Lots are never merged across portfolios even when the same
+// ticker appears in two checkouts -- each lot keeps its own strategy's expected hold and exit
+// clock, which a merged "total shares" row would destroy.
+const CREATE_TRACKED_PORTFOLIO_LOTS = `
+CREATE TABLE IF NOT EXISTS tracked_portfolio_lots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  portfolio_id INTEGER NOT NULL REFERENCES tracked_portfolios(id),
+  ticker TEXT NOT NULL,
+  quantity REAL NOT NULL,
+  entry_price REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tracked_portfolio_lots_portfolio ON tracked_portfolio_lots (portfolio_id);
+`;
+
+// Append-only, one row per pasted Seeking Alpha snapshot -- never overwritten, so the portfolio's
+// actual value history survives even though each paste only ever reports "right now".
+const CREATE_TRACKED_PORTFOLIO_SNAPSHOTS = `
+CREATE TABLE IF NOT EXISTS tracked_portfolio_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  portfolio_id INTEGER NOT NULL REFERENCES tracked_portfolios(id),
+  captured_at TEXT NOT NULL,
+  total_value REAL NOT NULL,
+  total_change_percent REAL
+);
+CREATE INDEX IF NOT EXISTS idx_tracked_portfolio_snapshots_portfolio ON tracked_portfolio_snapshots (portfolio_id, captured_at);
+`;
+
 // Ordered, append-only list of schema migrations, tracked via SQLite's built-in `PRAGMA
 // user_version` integer (no extra table needed to store "which version am I"). Each entry upgrades
 // the database from its own array index to index + 1. Once a migration has shipped and could exist
@@ -421,6 +466,13 @@ const migrations: Migration[] = [
     description: 'track importer parser revisions so metadata improvements reprocess unchanged files',
     up: (db) => {
       db.exec('ALTER TABLE source_files ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 1;');
+    },
+  },
+  {
+    description: 'live portfolio tracker: frozen checkouts, their lots, and append-only Seeking Alpha snapshots',
+    up: (db) => {
+      [CREATE_TRACKED_PORTFOLIOS, CREATE_TRACKED_PORTFOLIO_LOTS, CREATE_TRACKED_PORTFOLIO_SNAPSHOTS]
+        .forEach((statement) => db.exec(statement));
     },
   },
 ];

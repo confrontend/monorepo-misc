@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>GMGN Signal Capture</title>
+<style>
+  body { font: 13px system-ui, sans-serif; width: 260px; padding: 12px; background: #101614; color: #e9f2ed; }
+  h1 { font-size: 13px; margin: 0 0 8px; color: #83d6b0; text-transform: uppercase; letter-spacing: .06em; }
+  #status { margin: 0 0 10px; color: #a6b6ae; line-height: 1.4; }
+  button { width: 100%; padding: 9px; margin-top: 6px; cursor: pointer; border-radius: 6px; border: 1px solid #2d5648; background: #182720; color: #e9f2ed; font: inherit; }
+  button:hover { background: #20352b; }
+  #toggle.active { background: #72d8aa; color: #112118; border-color: #72d8aa; font-weight: 600; }
+  small { display: block; margin-top: 10px; color: #71877c; line-height: 1.4; }
+</style>
+</head>
+<body>
+  <h1>GMGN Signal Capture</h1>
+  <div id="status">Loading…</div>
+  <button id="toggle">Start capture</button>
+  <button id="export">Export JSON</button>
+  <button id="clear">Clear captured data</button>
+  <small>Captures gmgn.ai's own token-signal responses while this tab is open and capture is started. Also logs start/stop/heartbeat coverage windows so the app can tell "nothing happened" apart from "capture wasn't running." Nothing leaves your machine except the file you choose to export.</small>
+  <script src="popup.js"></script>
+</body>
+</html>

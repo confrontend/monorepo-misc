@@ -1,6 +1,7 @@
 import type { ResearchJob, ResearchReport } from '../../../api';
 import type { SignalDiscoveryResult } from '../../../data';
 import { EtfCheckView } from '../../etf-check/components/EtfCheckView';
+import { PortfolioTrackerView } from '../../portfolio-tracker/components/PortfolioTrackerView';
 import { ResearchView } from '../../research/components/ResearchView';
 import { SignalDiscoveryView } from '../../signal-discovery/components/SignalDiscoveryView';
 
@@ -13,7 +14,7 @@ export function EtfHubView({
   onRunResearch,
   onExportResearch,
 }: {
-  section: 'all' | 'discovery' | 'candidates' | 'research';
+  section: 'all' | 'discovery' | 'candidates' | 'research' | 'portfolios';
   discovery: SignalDiscoveryResult | null;
   researchReport: ResearchReport | null;
   researchJob: ResearchJob | null;
@@ -25,7 +26,7 @@ export function EtfHubView({
     <main className="etf-workspace">
       <section className="etf-workspace-intro">
         <div className="eyebrow">One ETF workflow</div>
-        <h2>{section === 'discovery' ? 'Discover and validate ETF rules' : section === 'candidates' ? 'Current ETF candidates' : section === 'research' ? 'Statistical evidence and diagnostics' : 'Discover the rule, then find today&apos;s matches'}</h2>
+        <h2>{section === 'discovery' ? 'Discover and validate ETF rules' : section === 'candidates' ? 'Current ETF candidates' : section === 'research' ? 'Statistical evidence and diagnostics' : section === 'portfolios' ? 'Build and track real portfolios' : 'Discover the rule, then find today&apos;s matches'}</h2>
         <p>
           {section === 'discovery'
             ? 'Find patterns in historical ETF ratings, then test the rule on an unseen period.'
@@ -33,7 +34,9 @@ export function EtfHubView({
               ? 'See which imported ETFs currently match a rule that already passed the validation gate.'
               : section === 'research'
                 ? 'Inspect SPY comparisons, placebo tests, bootstrap results, and the methodology behind the ETF conclusions.'
-                : 'The first section learns and validates rating rules. The second finds current matches. The third shows the detailed evidence.'}
+                : section === 'portfolios'
+                  ? 'Check out a confirmed rule as a real portfolio, then paste Seeking Alpha snapshots to track it over time.'
+                  : 'The first section learns and validates rating rules. The second finds current matches. The third shows the detailed evidence.'}
         </p>
       </section>
 
@@ -56,6 +59,11 @@ export function EtfHubView({
           onExportResults={onExportResearch}
           scope="etf"
         />
+      </details>}
+
+      {(section === 'all' || section === 'portfolios') && <details className="etf-workspace-section" open={section === 'portfolios'}>
+        <summary><strong>4. Build and track real portfolios</strong><span>Check out a confirmed rule, then track it against Seeking Alpha snapshots</span></summary>
+        <PortfolioTrackerView />
       </details>}
     </main>
   );

@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "GMGN Signal Capture (Research)",
+  "version": "0.2.0",
+  "description": "Captures GMGN token-signal API responses locally while you browse gmgn.ai, for personal research export. Captures nothing unless explicitly started.",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["https://gmgn.ai/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://gmgn.ai/*"],
+      "js": ["content-main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://gmgn.ai/*"],
+      "js": ["content-bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "GMGN Signal Capture"
+  }
+}

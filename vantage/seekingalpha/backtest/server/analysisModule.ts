@@ -27,5 +27,6 @@ export type AnalysisModule = {
   buildSignalDiscovery: (universe?: 'stocks' | 'etf') => any;
   buildEtfCheck: (tickers?: string[]) => any;
   buildEtfBasketAnalysis: (tickers: string[], horizonDays?: number, basketSize?: number) => any;
+  buildEpisodeFixture: () => any;
   getMethodologyConfig: () => any;
 };

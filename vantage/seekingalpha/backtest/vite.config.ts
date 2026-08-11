@@ -613,6 +613,60 @@ const dataApiPlugin = (): Plugin => ({
   },
 });
 
+// Real checkouts against a confirmed rule, tracked separately from every research/analysis table
+// above -- this data is never derived from input/ and must never be wiped by a re-import, so it
+// gets its own small plugin rather than a case inside analysisApiPlugin's action dispatch.
+const portfolioTrackerApiPlugin = (): Plugin => ({
+  name: 'local-portfolio-tracker-api',
+  configureServer(server) {
+    server.middlewares.use('/api/portfolio-tracker', async (request, response) => {
+      try {
+        const url = new URL(request.url ?? '/', 'http://localhost');
+        const tracker = await import('./server/db/portfolioTracker.js');
+        if (url.pathname.endsWith('/create') && request.method === 'POST') {
+          const body = await readJsonBody(request) as Record<string, unknown>;
+          const lots = Array.isArray(body.lots) ? body.lots as Array<Record<string, unknown>> : [];
+          const result = tracker.createTrackedPortfolio({
+            name: String(body.name ?? ''),
+            family: String(body.family ?? ''),
+            filter: String(body.filter ?? ''),
+            persistence: body.persistence === null || body.persistence === undefined ? null : String(body.persistence),
+            hold: String(body.hold ?? ''),
+            entryDate: String(body.entryDate ?? ''),
+            lots: lots.map((lot) => ({
+              ticker: String(lot.ticker ?? ''),
+              quantity: Number(lot.quantity ?? 0),
+              entryPrice: Number(lot.entryPrice ?? 0),
+            })),
+          });
+          sendJson(response, 200, result);
+          return;
+        }
+        if (url.pathname.endsWith('/snapshot') && request.method === 'POST') {
+          const body = await readJsonBody(request) as { entries?: unknown };
+          const entries = Array.isArray(body.entries) ? body.entries as Array<Record<string, unknown>> : [];
+          const outcomes = tracker.addTrackedPortfolioSnapshots(entries.map((entry) => ({
+            name: String(entry.name ?? ''),
+            capturedAt: String(entry.capturedAt ?? new Date().toISOString()),
+            totalValue: Number(entry.totalValue ?? 0),
+            totalChangePercent: entry.totalChangePercent === null || entry.totalChangePercent === undefined
+              ? null : Number(entry.totalChangePercent),
+          })));
+          sendJson(response, 200, { outcomes });
+          return;
+        }
+        if (request.method === 'GET') {
+          sendJson(response, 200, { portfolios: tracker.listTrackedPortfolios() });
+          return;
+        }
+        sendJson(response, 404, { error: 'Not found' });
+      } catch (error) {
+        sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+  },
+});
+
 // The persistence-screen statistics stay in Python: a wild cluster bootstrap, Holm correction and
 // placebo test that have been validated against this dataset and should not be re-derived in
 // another language just to remove a runtime dependency. Instead the server spawns them, so there
@@ -949,6 +1003,7 @@ const analysisApiPlugin = (): Plugin => ({
           if (action === 'etfSignalDiscovery') return analysis.buildSignalDiscovery('etf');
           if (action === 'etfCheck') return analysis.buildEtfCheck(tickersParam.length ? tickersParam : undefined);
           if (action === 'etfBasket') return analysis.buildEtfBasketAnalysis(tickersParam, horizon, basketSize);
+          if (action === 'episodeFixture') return analysis.buildEpisodeFixture();
           if (action === 'portfolio' || action === 'portfolioBest' || action === 'portfolioValidate') {
             if (!portfolioConfig) throw new Error('Portfolio configuration is required.');
             const config = JSON.parse(portfolioConfig);
@@ -969,7 +1024,7 @@ const analysisApiPlugin = (): Plugin => ({
 });
 
 export default defineConfig({
-  plugins: [react(), dataApiPlugin(), analysisApiPlugin(), researchApiPlugin()],
+  plugins: [react(), dataApiPlugin(), analysisApiPlugin(), researchApiPlugin(), portfolioTrackerApiPlugin()],
   server: {
     watch: {
       usePolling: true,

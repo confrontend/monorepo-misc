@@ -15,7 +15,7 @@ type CaptureRecord = { date: string; price: number; quantRating: Rating; quantSc
 type CaptureDataset = {
   capture: {
     capturedAt: string;
-    source: { ticker: string; companyName: string; currentPrice: number; quantRating: Rating; quantScore: number; fundType: string | null };
+    source: { ticker: string; companyName: string; currentPrice: number; quantRating: Rating; quantScore: number; fundType: string | null; sector: string | null };
     quantRatingHistory: { records: CaptureRecord[] };
   };
   sourceFile: string;
@@ -45,12 +45,13 @@ type ChangeRow = {
   ticker_slug: string; created_at: string;
   new_rating: string | null; previous_rating: string | null;
   rating_new: number | null; rating_previous: number | null;
+  sector_display: string | null;
 };
 type QuantRow = {
   ticker_slug: string; as_of_date: string; price: number | null;
   quant_rating: string | null; quant_score: number | null;
 };
-type TickerRow = { slug: string; company_name: string | null; name: string | null; fund_type: string | null };
+type TickerRow = { slug: string; company_name: string | null; name: string | null; fund_type: string | null; sector: string | null };
 
 const groupBy = <T>(rows: T[], key: (row: T) => string): Map<string, T[]> => {
   const map = new Map<string, T[]>();
@@ -75,18 +76,22 @@ export const loadDatasetsFromDb = (): LoadedData => {
     'SELECT ticker_slug, as_of_date, adj_close FROM prices WHERE adj_close > 0 ORDER BY ticker_slug, as_of_date',
   ).all() as unknown as PriceRow[];
   const changes = db.prepare(
-    'SELECT ticker_slug, created_at, new_rating, previous_rating, rating_new, rating_previous '
+    'SELECT ticker_slug, created_at, new_rating, previous_rating, rating_new, rating_previous, sector_display '
     + 'FROM rating_changes ORDER BY ticker_slug, created_at',
   ).all() as unknown as ChangeRow[];
   const quant = db.prepare(
     'SELECT ticker_slug, as_of_date, price, quant_rating, quant_score FROM quant_history ORDER BY ticker_slug, as_of_date',
   ).all() as unknown as QuantRow[];
-  const tickers = new Map((db.prepare('SELECT slug, company_name, name, fund_type FROM tickers').all() as unknown as TickerRow[])
+  const tickers = new Map((db.prepare('SELECT slug, company_name, name, fund_type, sector FROM tickers').all() as unknown as TickerRow[])
     .map((row) => [row.slug, row]));
 
   const pricesBySlug = groupBy(prices, (row) => row.ticker_slug);
   const changesBySlug = groupBy(changes, (row) => row.ticker_slug);
   const quantBySlug = groupBy(quant, (row) => row.ticker_slug);
+  const latestSectorBySlug = new Map<string, string>();
+  changes.forEach((row) => {
+    if (row.sector_display?.trim()) latestSectorBySlug.set(row.ticker_slug, row.sector_display.trim());
+  });
 
   const displayName = (slug: string) => {
     const row = tickers.get(slug);
@@ -150,6 +155,7 @@ export const loadDatasetsFromDb = (): LoadedData => {
           quantRating: last.quantRating,
           quantScore: last.quantScore,
           fundType: tickers.get(slug)?.fund_type ?? null,
+          sector: tickers.get(slug)?.sector ?? latestSectorBySlug.get(slug) ?? null,
         },
         quantRatingHistory: { records },
       },
@@ -187,6 +193,7 @@ export const loadDatasetsFromDb = (): LoadedData => {
           quantRating: last.quantRating,
           quantScore: last.quantScore,
           fundType: tickers.get(slug)?.fund_type ?? null,
+          sector: tickers.get(slug)?.sector ?? latestSectorBySlug.get(slug) ?? null,
         },
         quantRatingHistory: { records },
       },
