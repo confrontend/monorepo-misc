@@ -1,6 +1,18 @@
 # Handoff: consume GMGN browser-extension captures
 
-**Status:** Implementation brief for a fresh agent. Not yet built.
+## Investigation sampling (separate from signal capture)
+
+The extension also has an opt-in **Start investigation sampling** button. It does not change
+the normal `gmgn_captures` signal stream or its export. While enabled, it samples fetch/XHR and
+GMGN WebSocket traffic into a separate local store, grouped by transport, method, and URL. Each
+unique endpoint keeps up to five representative samples, including the page URL, direction,
+status, request payload, and response/message payload (payloads are capped at 50,000 characters).
+Use **Export investigation JSON** to create a separate file for endpoint review; use **Clear
+investigation data** to discard it. This is deliberately a discovery aid, not a permanent source
+or a scraper. Version 0.8.1 redacts common authorization/access-token fields before storage;
+older exports may still contain such values and must not be shared without review or revocation.
+
+**Status:** The normal signal-import handoff remains implemented; investigation sampling is implemented in extension version 0.8.1.
 **Context:** This is a deliberate, explicit exception to the "no website scraping" rule in
 `docs/GMGN_CAPTURE_NEXT_STEP_REVIEW.md` and to GMGN's own bundled CLI skill doc (which says
 the public OpenAPI CLI is "the only correct method"). The reason: the public

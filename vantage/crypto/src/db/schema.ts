@@ -253,6 +253,156 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    description: 'Signal pattern report snapshots',
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE signal_pattern_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          computed_at TEXT NOT NULL,
+          params_json TEXT NOT NULL,
+          source_run_ids_json TEXT NOT NULL,
+          report_json TEXT NOT NULL
+        );
+        CREATE INDEX idx_signal_pattern_snapshots_computed_at ON signal_pattern_snapshots(computed_at);
+      `);
+    },
+  },
+  {
+    description: 'GMGN raw radar, wallet rank, smart-money, and Twitter snapshots',
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE gmgn_radar_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chain TEXT,
+          period TEXT,
+          category TEXT,
+          captured_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL,
+          source_sha256 TEXT NOT NULL UNIQUE
+        );
+        CREATE INDEX idx_gmgn_radar_snapshots_lookup
+          ON gmgn_radar_snapshots(chain, period, category, captured_at);
+
+        CREATE TABLE gmgn_wallet_rank_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          window TEXT,
+          orderby TEXT,
+          captured_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL,
+          source_sha256 TEXT NOT NULL UNIQUE
+        );
+        CREATE INDEX idx_gmgn_wallet_rank_snapshots_lookup
+          ON gmgn_wallet_rank_snapshots(window, orderby, captured_at);
+
+        CREATE TABLE gmgn_smartmoney_wallet_stats (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          wallet_address TEXT NOT NULL,
+          chain TEXT,
+          captured_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL,
+          source_sha256 TEXT NOT NULL
+        );
+        CREATE INDEX idx_gmgn_smartmoney_wallet_stats_lookup
+          ON gmgn_smartmoney_wallet_stats(wallet_address, chain, captured_at);
+
+        CREATE TABLE gmgn_twitter_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tweet_id TEXT,
+          tw_type TEXT,
+          has_token INTEGER,
+          captured_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL,
+          source_event_id TEXT,
+          source_sha256 TEXT NOT NULL UNIQUE
+        );
+        CREATE INDEX idx_gmgn_twitter_messages_lookup
+          ON gmgn_twitter_messages(tweet_id, tw_type, captured_at);
+        CREATE INDEX idx_gmgn_twitter_messages_source_event
+          ON gmgn_twitter_messages(source_event_id);
+      `);
+    },
+  },
+  {
+    description: 'Raw-endpoint import breakdown persisted per browser-import batch (for accurate duplicate-file reporting)',
+    up: (database) => {
+      database.exec(`
+        ALTER TABLE gmgn_browser_import_batches ADD COLUMN raw_endpoints_json TEXT;
+      `);
+    },
+  },
+  {
+    // The migration that originally created gmgn_smartmoney_wallet_stats was edited in place
+    // after it had already run in this database (it briefly had `source_sha256 TEXT NOT NULL
+    // UNIQUE`, matching the other three raw-endpoint tables, before being corrected to plain
+    // `NOT NULL` so repeated wallet observations stay append-only per src/gmgn/smartmoney.ts's
+    // intent). Editing already-applied migration text has no effect on a database where it
+    // already ran — SQLite migrations here are tracked by count, not by re-diffing SQL — so any
+    // database that had already migrated past that point is still silently carrying the old
+    // UNIQUE constraint, causing every second capture of an unchanged wallet (very common for
+    // inactive/low-volume wallets) to throw an uncaught constraint violation. SQLite has no
+    // ALTER TABLE ... DROP CONSTRAINT, so the fix is the standard rebuild: recreate the table
+    // without the constraint, copy every row across untouched, then swap it in. A database that
+    // never had the bad constraint (fresh installs from schema.ts's current text) just performs
+    // a harmless no-op copy through this same path — no branching on which case applies.
+    description: 'Drop the erroneous UNIQUE constraint on gmgn_smartmoney_wallet_stats.source_sha256 (rebuild — SQLite has no ALTER TABLE DROP CONSTRAINT)',
+    up: (database) => {
+      database.exec(`
+        ALTER TABLE gmgn_smartmoney_wallet_stats RENAME TO gmgn_smartmoney_wallet_stats_old;
+        CREATE TABLE gmgn_smartmoney_wallet_stats (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          wallet_address TEXT NOT NULL,
+          chain TEXT,
+          captured_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL,
+          source_sha256 TEXT NOT NULL
+        );
+        INSERT INTO gmgn_smartmoney_wallet_stats (id, wallet_address, chain, captured_at, raw_payload, source_sha256)
+          SELECT id, wallet_address, chain, captured_at, raw_payload, source_sha256 FROM gmgn_smartmoney_wallet_stats_old;
+        DROP TABLE gmgn_smartmoney_wallet_stats_old;
+        CREATE INDEX idx_gmgn_smartmoney_wallet_stats_lookup
+          ON gmgn_smartmoney_wallet_stats(wallet_address, chain, captured_at);
+      `);
+    },
+  },
+  {
+    description: 'Versioned GMGN-to-Dune measurement pre-screen decisions',
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE dune_measurement_prescreen (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          signal_id INTEGER NOT NULL REFERENCES gmgn_signals(id),
+          rule_version TEXT NOT NULL,
+          decision_key TEXT NOT NULL UNIQUE,
+          disposition TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          signal_type TEXT,
+          capture_date TEXT,
+          cohort_matched INTEGER NOT NULL DEFAULT 0,
+          planner_state TEXT NOT NULL,
+          audit_seed TEXT,
+          evaluated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_dune_measurement_prescreen_signal ON dune_measurement_prescreen(signal_id, id DESC);
+        CREATE INDEX idx_dune_measurement_prescreen_disposition ON dune_measurement_prescreen(rule_version, disposition, signal_type, capture_date);
+      `);
+    },
+  },
+  {
+    description: 'Cached measurement-plan snapshots for fast repeat reads',
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE measurement_plan_cache (
+          cache_key TEXT PRIMARY KEY,
+          rule_version TEXT NOT NULL,
+          source_fingerprint TEXT NOT NULL,
+          generated_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          plan_json TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export const latestSchemaVersion = migrations.length;

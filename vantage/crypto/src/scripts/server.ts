@@ -23,13 +23,24 @@ import { logDiagnostic, readRecentDiagnostics } from '../db/diagnostics.js';
 import { redactSensitiveText } from '../security/redaction.js';
 import { probeBirdeye } from '../birdeye/probe.js';
 import { listOutcomeCandidates, measureSignalsOutcome } from '../birdeye/outcome.js';
-import { measureDuneOutcomes, readLatestDuneOutcomes } from '../dune/outcomes.js';
+import { measureDuneOutcomes, readAllDuneOutcomes, readLatestDuneOutcomes, reconcileStuckDuneRuns } from '../dune/outcomes.js';
+import { buildMeasurementPlan } from '../dune/planner.js';
+import { computeSignalPatternReport, computeSignalPatternSubgroupReport, listSignalPatternSnapshots, saveSignalPatternSnapshot, type SubgroupProperty } from '../db/patterns.js';
+import { listRadarSnapshots, listWalletRankSnapshots, listSmartMoneyWalletStats, listTwitterMessages, readRawEndpointSummary } from '../gmgn/rawEndpointReads.js';
+import { computeRobustPatternReport, type RobustPatternReport } from '../db/robustPatterns.js';
 
 const database = openDatabase();
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const uiRoot = path.join(projectRoot, 'dist-ui');
 const port = Number(process.env.CRYPTO_RESEARCH_PORT ?? 4173);
 const maxBodyBytes = 512 * 1024 * 1024;
+
+// Short-TTL cache for the robust pattern report (see its route below) — this endpoint runs a
+// multi-second synchronous computation, so a burst of near-simultaneous requests should share
+// one result rather than each independently blocking the event loop for the full cost.
+const robustReportCache = new Map<number, { computedAtMs: number; report: RobustPatternReport }>();
+const ROBUST_REPORT_CACHE_TTL_MS = 5000;
+const ROBUST_REPORT_CACHE_MAX_ENTRIES = 8;
 
 // Disabled for now (kept in place, not removed): unattended continuous polling needs more
 // runway on the manual one-off capture path first. /status and /stop stay live (harmless,
@@ -144,7 +155,10 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/dune/candidates') {
-      respond(200, listOutcomeCandidates(database));
+      const rawLimit = requestUrl.searchParams.get('limit');
+      const limit = rawLimit === null ? undefined : Number(rawLimit);
+      if (rawLimit !== null && (!Number.isFinite(limit) || (limit as number) <= 0)) { respond(400, { error: 'limit must be a positive number when provided.' }); return; }
+      respond(200, listOutcomeCandidates(database, limit));
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/birdeye/outcomes') {
@@ -161,6 +175,74 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/dune/outcomes/latest') {
       respond(200, readLatestDuneOutcomes(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dune/outcomes/all') {
+      respond(200, readAllDuneOutcomes(database));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dune/reconcile') {
+      respond(200, await reconcileStuckDuneRuns(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dune/measurement-plan') {
+      respond(200, buildMeasurementPlan(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns') {
+      respond(200, computeSignalPatternReport(database));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/analysis/patterns/snapshot') {
+      respond(200, saveSignalPatternSnapshot(database, computeSignalPatternReport(database)));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/snapshots') {
+      respond(200, listSignalPatternSnapshots(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/subgroups') {
+      const property = requestUrl.searchParams.get('property');
+      if (property !== 'launchPlatform' && property !== 'tokenAge' && property !== 'combined') { respond(400, { error: 'property must be "launchPlatform", "tokenAge", or "combined".' }); return; }
+      respond(200, computeSignalPatternSubgroupReport(database, property as SubgroupProperty));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/robust') {
+      const rawIterations = Number(requestUrl.searchParams.get('iterations') ?? '');
+      // Default kept modest (not the module's own 2000-iteration default) because this runs
+      // synchronously on Node's single event loop, same class of concern as the prescreen
+      // write-loop fix earlier this session — 1000 iterations is still a standard, reasonable
+      // bootstrap sample count for a percentile-method CI, just faster to compute at this data
+      // volume. A heavier run is available via ?iterations= for offline/one-off use, at the cost
+      // of blocking the event loop longer — the short-TTL cache below exists specifically so a
+      // burst of near-simultaneous requests (a UI double-fetch, several open tabs) only pays
+      // that cost once rather than once per request.
+      const iterations = Number.isFinite(rawIterations) && rawIterations > 0 ? Math.min(rawIterations, 5000) : 1000;
+      const cached = robustReportCache.get(iterations);
+      const nowMs = Date.now();
+      if (cached && nowMs - cached.computedAtMs < ROBUST_REPORT_CACHE_TTL_MS) {
+        respond(200, cached.report);
+        return;
+      }
+      const report = computeRobustPatternReport(database, new Date(nowMs), { bootstrapIterations: iterations });
+      if (robustReportCache.size >= ROBUST_REPORT_CACHE_MAX_ENTRIES) robustReportCache.clear(); // bounded, not a real LRU — this endpoint only ever sees a handful of distinct iteration values in practice
+      robustReportCache.set(iterations, { computedAtMs: nowMs, report });
+      respond(200, report);
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/gmgn/raw-endpoints/summary') {
+      respond(200, readRawEndpointSummary(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/gmgn/raw-endpoints/')) {
+      const type = requestUrl.pathname.slice('/api/gmgn/raw-endpoints/'.length);
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '');
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      if (type === 'radar') { respond(200, listRadarSnapshots(database, limit)); return; }
+      if (type === 'wallet-rank') { respond(200, listWalletRankSnapshots(database, limit)); return; }
+      if (type === 'smart-money') { respond(200, listSmartMoneyWalletStats(database, requestUrl.searchParams.get('wallet') ?? undefined, limit)); return; }
+      if (type === 'twitter') { respond(200, listTwitterMessages(database, limit)); return; }
+      respond(400, { error: 'type must be one of "radar", "wallet-rank", "smart-money", or "twitter".' });
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/gmgn/status') {

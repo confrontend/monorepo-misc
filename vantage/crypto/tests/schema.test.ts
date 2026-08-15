@@ -18,11 +18,18 @@ test('schema initialization creates V1 tables and is idempotent', () => {
       'diagnostic_logs',
       'dune_import_batches',
       'dune_import_records',
+      'dune_measurement_prescreen',
       'dune_outcome_runs',
       'gmgn_browser_coverage_windows',
       'gmgn_browser_import_batches',
       'gmgn_polls',
+      'gmgn_radar_snapshots',
       'gmgn_signals',
+      'gmgn_smartmoney_wallet_stats',
+      'gmgn_twitter_messages',
+      'gmgn_wallet_rank_snapshots',
+      'measurement_plan_cache',
+      'signal_pattern_snapshots',
       'tokens',
     ]);
     const version = database.prepare('PRAGMA user_version').get() as { user_version: number };

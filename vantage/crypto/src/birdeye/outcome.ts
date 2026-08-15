@@ -4,12 +4,16 @@ import { probeBirdeye, type BirdeyeProbeResult } from './probe.js';
 export type OutcomeCandidate = { id: number; tokenAddress: string; symbol: string | null; signalType: string | null; observedAt: string; marketCap: number | null };
 export type OutcomeTimeline = { signal: OutcomeCandidate; checkpoints: Array<{ label: string; targetTimestamp: string; result: BirdeyeProbeResult }> };
 
-export const listOutcomeCandidates = (database: DatabaseSync, limit = 50): OutcomeCandidate[] => database.prepare(`
-  SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap
-  FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address
-  WHERE g.token_address IS NOT NULL AND g.observed_at IS NOT NULL
-  ORDER BY observed_at DESC, id DESC LIMIT ?
-`).all(Math.min(Math.max(limit, 1), 200)) as unknown as OutcomeCandidate[];
+export const listOutcomeCandidates = (database: DatabaseSync, limit?: number): OutcomeCandidate[] => {
+  const base = `
+    SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap
+    FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address
+    WHERE g.token_address IS NOT NULL AND g.observed_at IS NOT NULL
+    ORDER BY observed_at DESC, id DESC`;
+  if (limit === undefined) return database.prepare(base).all() as unknown as OutcomeCandidate[];
+  const safeLimit = Math.max(1, Math.floor(limit));
+  return database.prepare(`${base} LIMIT ?`).all(safeLimit) as unknown as OutcomeCandidate[];
+};
 
 export const measureSignalOutcome = async (database: DatabaseSync, signalId: number): Promise<OutcomeTimeline> => {
   const signal = database.prepare(`SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id = ?`).get(signalId) as OutcomeCandidate | undefined;

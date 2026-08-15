@@ -7,6 +7,12 @@ const HEARTBEAT_INTERVAL_MINUTES = 1;
 // A gap bigger than this multiple (service worker suspended, tab closed, browser quit) means
 // the window must be split rather than silently stretched across time capture wasn't running.
 const HEARTBEAT_GAP_MULTIPLIER = 3;
+const INVESTIGATION_KEY = 'gmgn_investigation_samples';
+const INVESTIGATION_ACTIVE_KEY = 'gmgn_investigation_active';
+const INVESTIGATION_STARTED_KEY = 'gmgn_investigation_started_at';
+const INVESTIGATION_MAX_ENDPOINTS = 500;
+const INVESTIGATION_MAX_SAMPLES_PER_ENDPOINT = 5;
+let investigationWriteQueue = Promise.resolve();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GMGN_CAPTURE') {
@@ -27,6 +33,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type === 'EXPORT') {
     exportCaptures().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'GET_INVESTIGATION_STATE') {
+    getInvestigationState().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'SET_INVESTIGATION') {
+    setInvestigationActive(Boolean(message.active)).then(sendResponse);
+    return true;
+  }
+  if (message.type === 'GMGN_INVESTIGATION') {
+    investigationWriteQueue = investigationWriteQueue.then(() => handleInvestigation(message.sample)).catch((error) => console.debug('gmgn-signal-capture: investigation sample dropped', error));
+    return false;
+  }
+  if (message.type === 'EXPORT_INVESTIGATION') {
+    exportInvestigation().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'CLEAR_INVESTIGATION') {
+    clearInvestigation().then(sendResponse);
     return true;
   }
   return false;
@@ -95,12 +121,98 @@ async function setActive(active) {
   await chrome.storage.local.set({ [ACTIVE_KEY]: active, [COVERAGE_KEY]: windows });
 }
 
+// Appends one item to a stored array, tolerating a chrome.storage.local write failure (e.g.
+// "kQuotaBytes quota exceeded") by trimming the oldest half of the array and retrying once,
+// instead of the previous behavior: the write throws inside a fire-and-forget async call with
+// no catch anywhere in its chain, so the failure became an invisible unhandled promise
+// rejection and the new capture (and every capture after it, since the same write keeps
+// failing identically forever) was silently lost with no trace outside chrome://extensions'
+// hidden per-extension error log. This makes storage genuinely self-healing instead of a
+// permanent, silent dead end.
+async function appendToStorage(key, item) {
+  const { [key]: existing = [] } = await chrome.storage.local.get(key);
+  existing.push(item);
+  try {
+    await chrome.storage.local.set({ [key]: existing });
+  } catch (error) {
+    console.error(`gmgn-signal-capture: storage write failed for "${key}" (likely quota) — trimming oldest half and retrying`, error);
+    const trimmed = existing.slice(Math.ceil(existing.length / 2));
+    try {
+      await chrome.storage.local.set({ [key]: trimmed });
+    } catch (retryError) {
+      console.error(`gmgn-signal-capture: retry after trim also failed for "${key}" — this capture is dropped`, retryError);
+    }
+  }
+}
+
 async function handleCapture(capture) {
   const { [ACTIVE_KEY]: active } = await chrome.storage.local.get(ACTIVE_KEY);
   if (!active) return;
-  const { [STORAGE_KEY]: existing = [] } = await chrome.storage.local.get(STORAGE_KEY);
-  existing.push(capture);
-  await chrome.storage.local.set({ [STORAGE_KEY]: existing });
+  await appendToStorage(STORAGE_KEY, capture);
+}
+
+async function handleInvestigation(sample) {
+  const { [INVESTIGATION_ACTIVE_KEY]: active = false } = await chrome.storage.local.get(INVESTIGATION_ACTIVE_KEY);
+  if (!active || !sample || typeof sample.url !== 'string') return;
+  const { [INVESTIGATION_KEY]: endpoints = [] } = await chrome.storage.local.get(INVESTIGATION_KEY);
+  const key = `${sample.transport || 'unknown'}|${sample.method || ''}|${sample.url}`;
+  const existing = endpoints.find((endpoint) => endpoint.key === key);
+  const cleanSample = {
+    observedAt: sample.observedAt || new Date().toISOString(),
+    pageUrl: typeof sample.pageUrl === 'string' ? sample.pageUrl : null,
+    direction: sample.direction || null,
+    status: Number.isInteger(sample.status) ? sample.status : null,
+    requestPayload: sample.requestPayload ?? null,
+    responsePayload: sample.responsePayload ?? null,
+  };
+  if (existing) {
+    if (existing.samples.length < INVESTIGATION_MAX_SAMPLES_PER_ENDPOINT) existing.samples.push(cleanSample);
+    else if (cleanSample.direction && !existing.samples.some((sample) => sample.direction === cleanSample.direction)) existing.samples[existing.samples.length - 1] = cleanSample;
+  } else if (endpoints.length < INVESTIGATION_MAX_ENDPOINTS) {
+    endpoints.push({ key, transport: sample.transport || 'unknown', method: sample.method || null, url: sample.url, samples: [cleanSample] });
+  }
+  await chrome.storage.local.set({ [INVESTIGATION_KEY]: endpoints });
+}
+
+async function getInvestigationState() {
+  const values = await chrome.storage.local.get([INVESTIGATION_ACTIVE_KEY, INVESTIGATION_KEY, INVESTIGATION_STARTED_KEY]);
+  const endpoints = values[INVESTIGATION_KEY] || [];
+  return { investigationActive: values[INVESTIGATION_ACTIVE_KEY] === true, investigationCount: endpoints.length, investigationHitCount: endpoints.reduce((total, endpoint) => total + (endpoint.samples?.length || 0), 0), investigationStartedAt: values[INVESTIGATION_STARTED_KEY] || null };
+}
+
+async function broadcastInvestigationState(active) {
+  try {
+    const tabs = await chrome.tabs.query({ url: ['https://gmgn.ai/*'] });
+    await Promise.all(tabs.map((tab) => tab.id == null ? Promise.resolve() : chrome.tabs.sendMessage(tab.id, { type: 'SET_INVESTIGATION', active }).catch(() => {})));
+  } catch (error) {
+    console.debug('gmgn-signal-capture: investigation state broadcast skipped', error);
+  }
+}
+
+async function setInvestigationActive(active) {
+  const updates = { [INVESTIGATION_ACTIVE_KEY]: active };
+  if (active) updates[INVESTIGATION_STARTED_KEY] = new Date().toISOString();
+  await chrome.storage.local.set(updates);
+  await broadcastInvestigationState(active);
+  return getInvestigationState();
+}
+
+async function clearInvestigation() {
+  await chrome.storage.local.set({ [INVESTIGATION_KEY]: [], [INVESTIGATION_STARTED_KEY]: null });
+}
+
+async function exportInvestigation() {
+  const values = await chrome.storage.local.get([INVESTIGATION_KEY, INVESTIGATION_STARTED_KEY]);
+  const manifest = chrome.runtime.getManifest();
+  return {
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    extensionVersion: manifest.version,
+    source: 'gmgn-browser-extension-investigation',
+    startedAt: values[INVESTIGATION_STARTED_KEY] || null,
+    endpointCount: (values[INVESTIGATION_KEY] || []).length,
+    endpoints: values[INVESTIGATION_KEY] || [],
+  };
 }
 
 async function clearAll() {
@@ -108,9 +220,9 @@ async function clearAll() {
 }
 
 async function getState() {
-  const { [ACTIVE_KEY]: active = false, [STORAGE_KEY]: captures = [] } = await chrome.storage.local.get([ACTIVE_KEY, STORAGE_KEY]);
+  const { [ACTIVE_KEY]: active = false, [STORAGE_KEY]: captures = [], [INVESTIGATION_ACTIVE_KEY]: investigationActive = false, [INVESTIGATION_KEY]: investigation = [] } = await chrome.storage.local.get([ACTIVE_KEY, STORAGE_KEY, INVESTIGATION_ACTIVE_KEY, INVESTIGATION_KEY]);
   const windows = await getWindows();
-  return { active, count: captures.length, coverageWindowCount: windows.length };
+  return { active, count: captures.length, coverageWindowCount: windows.length, investigationActive, investigationCount: investigation.length, investigationHitCount: investigation.reduce((total, endpoint) => total + (endpoint.samples?.length || 0), 0) };
 }
 
 async function exportCaptures() {
