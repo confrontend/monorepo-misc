@@ -1,0 +1,57 @@
+<div id="top-callers-overview">
+  <style>
+    #top-callers-overview { --bg:#08120f; --surface:#10231c; --surface2:#152d24; --line:#285445; --text:#e8fff1; --muted:#91afa0; --mint:#73d9ac; --amber:#f1c36b; --red:#f28b8b; background:var(--bg); color:var(--text); min-height:700px; padding:26px; font:14px/1.45 Inter,system-ui,sans-serif; }
+    #top-callers-overview * { box-sizing:border-box; }
+    #top-callers-overview .shell { max-width:1020px; margin:auto; }
+    #top-callers-overview .top { display:flex; justify-content:space-between; align-items:center; gap:18px; border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:20px; }
+    #top-callers-overview h1 { font-size:28px; letter-spacing:-.04em; margin:0; }
+    #top-callers-overview h2 { font-size:18px; margin:0; }
+    #top-callers-overview h3 { font-size:14px; margin:0; }
+    #top-callers-overview .eyebrow { color:var(--mint); font:11px ui-monospace,monospace; letter-spacing:.12em; text-transform:uppercase; margin:0 0 5px; }
+    #top-callers-overview .muted { color:var(--muted); }
+    #top-callers-overview .status { color:var(--mint); border:1px solid var(--line); border-radius:999px; padding:7px 12px; font:12px ui-monospace,monospace; white-space:nowrap; }
+    #top-callers-overview .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+    #top-callers-overview select { color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:10px 12px; min-width:260px; }
+    #top-callers-overview button { color:#092017; background:var(--mint); border:1px solid var(--mint); border-radius:6px; padding:10px 14px; font-weight:700; }
+    #top-callers-overview button.secondary { color:var(--text); background:transparent; border-color:var(--line); }
+    #top-callers-overview .verdict { display:grid; grid-template-columns:1.2fr 1fr; gap:18px; background:var(--surface2); border:1px solid var(--mint); border-radius:10px; padding:20px; margin-bottom:16px; }
+    #top-callers-overview .verdict h2 { font-size:22px; margin-bottom:5px; }
+    #top-callers-overview .verdict-copy { max-width:560px; }
+    #top-callers-overview .verdict-label { display:inline-block; color:var(--mint); border:1px solid var(--mint); border-radius:999px; padding:4px 9px; font:11px ui-monospace,monospace; margin-bottom:10px; }
+    #top-callers-overview .verdict-number { display:flex; align-items:end; justify-content:end; gap:10px; }
+    #top-callers-overview .verdict-number strong { color:var(--mint); font-size:48px; line-height:1; }
+    #top-callers-overview .verdict-number span { color:var(--muted); max-width:130px; }
+    #top-callers-overview .metrics { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-bottom:16px; }
+    #top-callers-overview .metric { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:13px; }
+    #top-callers-overview .metric strong { display:block; font-size:22px; margin-bottom:4px; }
+    #top-callers-overview .metric span { color:var(--muted); font-size:11px; }
+    #top-callers-overview .positive { color:var(--mint); }
+    #top-callers-overview .negative { color:var(--red); }
+    #top-callers-overview .body { display:grid; grid-template-columns:1.1fr .9fr; gap:16px; }
+    #top-callers-overview .panel { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:16px; }
+    #top-callers-overview .panel-head { display:flex; justify-content:space-between; align-items:start; gap:10px; margin-bottom:15px; }
+    #top-callers-overview .timeline { display:grid; gap:13px; }
+    #top-callers-overview .timeline-row { display:grid; grid-template-columns:58px 1fr 80px; align-items:center; gap:10px; }
+    #top-callers-overview .timeline-row label { color:var(--muted); font:12px ui-monospace,monospace; }
+    #top-callers-overview .bar { height:9px; background:#203d31; border-radius:99px; overflow:hidden; }
+    #top-callers-overview .bar i { display:block; height:100%; border-radius:99px; background:var(--mint); }
+    #top-callers-overview .bar i.down { background:var(--red); }
+    #top-callers-overview .timeline-row b { text-align:right; }
+    #top-callers-overview .evidence { display:grid; gap:10px; }
+    #top-callers-overview .evidence-row { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid rgba(40,84,69,.65); padding-bottom:9px; }
+    #top-callers-overview .evidence-row:last-child { border-bottom:0; padding-bottom:0; }
+    #top-callers-overview .token { font-weight:700; }
+    #top-callers-overview .token small { display:block; color:var(--muted); font-weight:400; }
+    #top-callers-overview .foot { margin-top:16px; color:var(--muted); font-size:12px; }
+    @media(max-width:760px) { #top-callers-overview { padding:16px; } #top-callers-overview .top, #top-callers-overview .verdict { grid-template-columns:1fr; flex-direction:column; align-items:start; } #top-callers-overview .metrics { grid-template-columns:repeat(2,1fr); } #top-callers-overview .body { grid-template-columns:1fr; } #top-callers-overview .verdict-number { justify-content:start; } }
+  </style>
+  <div class="shell">
+    <div class="top"><div><p class="eyebrow">CopyTrade · Outcome overview</p><h1>Did this caller predict well?</h1></div><span class="status">● Data saved · SQLite</span></div>
+    <div class="toolbar"><select aria-label="Selected caller"><option>7JFSA… · selected winner</option></select><span class="muted">GMGN activity → Dune price checkpoints</span><button class="secondary">View raw evidence</button></div>
+    <section class="verdict"><div class="verdict-copy"><span class="verdict-label">SCREEN PASS · 24h RESULTS</span><h2>Promising caller, with measurable follow-through</h2><p class="muted">This wallet’s calls were profitable more often than not, and a $100 copy started at each measured call would have become approximately $152 after the 24-hour checkpoint.</p></div><div class="verdict-number"><strong>$152</strong><span>estimated value from a $100 equal-size copy</span></div></section>
+    <section class="metrics"><div class="metric"><strong>52.1%</strong><span>winning calls</span></div><div class="metric"><strong class="positive">+2.3%</strong><span>median return per call</span></div><div class="metric"><strong class="positive">+$52</strong><span>change on $100 start</span></div><div class="metric"><strong>127 / 150</strong><span>calls with Dune data</span></div><div class="metric"><strong>84.7%</strong><span>coverage</span></div></section>
+    <div class="body"><section class="panel"><div class="panel-head"><div><p class="eyebrow">OUTCOME OVER TIME</p><h2>Where the result came from</h2></div><span class="muted">Dune checkpoints</span></div><div class="timeline"><div class="timeline-row"><label>+10m</label><div class="bar"><i style="width:46%"></i></div><b class="positive">+0.8%</b></div><div class="timeline-row"><label>+30m</label><div class="bar"><i style="width:58%"></i></div><b class="positive">+1.4%</b></div><div class="timeline-row"><label>+1h</label><div class="bar"><i style="width:70%"></i></div><b class="positive">+2.0%</b></div><div class="timeline-row"><label>+3h</label><div class="bar"><i style="width:78%"></i></div><b class="positive">+2.8%</b></div><div class="timeline-row"><label>+24h</label><div class="bar"><i style="width:64%"></i></div><b class="positive">+2.3%</b></div></div><p class="foot">Median return is shown; missing checkpoints are excluded from that horizon, never treated as zero.</p></section>
+      <section class="panel"><div class="panel-head"><div><p class="eyebrow">EVIDENCE SAMPLE</p><h2>Representative calls</h2></div><span class="muted">3 of 127 measured</span></div><div class="evidence"><div class="evidence-row"><span class="token">BILLY<small>GMGN call · 24h checkpoint</small></span><b class="positive">+44.6%</b></div><div class="evidence-row"><span class="token">MILHO<small>GMGN call · 24h checkpoint</small></span><b class="positive">+18.2%</b></div><div class="evidence-row"><span class="token">RADON<small>GMGN call · 24h checkpoint</small></span><b class="negative">−21.4%</b></div></div><p class="foot">Open raw evidence for the complete call list. The overview stays focused on the decision.</p></section>
+    </div>
+  </div>
+</div>

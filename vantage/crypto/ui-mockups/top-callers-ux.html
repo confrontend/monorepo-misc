@@ -1,0 +1,58 @@
+<div id="top-callers-ux-mockup">
+  <style>
+    #top-callers-ux-mockup { --bg:#08120f; --surface:#10231c; --surface-2:#152d24; --line:#285445; --text:#e8fff1; --muted:#91afa0; --mint:#73d9ac; --amber:#f1c36b; --red:#f28b8b; background:var(--bg); color:var(--text); font:14px/1.45 Inter,system-ui,sans-serif; padding:24px; min-height:680px; box-sizing:border-box; }
+    #top-callers-ux-mockup * { box-sizing:border-box; }
+    #top-callers-ux-mockup .shell { max-width:1040px; margin:auto; }
+    #top-callers-ux-mockup .top { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px; }
+    #top-callers-ux-mockup h1 { margin:0; font-size:28px; letter-spacing:-.03em; }
+    #top-callers-ux-mockup h2 { margin:0; font-size:18px; }
+    #top-callers-ux-mockup h3 { margin:0; font-size:15px; }
+    #top-callers-ux-mockup .eyebrow { color:var(--mint); font:11px ui-monospace,monospace; letter-spacing:.12em; text-transform:uppercase; margin:0 0 4px; }
+    #top-callers-ux-mockup .status { color:var(--mint); border:1px solid var(--line); border-radius:999px; padding:7px 12px; font:12px ui-monospace,monospace; }
+    #top-callers-ux-mockup .steps { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:16px; }
+    #top-callers-ux-mockup .step { border:1px solid var(--line); border-radius:8px; padding:11px; color:var(--muted); background:var(--surface); }
+    #top-callers-ux-mockup .step.active { border-color:var(--mint); color:var(--text); background:var(--surface-2); }
+    #top-callers-ux-mockup .step.done { color:var(--mint); }
+    #top-callers-ux-mockup .step b { display:block; font-size:12px; margin-bottom:3px; }
+    #top-callers-ux-mockup .step span { font-size:11px; }
+    #top-callers-ux-mockup .notice { display:flex; gap:12px; align-items:center; border:1px solid var(--mint); background:rgba(115,217,172,.1); border-radius:8px; padding:13px 15px; margin-bottom:16px; }
+    #top-callers-ux-mockup .spinner { width:16px; height:16px; border:2px solid rgba(115,217,172,.25); border-top-color:var(--mint); border-radius:50%; }
+    #top-callers-ux-mockup .notice strong { display:block; }
+    #top-callers-ux-mockup .notice small { color:var(--muted); }
+    #top-callers-ux-mockup .grid { display:grid; grid-template-columns:1.4fr .9fr; gap:16px; }
+    #top-callers-ux-mockup .panel { border:1px solid var(--line); border-radius:10px; background:var(--surface); padding:16px; }
+    #top-callers-ux-mockup .panel-head { display:flex; justify-content:space-between; gap:12px; align-items:start; margin-bottom:12px; }
+    #top-callers-ux-mockup button { border:1px solid var(--mint); border-radius:6px; color:#092017; background:var(--mint); padding:9px 12px; font-weight:700; cursor:default; }
+    #top-callers-ux-mockup button.secondary { color:var(--text); background:transparent; border-color:var(--line); }
+    #top-callers-ux-mockup .table { width:100%; border-collapse:collapse; }
+    #top-callers-ux-mockup th { text-align:left; color:var(--muted); font:10px ui-monospace,monospace; text-transform:uppercase; padding:8px 6px; border-bottom:1px solid var(--line); }
+    #top-callers-ux-mockup td { padding:12px 6px; border-bottom:1px solid rgba(40,84,69,.6); }
+    #top-callers-ux-mockup .selected { background:rgba(115,217,172,.08); }
+    #top-callers-ux-mockup .tag { display:inline-block; border-radius:999px; padding:3px 7px; font-size:11px; color:var(--mint); border:1px solid var(--line); }
+    #top-callers-ux-mockup .muted { color:var(--muted); }
+    #top-callers-ux-mockup .metric { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0; }
+    #top-callers-ux-mockup .metric div { border-top:1px solid var(--line); padding-top:9px; }
+    #top-callers-ux-mockup .metric b { display:block; font-size:20px; }
+    #top-callers-ux-mockup .metric span { color:var(--muted); font-size:11px; }
+    #top-callers-ux-mockup .timeline { display:grid; gap:9px; margin-top:14px; }
+    #top-callers-ux-mockup .timeline-row { display:flex; justify-content:space-between; border-bottom:1px solid rgba(40,84,69,.6); padding-bottom:8px; }
+    #top-callers-ux-mockup .good { color:var(--mint); }
+    #top-callers-ux-mockup .pending { color:var(--amber); }
+    @media(max-width:760px) { #top-callers-ux-mockup { padding:16px; } #top-callers-ux-mockup .steps, #top-callers-ux-mockup .grid { grid-template-columns:1fr; } #top-callers-ux-mockup .top { align-items:start; gap:12px; flex-direction:column; } }
+  </style>
+  <div class="shell">
+    <div class="top"><div><p class="eyebrow">CopyTrade · Top Callers</p><h1>Find callers worth following</h1></div><span class="status">● Ready · SQLite saved</span></div>
+    <div class="steps">
+      <div class="step done"><b>1 · Capture leaderboard</b><span>25 callers captured</span></div>
+      <div class="step done"><b>2 · Track callers</b><span>3 selected</span></div>
+      <div class="step active"><b>3 · Fetch history</b><span>GMGN · in progress</span></div>
+      <div class="step"><b>4 · Measure with Dune</b><span>Available after history</span></div>
+    </div>
+    <div class="notice"><span class="spinner" aria-hidden="true"></span><div><strong>Fetching GMGN history for 3 tracked callers</strong><small>2 of 3 callers complete · 146 calls saved · this page will update automatically</small></div></div>
+    <div class="grid">
+      <section class="panel"><div class="panel-head"><div><p class="eyebrow">GMGN SOURCE</p><h2>Tracked callers</h2></div><button class="secondary">Refresh status</button></div><table class="table"><thead><tr><th>Caller</th><th>Calls saved</th><th>History</th><th></th></tr></thead><tbody><tr class="selected"><td><b>PMJ…</b><br><span class="muted">7JFSA…</span></td><td>64</td><td><span class="tag">24h covered</span></td><td><button class="secondary">Selected</button></td></tr><tr><td><b>4Iw…</b></td><td>51</td><td><span class="pending">Fetching…</span></td><td><button class="secondary">View</button></td></tr><tr><td><b>215…</b></td><td>31</td><td><span class="tag">24h covered</span></td><td><button class="secondary">View</button></td></tr></tbody></table></section>
+      <aside class="panel"><p class="eyebrow">SELECTED CALLER</p><h2>PMJ…</h2><p class="muted">GMGN activity is stored first. Dune is only used for historical price checkpoints.</p><div class="metric"><div><b>64</b><span>calls saved</span></div><div><b>24h</b><span>history covered</span></div><div><b>0</b><span>Dune measured</span></div><div><b class="pending">Ready next</b><span>measure with Dune</span></div></div><button>4 · Measure with Dune</button></aside>
+    </div>
+    <section class="panel" style="margin-top:16px"><div class="panel-head"><div><p class="eyebrow">CALLER DETAIL · GMGN CALLS</p><h2>Recent and historical calls</h2></div><span class="muted">Dune columns appear after measurement</span></div><table class="table"><thead><tr><th>Token</th><th>Called</th><th>GMGN price</th><th>Dune +1h</th><th>Dune +24h</th></tr></thead><tbody><tr><td><b>BILLY</b></td><td>Today 05:21</td><td>$0.0027</td><td class="pending">Pending</td><td class="muted">Not mature</td></tr><tr><td><b>MILHO</b></td><td>Yesterday 11:31</td><td>$0.00003</td><td class="good">+18.2%</td><td class="good">+44.6%</td></tr></tbody></table></section>
+  </div>
+</div>

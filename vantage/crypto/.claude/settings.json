@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(gmgn-cli swap*)",
+      "Bash(gmgn-cli multi-swap*)",
+      "Bash(gmgn-cli order strategy create*)",
+      "Bash(gmgn-cli cooking create*)",
+      "Bash(npx gmgn-cli swap*)",
+      "Bash(npx gmgn-cli multi-swap*)",
+      "Bash(npx gmgn-cli order strategy create*)",
+      "Bash(npx gmgn-cli cooking create*)"
+    ]
+  }
+}
