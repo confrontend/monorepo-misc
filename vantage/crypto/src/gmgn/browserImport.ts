@@ -9,6 +9,7 @@ import { storeRadarSnapshot } from './radar.js';
 import { storeWalletRankSnapshot } from './walletRank.js';
 import { storeSmartMoneyWalletStats } from './smartmoney.js';
 import { storeTwitterMessages } from './twitter.js';
+import { redactAccountIdentifiers } from '../security/redaction.js';
 
 type BrowserCapture = { capturedAt: string; requestPath?: string; requestQuery?: Record<string, unknown>; status: number; responseBody?: { channel?: unknown; data?: unknown } };
 type BrowserCoverageWindow = { startedAt: string; endedAt?: string | null; lastHeartbeatAt: string; closedReason?: string | null };
@@ -47,10 +48,14 @@ const queryParam = (capture: BrowserCapture, key: string): string | null => {
   const value = capture.requestQuery?.[key];
   return typeof value === 'string' && value.length > 0 ? value : null;
 };
-// gmgn.ai/api/v1/rank/sol/wallets/7d — the window ("7d") is a path segment, not a query
-// parameter, so it must be parsed out of the path itself rather than requestQuery.
-const walletRankWindowFromPath = (requestPath: string): string | null => {
-  const match = requestPath.match(/\/wallets\/([^/?]+)/);
+// gmgn.ai/api/v1/rank/sol/wallets/7d LOOKS like the window ("7d") is a path segment, but a real
+// captured 30D selection confirmed the path stays /wallets/7d regardless of which window is
+// actually selected in the UI — only orderby (e.g. "pnl_30d" vs "pnl_7d") actually changes.
+// Deriving window from the path silently mislabeled every capture from this page as "7d"
+// (progress.md 2026-08-17). orderby's trailing "<n><unit>" token is the real window.
+const windowFromOrderby = (orderby: string | null): string | null => {
+  if (!orderby) return null;
+  const match = orderby.match(/_(\d+[a-z]+)$/i);
   return match ? match[1] : null;
 };
 const isSignalCapture = (capture: BrowserCapture): boolean => capture.responseBody?.channel === 'token_signal' || capturePath(capture).includes(SIGNAL_REQUEST_PATH);
@@ -109,7 +114,12 @@ export const importGmgnBrowserCapture = (
   rawFileContent: string,
   now = new Date(),
 ): BrowserImportResult => {
+  // Dedup identity is keyed off the ORIGINAL bytes so a redaction-pattern refinement later never
+  // changes whether a re-uploaded file counts as a duplicate. Everything actually persisted or
+  // archived below uses the redacted version instead — see redactAccountIdentifiers's own
+  // comment for why account-identifying fields must never reach storage unredacted.
   const sourceSha256 = createHash('sha256').update(rawFileContent, 'utf8').digest('hex');
+  const redactedFileContent = redactAccountIdentifiers(rawFileContent);
   const existing = database.prepare(`SELECT id, imported_count AS imported, skipped_count AS skipped, error_count AS errors, archive_path AS archivePath, archive_sha256 AS archiveSha256, raw_source AS rawSource, raw_endpoints_json AS rawEndpointsJson FROM gmgn_browser_import_batches WHERE source_sha256 = ?`).get(sourceSha256) as { id: number; imported: number; skipped: number; errors: number; archivePath: string | null; archiveSha256: string | null; rawSource: string; rawEndpointsJson: string | null } | undefined;
   if (existing) {
     const coverageWindowsImported = Number((database.prepare(`SELECT COUNT(*) AS count FROM gmgn_browser_coverage_windows WHERE batch_id = ?`).get(existing.id) as { count: number }).count);
@@ -128,7 +138,7 @@ export const importGmgnBrowserCapture = (
   }
 
   const importedAt = now.toISOString();
-  const batch = database.prepare(`INSERT INTO gmgn_browser_import_batches (source_path, source_sha256, raw_source, status, imported_at) VALUES (?, ?, ?, 'processing', ?)`).run(`ui-upload/${path.basename(sourceName)}`, sourceSha256, rawFileContent, importedAt);
+  const batch = database.prepare(`INSERT INTO gmgn_browser_import_batches (source_path, source_sha256, raw_source, status, imported_at) VALUES (?, ?, ?, 'processing', ?)`).run(`ui-upload/${path.basename(sourceName)}`, sourceSha256, redactedFileContent, importedAt);
   const batchId = Number(batch.lastInsertRowid);
   let imported = 0;
   let skipped = 0;
@@ -138,7 +148,7 @@ export const importGmgnBrowserCapture = (
   const issueBreakdown: Record<string, number> = {};
   const recordIssues = (issues: string[]) => { for (const issue of issues) issueBreakdown[issue] = (issueBreakdown[issue] ?? 0) + 1; };
   try {
-    const parsed = JSON.parse(rawFileContent) as Partial<BrowserExport>;
+    const parsed = JSON.parse(redactedFileContent) as Partial<BrowserExport>;
     if (parsed.formatVersion !== 1 || parsed.source !== 'gmgn-browser-extension' || !Array.isArray(parsed.captures)) throw new Error('Browser capture export must have source gmgn-browser-extension, formatVersion 1, and a captures array.');
     for (const capture of parsed.captures) {
       if (!capture || typeof capture.capturedAt !== 'string') { errors += 1; continue; }
@@ -185,7 +195,11 @@ export const importGmgnBrowserCapture = (
             const result = storeRadarSnapshot(database, { chain: queryParam(capture, 'chain'), period: queryParam(capture, 'period'), category: queryParam(capture, 'type'), capturedAt, rawPayload: responseBody });
             rawEndpoints.radar.imported += result.inserted; rawEndpoints.radar.skipped += result.skipped;
           } else if (requestPath.includes(ENDPOINT_PATHS.walletRank)) {
-            const result = storeWalletRankSnapshot(database, { window: walletRankWindowFromPath(requestPath), orderby: queryParam(capture, 'orderby'), capturedAt, rawPayload: responseBody });
+            const orderby = queryParam(capture, 'orderby');
+            const result = storeWalletRankSnapshot(database, {
+              window: windowFromOrderby(orderby), orderby,
+              capturedAt, rawPayload: responseBody, requestPath, requestQuery: capture.requestQuery ?? {},
+            });
             rawEndpoints.walletRank.imported += result.inserted; rawEndpoints.walletRank.skipped += result.skipped;
           } else if (requestPath.includes(ENDPOINT_PATHS.smartMoney)) {
             const match = requestPath.match(/\/smartmoney\/([^/]+)\/walletNew\/([^/]+)/);
@@ -218,7 +232,7 @@ export const importGmgnBrowserCapture = (
 
     mkdirSync(archiveDirectory, { recursive: true });
     const manifest = JSON.stringify({ batchId, sourceName: path.basename(sourceName), sourceSha256, imported, skipped, errors, otherCaptures, rawEndpoints, coverageWindows: coverageWindows.length, archivedAt: new Date().toISOString() }, null, 2);
-    const archive = zipStored([{ name: path.basename(sourceName), data: Buffer.from(rawFileContent, 'utf8') }, { name: 'manifest.json', data: Buffer.from(manifest, 'utf8') }]);
+    const archive = zipStored([{ name: path.basename(sourceName), data: Buffer.from(redactedFileContent, 'utf8') }, { name: 'manifest.json', data: Buffer.from(manifest, 'utf8') }]);
     const archiveSha256 = createHash('sha256').update(archive).digest('hex');
     const archivePath = path.join(archiveDirectory, `gmgn-browser-batch-${batchId}-${sourceSha256.slice(0, 16)}.zip`);
     if (!existsSync(archivePath)) writeFileSync(archivePath, archive, { flag: 'wx' });

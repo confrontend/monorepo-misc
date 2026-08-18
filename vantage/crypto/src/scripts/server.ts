@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { DatabaseSync } from 'node:sqlite';
 import { defaultArchivePath, openDatabase } from '../db/client.js';
 import { readDatabaseStats } from '../db/stats.js';
 import { readDataQuality } from '../db/quality.js';
@@ -28,8 +29,28 @@ import { buildMeasurementPlan } from '../dune/planner.js';
 import { computeSignalPatternReport, computeSignalPatternSubgroupReport, listSignalPatternSnapshots, saveSignalPatternSnapshot, type SubgroupProperty } from '../db/patterns.js';
 import { listRadarSnapshots, listWalletRankSnapshots, listSmartMoneyWalletStats, listTwitterMessages, readRawEndpointSummary } from '../gmgn/rawEndpointReads.js';
 import { computeRobustPatternReport, type RobustPatternReport } from '../db/robustPatterns.js';
+import { computeCopyTradeReport, readCopyTradeSummary, saveCopyTradeSnapshot } from '../copytrade/evaluate.js';
+import { computeHistoricalConsistency } from '../copytrade/historicalConsistency.js';
+import { computeCopyCandidates, computeScreenPassCandidates, type CopySimulationSurvivalInput } from '../copytrade/copyCandidates.js';
+import { listLeaderboardSnapshotStatuses, listRosterWallets, readCaptureHealth, resolveSingleTrader } from '../copytrade/roster.js';
+import { hasActiveFetchRun, readFetchRunState, reconcileStaleFetchRuns, requestCopyTradeFetchStop, startCopyTradeFetch } from '../copytrade/fetch.js';
+import { projectFetchDuration } from '../copytrade/estimate.js';
+import { evaluateExperiment, freezeExperiment, listExperiments } from '../copytrade/experiments.js';
+import { computeCopySimulationReport, computeLiquidityImpactReport, runCopySimulationBatch } from '../copytrade/copySimulation.js';
+import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
+import {
+  computeCallerCheckpointBreakdown, computeCallerEvaluationReport, hasActiveCollectionRun, readCallerDetail, readCollectionRunState,
+  readLeaderboard, startCollectionRun, stopCollectionRuns, trackCaller, untrackCaller,
+  LEADERBOARD_CAPTURE_COOLDOWN_MS, msSinceLastCollectionStart, reconcileOrphanedCollectionRuns, rearmPausedCollectionRuns, resumeCollectionRun,
+  type CollectionKind,
+} from '../copytrade/topCallers.js';
 
 const database = openDatabase();
+// A CopyTrade fetch only runs inside the process that started it, so anything still marked
+// running at startup was orphaned by a restart and would otherwise latch the single-run guard.
+reconcileStaleFetchRuns(database);
+reconcileOrphanedCollectionRuns(database);
+rearmPausedCollectionRuns(database);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const uiRoot = path.join(projectRoot, 'dist-ui');
 const port = Number(process.env.CRYPTO_RESEARCH_PORT ?? 4173);
@@ -83,6 +104,49 @@ const staticFile = (requestPath: string, response: ServerResponse): void => {
   }
   response.writeHead(200, { 'content-type': mimeType(filePath) });
   response.end(readFileSync(filePath));
+};
+
+/** Shared by /historical-consistency and /winners so the trade-loading query and the
+ *  roster/consistency join live in exactly one place, not two. */
+const readHistoricalConsistencyForRoster = (
+  database: DatabaseSync,
+  limit: number,
+  rosterSnapshotId?: number,
+): { roster: ReturnType<typeof listRosterWallets>; computed: ReturnType<typeof computeHistoricalConsistency> } => {
+  const roster = listRosterWallets(database, { chain: 'sol', limit, snapshotId: rosterSnapshotId });
+  const wallets = roster.map((wallet) => wallet.walletAddress);
+  if (wallets.length === 0) return { roster, computed: computeHistoricalConsistency([], new Date()) };
+  const placeholders = wallets.map(() => '?').join(', ');
+  const rows = database.prepare(
+    `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
+            event_type AS eventType, token_address AS tokenAddress,
+            token_symbol AS tokenSymbol, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
+     FROM copytrade_trades
+     WHERE chain = ? AND wallet_address IN (${placeholders})
+     ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
+  ).all('sol', ...wallets) as unknown as Parameters<typeof computeHistoricalConsistency>[0];
+  return { roster, computed: computeHistoricalConsistency(rows, new Date()) };
+};
+
+/**
+ * Read-only: builds the copy-survival map computeCopyCandidates needs, from whatever Dune
+ * copy-simulation runs already exist — never triggers a new Dune query itself (that only
+ * happens from the explicit /copy-simulation/run action). A wallet that hasn't been simulated
+ * yet is simply absent from the map, and computeCopyCandidates already treats "absent" as
+ * "not_yet_simulated", not as passing.
+ */
+const readCopySimulationSurvivalMap = (
+  database: DatabaseSync,
+  screenReport: ReturnType<typeof computeCopyTradeReport>,
+  historicalConsistency: ReturnType<typeof computeHistoricalConsistency>,
+): Map<string, CopySimulationSurvivalInput> => {
+  const walletAddresses = computeScreenPassCandidates(screenReport, historicalConsistency).candidates.map((candidate) => candidate.walletAddress);
+  if (!walletAddresses.length) return new Map();
+  const simReport = computeCopySimulationReport(database, { walletAddresses });
+  return new Map(simReport.wallets.map((wallet) => [wallet.walletAddress, {
+    simulatedMedianReturnPercent: wallet.simulatedMedianReturnPercent,
+    coverageRatePercent: wallet.coverageRatePercent,
+  }]));
 };
 
 const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -247,6 +311,335 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/gmgn/status') {
       respond(200, readGmgnCredentialStatus());
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/summary') {
+      respond(200, readCopyTradeSummary(database));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch') {
+      const payload = (await readJsonBody(request)) as { limit?: unknown; periodDays?: unknown };
+      const limit = Number(payload.limit);
+      const periodDays = Number(payload.periodDays);
+      if (!Number.isInteger(limit) || limit <= 0 || limit > 500) { respond(400, { error: 'limit must be an integer between 1 and 500.' }); return; }
+      if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > 365) { respond(400, { error: 'periodDays must be an integer between 1 and 365.' }); return; }
+      // One run at a time: concurrent runs would double the request rate against a limiter
+      // whose penalty for overshooting is a multi-minute ban.
+      if (hasActiveFetchRun(database)) { respond(409, { error: 'A fetch run is already in progress.' }); return; }
+      respond(200, startCopyTradeFetch(database, { limit, periodDays }));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch/single') {
+      const payload = (await readJsonBody(request)) as { query?: unknown; periodDays?: unknown };
+      const query = typeof payload.query === 'string' ? payload.query.trim() : '';
+      const periodDays = Number(payload.periodDays);
+      if (!query) { respond(400, { error: 'Enter a wallet address or trader name.' }); return; }
+      if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > 365) { respond(400, { error: 'periodDays must be an integer between 1 and 365.' }); return; }
+      if (hasActiveFetchRun(database)) { respond(409, { error: 'A fetch run is already in progress.' }); return; }
+      const resolved = resolveSingleTrader(database, query);
+      if (resolved.kind === 'not_found') {
+        respond(404, { error: `No wallet address matches "${query}", and no stored trader has that exact name. Try the wallet address directly, or capture a leaderboard snapshot that includes them first.` });
+        return;
+      }
+      const result = startCopyTradeFetch(database, { limit: 1, periodDays, walletAddresses: [resolved.walletAddress], scope: 'single' });
+      respond(200, { ...result, resolved });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch/stop') {
+      respond(200, requestCopyTradeFetchStop(database));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/import-browser-activity') {
+      const payload = await readJsonBody(request) as { name?: unknown; content?: unknown };
+      if (typeof payload.content !== 'string') { respond(400, { error: 'Upload must include a text content field.' }); return; }
+      try {
+        respond(200, importBrowserWalletActivity(database, typeof payload.name === 'string' ? payload.name : 'gmgn-investigation.json', payload.content));
+      } catch (error) {
+        respond(400, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/fetch/status') {
+      respond(200, readFetchRunState(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/fetch/estimate') {
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '');
+      const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 25;
+      const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '');
+      const periodDays = Number.isInteger(periodParam) && periodParam > 0 ? periodParam : 30;
+      respond(200, projectFetchDuration(database, { limit, periodDays }));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/capture-health') {
+      respond(200, readCaptureHealth(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/rosters') {
+      const snapshots = listLeaderboardSnapshotStatuses(database);
+      const health = readCaptureHealth(database);
+      respond(200, {
+        selectedByDefault: health.latestProvenancedSnapshotId ?? health.latestSnapshotId,
+        snapshots,
+      });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/experiments/freeze') {
+      const payload = (await readJsonBody(request)) as { snapshotId?: unknown; primaryTopN?: unknown; rosterTopN?: unknown; evaluationWindowsDays?: unknown };
+      const snapshotId = Number(payload.snapshotId);
+      if (!Number.isInteger(snapshotId) || snapshotId <= 0) { respond(400, { error: 'snapshotId must be a positive integer.' }); return; }
+      const primaryTopN = Number.isInteger(payload.primaryTopN) && Number(payload.primaryTopN) > 0 ? Number(payload.primaryTopN) : undefined;
+      const rosterTopN = Number.isInteger(payload.rosterTopN) && Number(payload.rosterTopN) > 0 ? Number(payload.rosterTopN) : undefined;
+      const evaluationWindowsDays = Array.isArray(payload.evaluationWindowsDays) && payload.evaluationWindowsDays.every((value) => Number.isInteger(value) && value > 0)
+        ? payload.evaluationWindowsDays as number[] : undefined;
+      try {
+        respond(200, freezeExperiment(database, snapshotId, { primaryTopN, rosterTopN, evaluationWindowsDays }));
+      } catch (error: unknown) {
+        respond(400, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/experiments') {
+      respond(200, listExperiments(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/copytrade/experiments/')) {
+      const experimentId = Number(requestUrl.pathname.slice('/api/copytrade/experiments/'.length));
+      if (!Number.isInteger(experimentId) || experimentId <= 0) { respond(400, { error: 'Experiment id must be a positive integer.' }); return; }
+      try {
+        // Forward validation is intentionally scoped to the first-stage Winners set. The frozen
+        // roster remains 25 wallets for provenance/comparison, but only wallets that currently
+        // clear the research gates should consume attention in this detailed report.
+        const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: 25 });
+        const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, 25);
+        const winnerAddresses = new Set(computeCopyCandidates(
+          screenReport,
+          historicalConsistency,
+          readCopySimulationSurvivalMap(database, screenReport, historicalConsistency),
+        ).candidates.map((candidate) => candidate.walletAddress));
+        const report = evaluateExperiment(database, experimentId);
+        respond(200, {
+          ...report,
+          wallets: report.wallets.filter((wallet) => winnerAddresses.has(wallet.walletAddress)),
+          evaluatedScope: { kind: 'first_stage_winners', winnerCount: winnerAddresses.size, frozenRosterCount: report.wallets.length },
+        });
+      } catch (error: unknown) {
+        respond(404, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/results') {
+      const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '');
+      const periodDays = Number.isInteger(periodParam) && periodParam > 0 ? periodParam : undefined;
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '');
+      const traderLimit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : undefined;
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      respond(200, computeCopyTradeReport(database, { periodDays, traderLimit, rosterSnapshotId }));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/results/snapshot') {
+      // The snapshot must freeze the report the user is looking at, so it takes the same
+      // parameters the results route does rather than recomputing under the defaults.
+      const payload = (await readJsonBody(request)) as { periodDays?: unknown; limit?: unknown; snapshotId?: unknown };
+      const periodDays = Number.isInteger(payload.periodDays) && Number(payload.periodDays) > 0 ? Number(payload.periodDays) : undefined;
+      const traderLimit = Number.isInteger(payload.limit) && Number(payload.limit) > 0 ? Number(payload.limit) : undefined;
+      const rosterSnapshotId = Number.isInteger(payload.snapshotId) && Number(payload.snapshotId) > 0 ? Number(payload.snapshotId) : undefined;
+      respond(200, saveCopyTradeSnapshot(database, computeCopyTradeReport(database, { periodDays, traderLimit, rosterSnapshotId })));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/historical-consistency') {
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '25');
+      const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 25;
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      const { roster, computed } = readHistoricalConsistencyForRoster(database, limit, rosterSnapshotId);
+      const rosterByAddress = new Map(roster.map((wallet) => [wallet.walletAddress, wallet]));
+      respond(200, {
+        ...computed,
+        rows: computed.rows.map((row) => {
+          const wallet = rosterByAddress.get(row.walletAddress);
+          return {
+            ...row,
+            name: wallet?.name ?? null,
+            rankPosition: wallet?.rankPosition ?? null,
+            riskFlags: wallet?.riskFlags ?? [],
+          };
+        }),
+        scope: { chain: 'sol', traderLimit: limit, rosterSize: roster.length, rosterSnapshotId: rosterSnapshotId ?? null },
+      });
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/winners') {
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '25');
+      const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 25;
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      // 90 days: the copy-viability gates (hold time, concentration, fast-round-trip) and the
+      // historical-consistency check both want the deepest available history, not the app's
+      // general-purpose default period used elsewhere.
+      const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: limit, rosterSnapshotId });
+      const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, limit, rosterSnapshotId);
+      respond(200, computeCopyCandidates(screenReport, historicalConsistency, readCopySimulationSurvivalMap(database, screenReport, historicalConsistency)));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/winners/fetch') {
+      // Dynamically scoped to whoever currently qualifies as a Winner at request time — never a
+      // frozen list. Reuses the exact same fetch loop as the discovery fetch above (resume-cursor,
+      // daily cap, etc.), just pointed at these specific wallet addresses instead of the top-N
+      // roster, so it only ever pulls what's missing since each wallet's own last fetch.
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: 25, rosterSnapshotId });
+      const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, 25, rosterSnapshotId);
+      const walletAddresses = computeCopyCandidates(
+        screenReport, historicalConsistency, readCopySimulationSurvivalMap(database, screenReport, historicalConsistency),
+      ).candidates.map((candidate) => candidate.walletAddress);
+      if (!walletAddresses.length) { respond(400, { error: 'No current Winners to fetch trades for.' }); return; }
+      if (hasActiveFetchRun(database)) { respond(409, { error: 'A fetch run is already in progress.' }); return; }
+      respond(200, startCopyTradeFetch(database, { limit: walletAddresses.length, periodDays: 90, walletAddresses, scope: 'winners' }));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/copy-simulation') {
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: 25, rosterSnapshotId });
+      const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, 25, rosterSnapshotId);
+      const walletAddresses = computeScreenPassCandidates(screenReport, historicalConsistency).candidates.map((candidate) => candidate.walletAddress);
+      respond(200, computeCopySimulationReport(database, { walletAddresses }));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/liquidity-impact') {
+      // Same wallet scope as /api/copytrade/copy-simulation above (every screen-pass candidate,
+      // not just final Winners) — the liquidity-band breakdown re-slices the exact same
+      // already-computed simulation results, never a separate query or a different population.
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: 25, rosterSnapshotId });
+      const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, 25, rosterSnapshotId);
+      const walletAddresses = computeScreenPassCandidates(screenReport, historicalConsistency).candidates.map((candidate) => candidate.walletAddress);
+      const simReport = computeCopySimulationReport(database, { walletAddresses });
+      respond(200, computeLiquidityImpactReport(simReport));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/copy-simulation/run') {
+      // Scoped to every wallet that still needs copy-survival verification — the wallets that
+      // already pass every other gate (screen, historical consistency, hold time,
+      // fast-round-trip, concentration) — not just whoever is already a final Winner. A wallet
+      // can only ever earn its first simulation this way; scoping to final Winners instead would
+      // be circular, since copy-survival is itself one of the gates that makes a Winner.
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: 25, rosterSnapshotId });
+      const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, 25, rosterSnapshotId);
+      const walletAddresses = computeScreenPassCandidates(screenReport, historicalConsistency).candidates.map((candidate) => candidate.walletAddress);
+      if (!walletAddresses.length) { respond(400, { error: 'No candidates pass the other gates yet — nothing to simulate.' }); return; }
+      try {
+        // Runs to completion for the current candidate scope in one call (see
+        // runCopySimulationBatch's own comment) — the UI should never need to click this
+        // repeatedly.
+        respond(200, await runCopySimulationBatch(database, { walletAddresses }));
+      } catch (error) {
+        respond(502, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/top-callers/leaderboard') {
+      respond(200, readLeaderboard(database));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/track') {
+      const payload = (await readJsonBody(request)) as { callerKey?: unknown };
+      if (typeof payload.callerKey !== 'string' || !payload.callerKey.trim()) { respond(400, { error: 'callerKey is required.' }); return; }
+      trackCaller(database, payload.callerKey.trim());
+      respond(200, { tracked: true });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/untrack') {
+      const payload = (await readJsonBody(request)) as { callerKey?: unknown };
+      if (typeof payload.callerKey !== 'string' || !payload.callerKey.trim()) { respond(400, { error: 'callerKey is required.' }); return; }
+      untrackCaller(database, payload.callerKey.trim());
+      respond(200, { tracked: false });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/collect') {
+      const payload = (await readJsonBody(request)) as { kind?: unknown };
+      const validKinds: CollectionKind[] = ['leaderboard', 'callouts', 'checkpoints'];
+      if (typeof payload.kind !== 'string' || !validKinds.includes(payload.kind as CollectionKind)) {
+        respond(400, { error: `kind must be one of: ${validKinds.join(', ')}.` });
+        return;
+      }
+      const kind = payload.kind as CollectionKind;
+      if (kind === 'leaderboard') {
+        const elapsed = msSinceLastCollectionStart(database, kind);
+        if (elapsed !== null && elapsed < LEADERBOARD_CAPTURE_COOLDOWN_MS) {
+          const retryAfterSeconds = Math.ceil((LEADERBOARD_CAPTURE_COOLDOWN_MS - elapsed) / 1000);
+          respond(429, {
+            error: `Leaderboard capture cooldown active. Try again in ${retryAfterSeconds}s.`,
+            retryAfterSeconds,
+          });
+          return;
+        }
+      }
+      if (hasActiveCollectionRun(database, kind)) { respond(409, { error: `A collection run of kind "${kind}" is already in progress.` }); return; }
+      // Start the network work in the background so the browser receives an immediate running
+      // state and can show progress/countdown instead of appearing frozen until GMGN/Dune
+      // finishes. The durable run row is the source of truth polled by the UI.
+      void startCollectionRun(database, kind).catch((error: unknown) => {
+        logDiagnostic(database, { level: 'error', event: 'top_caller_collection_background_failure', method: request.method, path: requestUrl.pathname, message: error instanceof Error ? error.message : String(error) });
+      });
+      respond(202, { status: 'running', kind });
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/top-callers/collect/status') {
+      const kindParam = requestUrl.searchParams.get('kind');
+      const validKinds: CollectionKind[] = ['leaderboard', 'callouts', 'checkpoints'];
+      if (!kindParam || !validKinds.includes(kindParam as CollectionKind)) { respond(400, { error: `kind must be one of: ${validKinds.join(', ')}.` }); return; }
+      respond(200, readCollectionRunState(database, kindParam as CollectionKind));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/collect/stop') {
+      const payload = (await readJsonBody(request)) as { kind?: unknown };
+      const validKinds: CollectionKind[] = ['leaderboard', 'callouts', 'checkpoints'];
+      const kind = typeof payload.kind === 'string' && validKinds.includes(payload.kind as CollectionKind)
+        ? payload.kind as CollectionKind : undefined;
+      if (payload.kind !== undefined && kind === undefined) { respond(400, { error: `kind must be one of: ${validKinds.join(', ')}.` }); return; }
+      respond(200, { stopped: stopCollectionRuns(database, kind), status: 'cancelled', message: 'Stopped by user; data already fetched is retained.' });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/resume') {
+      const payload = (await readJsonBody(request)) as { runId?: unknown };
+      const runId = payload.runId === undefined ? undefined : Number(payload.runId);
+      if (runId !== undefined && (!Number.isInteger(runId) || runId <= 0)) { respond(400, { error: 'runId must be a positive integer.' }); return; }
+      try {
+        const row = (runId
+          ? database.prepare(`SELECT id FROM top_caller_collection_runs WHERE id = ? AND status = 'paused'`).get(runId)
+          : database.prepare(`SELECT id FROM top_caller_collection_runs WHERE status = 'paused' ORDER BY id DESC LIMIT 1`).get()) as { id: number } | undefined;
+        if (!row) { respond(404, { error: 'No paused Top Caller collection run exists.' }); return; }
+        void resumeCollectionRun(database, row.id).catch((error: unknown) => {
+          logDiagnostic(database, { level: 'error', event: 'top_caller_resume_background_failure', message: error instanceof Error ? error.message : String(error) });
+        });
+        respond(200, { runId: row.id, status: 'running' });
+      } catch (error) {
+        respond(404, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/top-callers/callers') {
+      const checkpoint = requestUrl.searchParams.get('checkpoint') ?? undefined;
+      respond(200, checkpoint ? computeCallerEvaluationReport(database, checkpoint) : computeCallerEvaluationReport(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/top-callers/callers/') && requestUrl.pathname.endsWith('/checkpoints')) {
+      const callerKey = decodeURIComponent(requestUrl.pathname.slice('/api/top-callers/callers/'.length, -'/checkpoints'.length));
+      if (!callerKey) { respond(400, { error: 'callerKey is required.' }); return; }
+      respond(200, { callerKey, rows: computeCallerCheckpointBreakdown(database, callerKey) });
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/top-callers/callers/')) {
+      const callerKey = decodeURIComponent(requestUrl.pathname.slice('/api/top-callers/callers/'.length));
+      if (!callerKey) { respond(400, { error: 'callerKey is required.' }); return; }
+      respond(200, readCallerDetail(database, callerKey));
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/logs') {

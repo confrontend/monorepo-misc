@@ -174,7 +174,10 @@ test('browser import stores and deduplicates the four raw GMGN endpoint families
   try {
     const captures = [
       { capturedAt: '2026-03-01T12:00:01.000Z', requestPath: '/vas/api/v1/radar/detail', requestQuery: { chain: 'sol', period: '1d', type: '7' }, status: 200, responseBody: { code: 0, data: [{ address: 'TokenRadar' }] } },
-      { capturedAt: '2026-03-01T12:00:02.000Z', requestPath: '/api/v1/rank/sol/wallets/7d', requestQuery: { orderby: 'pnl' }, status: 200, responseBody: { code: 0, data: [{ address: 'WalletRank' }] } },
+      // orderby carries "pnl_30d" while the path stays the fixed "/wallets/7d" segment
+      // regardless of the actually-selected window — a real captured 30D selection confirmed
+      // this (progress.md 2026-08-17), which is why window must come from orderby, not the path.
+      { capturedAt: '2026-03-01T12:00:02.000Z', requestPath: '/api/v1/rank/sol/wallets/7d', requestQuery: { orderby: 'pnl_30d' }, status: 200, responseBody: { code: 0, data: [{ address: 'WalletRank' }] } },
       { capturedAt: '2026-03-01T12:00:03.000Z', requestPath: '/defi/quotation/v1/smartmoney/sol/walletNew/WalletSmart', status: 200, responseBody: { code: 0, data: { pnl: 12 } } },
       { capturedAt: '2026-03-01T12:00:03.500Z', requestPath: '/defi/quotation/v1/smartmoney/sol/walletNew/WalletSmart', status: 200, responseBody: { code: 0, data: { pnl: 12 } } },
       { capturedAt: '2026-03-01T12:00:04.000Z', requestPath: '/vas/api/v1/twitter/messages', requestQuery: { tw_type: 'kol', has_token: 'false' }, status: 200, responseBody: { code: 0, data: [{ id: 'tweet-1', tweet_id: 'tweet-1', tw_type: 'kol', text: 'hello' }] } },
@@ -198,8 +201,8 @@ test('browser import stores and deduplicates the four raw GMGN endpoint families
     assert.equal(radarRow.period, '1d');
     assert.equal(radarRow.category, '7', 'category must come from requestQuery.type, recovered via the fixed extraction path');
     const rankRow = database.prepare('SELECT window, orderby FROM gmgn_wallet_rank_snapshots').get() as Record<string, string>;
-    assert.equal(rankRow.window, '7d', 'window must be parsed from the /wallets/7d path segment, not a (nonexistent) query param');
-    assert.equal(rankRow.orderby, 'pnl');
+    assert.equal(rankRow.window, '30d', 'window must be derived from orderby\'s trailing token, never the fixed /wallets/7d path segment — a real 30D capture proved the path never changes');
+    assert.equal(rankRow.orderby, 'pnl_30d');
     assert.equal((database.prepare('SELECT COUNT(*) AS count FROM gmgn_smartmoney_wallet_stats').get() as { count: number }).count, 2, 'repeated wallet observations are preserved');
     assert.equal((database.prepare('SELECT wallet_address FROM gmgn_smartmoney_wallet_stats').get() as { wallet_address: string }).wallet_address, 'WalletSmart');
     const twitter = database.prepare('SELECT COUNT(*) AS count, MAX(has_token) AS hasToken FROM gmgn_twitter_messages').get() as { count: number; hasToken: number };
@@ -214,6 +217,29 @@ test('browser import stores and deduplicates the four raw GMGN endpoint families
       smartMoney: { imported: 2, skipped: 0 },
       twitter: { imported: 0, skipped: 2 },
     }, 'radar, rank, and Twitter repeats deduplicate by content hash; smart-money observations remain append-only');
+  } finally { database.close(); }
+});
+
+test('browser import redacts account-identifying fields before the raw file is persisted or archived, while dedup still keys off the original bytes', () => {
+  const database = openDatabase(':memory:');
+  try {
+    const captures = [
+      { capturedAt: '2026-03-01T12:00:01.000Z', requestPath: '/vas/api/v1/radar/detail', requestQuery: { chain: 'sol' }, status: 200, responseBody: { code: 0, data: [{ address: 'TokenRadar' }], user_id: 'ee33acab-1234', referral_code: 'D9Km8Jkz' } },
+    ];
+    const raw = exportJson([], [], captures);
+    assert.ok(raw.includes('ee33acab-1234'), 'sanity check: the fixture actually contains the identifier before import');
+    const result = importGmgnBrowserCapture(database, 'privacy-sample.json', raw);
+
+    const stored = (database.prepare('SELECT raw_source AS rawSource FROM gmgn_browser_import_batches WHERE id = ?').get(result.batchId) as { rawSource: string }).rawSource;
+    assert.ok(!stored.includes('ee33acab-1234'), 'user_id must never reach the database unredacted');
+    assert.ok(!stored.includes('D9Km8Jkz'), 'referral_code must never reach the database unredacted');
+    assert.ok(stored.includes('TokenRadar'), 'legitimate research data in the same payload must survive redaction');
+
+    // Re-uploading the exact same original (unredacted) bytes must still be recognized as a
+    // duplicate — dedup identity is keyed off the original content, not the redacted copy.
+    const repeat = importGmgnBrowserCapture(database, 'privacy-sample-again.json', raw);
+    assert.equal(repeat.duplicateFile, true);
+    assert.equal(repeat.batchId, result.batchId);
   } finally { database.close(); }
 });
 

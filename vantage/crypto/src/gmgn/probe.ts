@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { redactSensitiveText } from '../security/redaction.js';
+import { waitForGmgnRequest } from './rateLimit.js';
 
 const execFileAsync = promisify(execFile);
 const findProjectRoot = (): string => {
@@ -46,6 +47,7 @@ export const probeGmgn = async (): Promise<GmgnProbeResult> => {
     ? [localScript, 'market', 'signal', '--chain', 'sol', '--raw']
     : ['market', 'signal', '--chain', 'sol', '--raw'];
   try {
+    await waitForGmgnRequest();
     const { stdout } = await execFileAsync(command, args, {
       cwd: projectRoot,
       env: { ...process.env, GMGN_API_KEY: secret },

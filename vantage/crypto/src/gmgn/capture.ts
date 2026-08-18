@@ -8,6 +8,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { zipStored } from '../dune/archive.js';
 import { storeGmgnSignal } from './ingest.js';
 import { completeGmgnPoll, failGmgnPoll, previousNewestTriggerAt, startGmgnPoll, triggerBounds } from './polls.js';
+import { waitForGmgnRequest } from './rateLimit.js';
 
 const execFileAsync = promisify(execFile);
 const findProjectRoot = (): string => {
@@ -43,6 +44,7 @@ export const captureGmgnSignals = async (database: DatabaseSync): Promise<GmgnCa
   try {
   const script = path.join(projectRoot, 'node_modules', 'gmgn-cli', 'dist', 'index.js');
   if (!existsSync(script)) throw new Error('Project-local gmgn-cli is unavailable. Run npm install first.');
+  await waitForGmgnRequest();
   const { stdout } = await execFileAsync(process.execPath, [script, 'market', 'signal', '--chain', 'sol', '--raw'], {
     cwd: projectRoot, env: { ...process.env, GMGN_API_KEY: secret }, timeout: 30_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true,
   });

@@ -8,7 +8,7 @@ const clampLimit = (limit?: number): number => {
 };
 
 export type RadarSnapshotRow = { id: number; chain: string | null; period: string | null; category: string | null; capturedAt: string; rawPayload: unknown };
-export type WalletRankSnapshotRow = { id: number; window: string | null; orderby: string | null; capturedAt: string; rawPayload: unknown };
+export type WalletRankSnapshotRow = { id: number; window: string | null; orderby: string | null; capturedAt: string; requestPath: string | null; requestQuery: Record<string, unknown>; rawPayload: unknown };
 export type SmartMoneyWalletStatRow = { id: number; walletAddress: string; chain: string | null; capturedAt: string; rawPayload: unknown };
 export type TwitterMessageRow = { id: number; tweetId: string | null; twType: string | null; hasToken: boolean | null; capturedAt: string; rawPayload: unknown };
 
@@ -20,8 +20,21 @@ export const listRadarSnapshots = (database: DatabaseSync, limit?: number): Rada
 };
 
 export const listWalletRankSnapshots = (database: DatabaseSync, limit?: number): WalletRankSnapshotRow[] => {
-  const rows = database.prepare(`SELECT id, window, orderby, captured_at AS capturedAt, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots ORDER BY id DESC LIMIT ?`).all(clampLimit(limit)) as unknown as Array<{ id: number; window: string | null; orderby: string | null; capturedAt: string; rawPayload: string }>;
-  return rows.map((row) => ({ ...row, rawPayload: parseRawPayload(row.rawPayload) }));
+  const rows = database.prepare(`
+    SELECT s.id, s.window, s.orderby, COALESCE(p.captured_at, s.captured_at) AS capturedAt,
+           p.request_path AS requestPath, p.request_query_json AS requestQueryJson,
+           s.raw_payload AS rawPayload
+    FROM gmgn_wallet_rank_snapshots s
+    LEFT JOIN gmgn_wallet_rank_capture_provenance p ON p.id = (
+      SELECT p2.id FROM gmgn_wallet_rank_capture_provenance p2
+      WHERE p2.snapshot_id = s.id ORDER BY p2.captured_at DESC, p2.id DESC LIMIT 1
+    )
+    ORDER BY capturedAt DESC, s.id DESC LIMIT ?`).all(clampLimit(limit)) as unknown as Array<{ id: number; window: string | null; orderby: string | null; capturedAt: string; requestPath: string | null; requestQueryJson: string | null; rawPayload: string }>;
+  return rows.map(({ requestQueryJson, ...row }) => {
+    let requestQuery: Record<string, unknown> = {};
+    try { const parsed = JSON.parse(requestQueryJson ?? '{}') as unknown; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) requestQuery = parsed as Record<string, unknown>; } catch { /* empty provenance */ }
+    return { ...row, requestQuery, rawPayload: parseRawPayload(row.rawPayload) };
+  });
 };
 
 // Optionally filterable by wallet — this is the one raw-endpoint table where the same entity is

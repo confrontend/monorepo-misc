@@ -3,6 +3,7 @@ dist/
 dist-ui/
 .data/
 .secrets/
+.env
 *.pem
 *.key
 gmgn-api-key.txt

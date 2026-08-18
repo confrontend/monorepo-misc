@@ -16,7 +16,11 @@
   small { display: block; margin-top: 10px; color: #71877c; line-height: 1.4; }
   .route-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .route-card { border: 1px solid #2d5648; border-radius: 8px; padding: 10px; background: #121e19; }
-  .route-card h2 { font-size: 12px; margin: 0 0 5px; color: #83d6b0; text-transform: uppercase; letter-spacing: .05em; }
+  .route-card > summary { cursor: pointer; list-style: none; }
+  .route-card > summary::-webkit-details-marker { display: none; }
+  .route-card > summary::before { content: '▸'; display: inline-block; margin-right: 6px; color: #83d6b0; transition: transform .15s ease; }
+  .route-card[open] > summary::before { transform: rotate(90deg); }
+  .route-card h2 { display: inline; font-size: 12px; margin: 0; color: #83d6b0; text-transform: uppercase; letter-spacing: .05em; }
   .route-card p { min-height: 48px; margin: 0; color: #a6b6ae; line-height: 1.35; font-size: 12px; }
   .route-card button { margin-top: 7px; }
   @media (max-width: 420px) { body { width: 260px; } .route-grid { grid-template-columns: 1fr; } }
@@ -26,22 +30,22 @@
   <h1>GMGN Signal Capture <span id="version"></span></h1>
   <div id="status">Loading…</div>
   <div class="route-grid">
-    <section class="route-card">
-      <h2>Signal capture</h2>
+    <details class="route-card">
+      <summary><h2>Signal capture</h2></summary>
       <p>Stores the known GMGN signal and related research events.</p>
       <button id="toggle">Start capture</button>
       <button id="export">Export signal JSON</button>
       <button id="clear">Clear signal data</button>
       <div id="capture-stats" class="route-stats">0 event batches · 0 coverage windows</div>
-    </section>
-    <section class="route-card">
-      <h2>Investigation sampling</h2>
+    </details>
+    <details class="route-card">
+      <summary><h2>Investigation sampling</h2></summary>
       <p>Samples unique fetch/XHR/WebSocket URLs and representative payloads.</p>
       <button id="investigate">Start investigation sampling</button>
       <button id="exportInvestigation">Export investigation JSON</button>
       <button id="clearInvestigation">Clear investigation data</button>
       <div id="investigation-stats" class="route-stats">0 unique endpoints · 0 sampled hits</div>
-    </section>
+    </details>
   </div>
   <small>These routes are independent. Investigation sampling is opt-in and does not alter normal signal storage. Nothing leaves your machine except the file you choose to export.</small>
   <script src="popup.js"></script>
