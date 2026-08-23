@@ -1,0 +1,2444 @@
+{
+  "report_version": "shared-discovery-v1",
+  "project": "unusualwhales",
+  "run_id": "243f4a1cb470aed0",
+  "dependencies": {
+    "numpy": true,
+    "scipy": false,
+    "statsmodels": false,
+    "sklearn": false
+  },
+  "isolation": {
+    "project": "unusualwhales",
+    "input_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\uw-1d-limit100.json",
+    "output_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\uw-1d-limit100-report.json",
+    "cache_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\.cache\\unusualwhales\\243f4a1cb470aed0",
+    "model_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\.models\\unusualwhales\\243f4a1cb470aed0",
+    "shared_database_opened": false,
+    "cross_project_state": false,
+    "model_reuse": false
+  },
+  "input_contract": {
+    "schema_version": "normalized-v1",
+    "feature_allowlist_version": "uw-v1-event-time-allowlist",
+    "allow_list": [
+      {
+        "name": "signal_type",
+        "justification": "Signal classification is stored with the event."
+      },
+      {
+        "name": "underlying_symbol",
+        "justification": "Instrument identity is present on the event."
+      },
+      {
+        "name": "symbol",
+        "justification": "Instrument identity is present on the event."
+      },
+      {
+        "name": "premium",
+        "justification": "Trade premium is observed at the provider event."
+      },
+      {
+        "name": "size",
+        "justification": "Trade size is observed at the provider event."
+      },
+      {
+        "name": "open_interest",
+        "justification": "Provider open interest is captured with event provenance."
+      },
+      {
+        "name": "volume",
+        "justification": "Provider volume is captured with event provenance."
+      },
+      {
+        "name": "nbbo_bid",
+        "justification": "Quote bid is captured with the trade event."
+      },
+      {
+        "name": "nbbo_ask",
+        "justification": "Quote ask is captured with the trade event."
+      },
+      {
+        "name": "strike",
+        "justification": "Contract strike is known at the event."
+      },
+      {
+        "name": "underlying_price",
+        "justification": "Underlying price is captured at the event."
+      },
+      {
+        "name": "expiry",
+        "justification": "Contract expiry is known at the event."
+      },
+      {
+        "name": "executed_at",
+        "justification": "Execution timestamp anchors event-time ordering."
+      },
+      {
+        "name": "event_at",
+        "justification": "Event timestamp anchors event-time ordering."
+      },
+      {
+        "name": "observable_at",
+        "justification": "Provider observable timestamp anchors event-time ordering."
+      },
+      {
+        "name": "dte_days",
+        "justification": "Derived only from expiry minus executed_at, never current time."
+      },
+      {
+        "name": "volume_oi_ratio",
+        "justification": "Deterministic transform of event-time volume and open interest."
+      },
+      {
+        "name": "spread_pct",
+        "justification": "Deterministic transform of event-time NBBO quotes."
+      },
+      {
+        "name": "moneyness_pct",
+        "justification": "Deterministic transform of event-time strike and underlying price."
+      },
+      {
+        "name": "side_score",
+        "justification": "Deterministic event-time trade-side feature."
+      },
+      {
+        "name": "report_flags",
+        "justification": "Captured event labels are known at event time."
+      },
+      {
+        "name": "tags",
+        "justification": "Captured event labels are known at event time."
+      }
+    ],
+    "examined_fields": [
+      "dte_days",
+      "executed_at",
+      "expiry",
+      "moneyness_pct",
+      "nbbo_ask",
+      "nbbo_bid",
+      "open_interest",
+      "outcome_at",
+      "outcome_exclusion_reason",
+      "premium",
+      "report_flags",
+      "side_score",
+      "size",
+      "spread_pct",
+      "strike",
+      "tags",
+      "underlying_price",
+      "underlying_symbol",
+      "volume",
+      "volume_oi_ratio"
+    ],
+    "rejected_fields": [
+      "outcome_at",
+      "outcome_exclusion_reason"
+    ],
+    "reject_by_default": [
+      "captured_at",
+      "retrieved_at",
+      "post_event_market_bar",
+      "outcome",
+      "checkpoint",
+      "return",
+      "current_value",
+      "provider_field_with_later_timestamp",
+      "dte_from_now"
+    ],
+    "outcome": "net_return_after_costs"
+  },
+  "dataset_summary": {
+    "rows": 100,
+    "eligible_outcome_rows": 43,
+    "mature_rows": 43,
+    "usable_rows": 43,
+    "outcome_coverage": 0.43,
+    "independence_groups": 40,
+    "time_start": "2026-07-20T13:30:00.059000Z",
+    "time_end": "2026-07-20T13:30:01.263000Z"
+  },
+  "missingness_checks": [
+    {
+      "feature": "premium",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 666.8518518518518,
+      "without_outcome_mean": 392.2105263157895,
+      "mean_difference": 274.64132553606237,
+      "standardized_difference": 0.3032849981613005,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "size",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 1.8148148148148149,
+      "without_outcome_mean": 3.1578947368421053,
+      "mean_difference": -1.3430799220272904,
+      "standardized_difference": -0.2401185811763182,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "open_interest",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 16655.333333333332,
+      "without_outcome_mean": 13990.552631578947,
+      "mean_difference": 2664.7807017543855,
+      "standardized_difference": 0.056991265175833625,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "volume",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 13.11111111111111,
+      "without_outcome_mean": 18.5,
+      "mean_difference": -5.388888888888889,
+      "standardized_difference": -0.12745570616363386,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "nbbo_bid",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 5.887777777777778,
+      "without_outcome_mean": 2.5839473684210525,
+      "mean_difference": 3.3038304093567255,
+      "standardized_difference": 0.405312282972536,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "nbbo_ask",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 6.897407407407407,
+      "without_outcome_mean": 3.164736842105263,
+      "mean_difference": 3.732670565302144,
+      "standardized_difference": 0.4087144769436768,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "strike",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 207.24074074074073,
+      "without_outcome_mean": 556.921052631579,
+      "mean_difference": -349.6803118908382,
+      "standardized_difference": -1.241174851933481,
+      "flagged_material_difference": true
+    },
+    {
+      "feature": "underlying_price",
+      "with_outcome_n": 25,
+      "without_outcome_n": 36,
+      "with_outcome_mean": 210.35986799999998,
+      "without_outcome_mean": 577.3336944444444,
+      "mean_difference": -366.9738264444444,
+      "standardized_difference": -1.2852506025743626,
+      "flagged_material_difference": true
+    },
+    {
+      "feature": "dte_days",
+      "with_outcome_n": 27,
+      "without_outcome_n": 38,
+      "with_outcome_mean": 38.141196616512346,
+      "without_outcome_mean": 14.46380733065302,
+      "mean_difference": 23.677389285859327,
+      "standardized_difference": 0.5163695600353431,
+      "flagged_material_difference": true
+    }
+  ],
+  "feature_summaries": [
+    {
+      "feature": "signal_type",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "call_sweep",
+          48
+        ],
+        [
+          "put_sweep",
+          17
+        ]
+      ]
+    },
+    {
+      "feature": "underlying_symbol",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "SPY",
+          15
+        ],
+        [
+          "QQQ",
+          12
+        ],
+        [
+          "NVDA",
+          6
+        ],
+        [
+          "TSLA",
+          5
+        ],
+        [
+          "MSFT",
+          3
+        ],
+        [
+          "APGE",
+          2
+        ],
+        [
+          "GMAB",
+          2
+        ],
+        [
+          "SPCX",
+          2
+        ],
+        [
+          "TQQQ",
+          2
+        ],
+        [
+          "AAPL",
+          1
+        ],
+        [
+          "AMZN",
+          1
+        ],
+        [
+          "CRWV",
+          1
+        ],
+        [
+          "GDX",
+          1
+        ],
+        [
+          "HIVE",
+          1
+        ],
+        [
+          "INTC",
+          1
+        ],
+        [
+          "IREN",
+          1
+        ],
+        [
+          "MRNA",
+          1
+        ],
+        [
+          "MSTR",
+          1
+        ],
+        [
+          "NBIS",
+          1
+        ],
+        [
+          "PYPL",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "premium",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 506.2923076923077,
+        "median": 229.0,
+        "std": 912.6024895024963
+      },
+      "quantiles": {
+        "0.05": 4.0,
+        "0.25": 25.0,
+        "0.5": 229.0,
+        "0.75": 655.0,
+        "0.95": 1492.9999999999998
+      }
+    },
+    {
+      "feature": "size",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 2.6,
+        "median": 1.0,
+        "std": 5.636931789546508
+      },
+      "quantiles": {
+        "0.05": 1.0,
+        "0.25": 1.0,
+        "0.5": 1.0,
+        "0.75": 2.0,
+        "0.95": 6.599999999999994
+      }
+    },
+    {
+      "feature": "open_interest",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 15097.461538461539,
+        "median": 3662.0,
+        "std": 47121.58256609867
+      },
+      "quantiles": {
+        "0.05": 30.000000000000004,
+        "0.25": 890.0,
+        "0.5": 3662.0,
+        "0.75": 7496.0,
+        "0.95": 56301.199999999924
+      }
+    },
+    {
+      "feature": "volume",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 16.26153846153846,
+        "median": 3.0,
+        "std": 42.60951952141861
+      },
+      "quantiles": {
+        "0.05": 1.0,
+        "0.25": 1.0,
+        "0.5": 3.0,
+        "0.75": 12.0,
+        "0.95": 48.99999999999997
+      }
+    },
+    {
+      "feature": "nbbo_bid",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 3.9563076923076927,
+        "median": 1.3,
+        "std": 8.214756076953604
+      },
+      "quantiles": {
+        "0.05": 0.0020000000000000018,
+        "0.25": 0.07,
+        "0.5": 1.3,
+        "0.75": 4.7,
+        "0.95": 12.689999999999992
+      }
+    },
+    {
+      "feature": "nbbo_ask",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 4.71523076923077,
+        "median": 1.95,
+        "std": 9.203782189216478
+      },
+      "quantiles": {
+        "0.05": 0.04,
+        "0.25": 0.12,
+        "0.5": 1.95,
+        "0.75": 5.3,
+        "0.95": 17.009999999999994
+      }
+    },
+    {
+      "feature": "strike",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 411.66923076923075,
+        "median": 365.0,
+        "std": 283.92583039142727
+      },
+      "quantiles": {
+        "0.05": 29.6,
+        "0.25": 135.0,
+        "0.5": 365.0,
+        "0.75": 712.0,
+        "0.95": 754.8
+      }
+    },
+    {
+      "feature": "underlying_price",
+      "rows": 65,
+      "present": 61,
+      "missing": 4,
+      "missing_fraction": 0.06153846153846154,
+      "kind": "numeric",
+      "summary": {
+        "n": 61,
+        "mean": 426.93458524590164,
+        "median": 386.4,
+        "std": 287.8966202140853
+      },
+      "quantiles": {
+        "0.05": 36.32,
+        "0.25": 144.0,
+        "0.5": 386.4,
+        "0.75": 702.35,
+        "0.95": 747.02
+      }
+    },
+    {
+      "feature": "expiry",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "2026-07-20",
+          21
+        ],
+        [
+          "2026-07-24",
+          14
+        ],
+        [
+          "2026-07-31",
+          8
+        ],
+        [
+          "2026-08-21",
+          5
+        ],
+        [
+          "2026-10-16",
+          4
+        ],
+        [
+          "2026-07-21",
+          3
+        ],
+        [
+          "2027-01-15",
+          3
+        ],
+        [
+          "2026-08-07",
+          2
+        ],
+        [
+          "2026-08-14",
+          2
+        ],
+        [
+          "2026-09-18",
+          1
+        ],
+        [
+          "2026-11-20",
+          1
+        ],
+        [
+          "2026-12-18",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "executed_at",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "2026-07-20T13:30:00.800Z",
+          3
+        ],
+        [
+          "2026-07-20T13:30:00.811Z",
+          3
+        ],
+        [
+          "2026-07-20T13:30:00.059Z",
+          2
+        ],
+        [
+          "2026-07-20T13:30:00.284Z",
+          2
+        ],
+        [
+          "2026-07-20T13:30:00.733Z",
+          2
+        ],
+        [
+          "2026-07-20T13:30:00.755Z",
+          2
+        ],
+        [
+          "2026-07-20T13:30:00.799Z",
+          2
+        ],
+        [
+          "2026-07-20T13:30:00.801Z",
+          2
+        ],
+        [
+          "2026-07-20T13:30:00.410Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.420Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.437Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.439Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.446Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.456Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.498Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.531Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.545Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.549Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.552Z",
+          1
+        ],
+        [
+          "2026-07-20T13:30:00.561Z",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "dte_days",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 65,
+        "mean": 24.29903057247151,
+        "median": 3.437491261574074,
+        "std": 46.210415466864156
+      },
+      "quantiles": {
+        "0.05": -0.5625093541666667,
+        "0.25": -0.5625087962962964,
+        "0.5": 3.437491261574074,
+        "0.75": 24.43749346064815,
+        "0.95": 144.83749931712956
+      }
+    },
+    {
+      "feature": "volume_oi_ratio",
+      "rows": 65,
+      "present": 0,
+      "missing": 65,
+      "missing_fraction": 1.0,
+      "kind": "categorical",
+      "top_values": []
+    },
+    {
+      "feature": "spread_pct",
+      "rows": 65,
+      "present": 0,
+      "missing": 65,
+      "missing_fraction": 1.0,
+      "kind": "categorical",
+      "top_values": []
+    },
+    {
+      "feature": "moneyness_pct",
+      "rows": 65,
+      "present": 0,
+      "missing": 65,
+      "missing_fraction": 1.0,
+      "kind": "categorical",
+      "top_values": []
+    },
+    {
+      "feature": "side_score",
+      "rows": 65,
+      "present": 0,
+      "missing": 65,
+      "missing_fraction": 1.0,
+      "kind": "categorical",
+      "top_values": []
+    },
+    {
+      "feature": "report_flags",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "['intermarket_sweep']",
+          65
+        ]
+      ]
+    },
+    {
+      "feature": "tags",
+      "rows": 65,
+      "present": 65,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "['ask_side', 'bullish', 'etf']",
+          13
+        ],
+        [
+          "['bid_side', 'bearish', 'etf']",
+          9
+        ],
+        [
+          "['bid_side', 'bearish']",
+          8
+        ],
+        [
+          "['ask_side', 'bullish']",
+          5
+        ],
+        [
+          "['bid_side', 'bearish', 'earnings_this_week']",
+          5
+        ],
+        [
+          "['ask_side', 'bearish', 'etf']",
+          4
+        ],
+        [
+          "['bid_side', 'bearish', 'earnings_next_week']",
+          4
+        ],
+        [
+          "['ask_side', 'bearish', 'volatility', 'etf']",
+          3
+        ],
+        [
+          "['bid_side', 'bullish', 'earnings_next_week']",
+          3
+        ],
+        [
+          "['bid_side', 'bullish', 'etf']",
+          2
+        ],
+        [
+          "['bid_side', 'bullish']",
+          2
+        ],
+        [
+          "['ask_side', 'bearish', 'earnings_next_week']",
+          1
+        ],
+        [
+          "['ask_side', 'bearish']",
+          1
+        ],
+        [
+          "['ask_side', 'bullish', 'earnings_next_week']",
+          1
+        ],
+        [
+          "['ask_side', 'bullish', 'earnings_this_week']",
+          1
+        ],
+        [
+          "['ask_side', 'bullish', 'volatility', 'etf']",
+          1
+        ],
+        [
+          "['bid_side', 'bearish', 'volatility', 'etf']",
+          1
+        ],
+        [
+          "['mid_side', 'neutral', 'etf']",
+          1
+        ]
+      ]
+    }
+  ],
+  "split": {
+    "method": "chronological",
+    "discovery_uses_event_ids": [
+      "uw-option-trade:5710809",
+      "uw-option-trade:5710810",
+      "uw-option-trade:6480837",
+      "uw-option-trade:6480838",
+      "uw-option-trade:5710815",
+      "uw-option-trade:5710811",
+      "uw-option-trade:6480842",
+      "uw-option-trade:5710813",
+      "uw-option-trade:6480839",
+      "uw-option-trade:6480840",
+      "uw-option-trade:5710812",
+      "uw-option-trade:5710814",
+      "uw-option-trade:6480841",
+      "uw-option-trade:5710819",
+      "uw-option-trade:5710816",
+      "uw-option-trade:5710827",
+      "uw-option-trade:5710826",
+      "uw-option-trade:5710818",
+      "uw-option-trade:5710823",
+      "uw-option-trade:6480850",
+      "uw-option-trade:5710821",
+      "uw-option-trade:6480851",
+      "uw-option-trade:5710822",
+      "uw-option-trade:6480844",
+      "uw-option-trade:6480845",
+      "uw-option-trade:5710817",
+      "uw-option-trade:5710820",
+      "uw-option-trade:5710875",
+      "uw-option-trade:6480881",
+      "uw-option-trade:6480855",
+      "uw-option-trade:5711010",
+      "uw-option-trade:6480856",
+      "uw-option-trade:6480882",
+      "uw-option-trade:5710824",
+      "uw-option-trade:5710825",
+      "uw-option-trade:5710831",
+      "uw-option-trade:5710832",
+      "uw-option-trade:5710840",
+      "uw-option-trade:5710833",
+      "uw-option-trade:5710834",
+      "uw-option-trade:6480879",
+      "uw-option-trade:5710828",
+      "uw-option-trade:5710851",
+      "uw-option-trade:5710852",
+      "uw-option-trade:5710853",
+      "uw-option-trade:5710854",
+      "uw-option-trade:5710855",
+      "uw-option-trade:5710856",
+      "uw-option-trade:5710857",
+      "uw-option-trade:5710859",
+      "uw-option-trade:5710860",
+      "uw-option-trade:5710862",
+      "uw-option-trade:5710863",
+      "uw-option-trade:5710864",
+      "uw-option-trade:5710829",
+      "uw-option-trade:5710838",
+      "uw-option-trade:5710865",
+      "uw-option-trade:5710900",
+      "uw-option-trade:5710901",
+      "uw-option-trade:5710844",
+      "uw-option-trade:5710848",
+      "uw-option-trade:5710846",
+      "uw-option-trade:6480854",
+      "uw-option-trade:6480888",
+      "uw-option-trade:5710835"
+    ],
+    "validation_uses_event_ids": [
+      "uw-option-trade:5710836",
+      "uw-option-trade:5710830",
+      "uw-option-trade:5711020",
+      "uw-option-trade:5710842",
+      "uw-option-trade:5710843",
+      "uw-option-trade:6480846",
+      "uw-option-trade:6480852",
+      "uw-option-trade:5710839",
+      "uw-option-trade:5710837",
+      "uw-option-trade:6480871",
+      "uw-option-trade:6480872",
+      "uw-option-trade:6480873",
+      "uw-option-trade:6480900",
+      "uw-option-trade:5710861",
+      "uw-option-trade:5710878",
+      "uw-option-trade:6480883",
+      "uw-option-trade:5710850",
+      "uw-option-trade:5710845",
+      "uw-option-trade:5710877",
+      "uw-option-trade:5711027",
+      "uw-option-trade:5711028",
+      "uw-option-trade:6480853",
+      "uw-option-trade:5710907",
+      "uw-option-trade:6480914",
+      "uw-option-trade:6480915"
+    ],
+    "discovery_rows": 65,
+    "discovery_eligible_rows": 27,
+    "validation_rows": 25,
+    "validation_eligible_rows": 12,
+    "untouched_holdout_rows": 10,
+    "untouched_holdout_eligible_rows": 4,
+    "validation_fraction": 0.25,
+    "holdout_fraction": 0.1,
+    "holdout_policy": "untouched: excluded from feature summaries, candidate generation, model fitting, validation, correction, and status assignment; counts only are reported",
+    "holdout_used_for_discovery": false,
+    "holdout_used_for_validation": false,
+    "holdout_used_for_model_fit": false,
+    "holdout_used_for_multiple_testing": false
+  },
+  "multiple_testing": {
+    "method": "Benjamini-Hochberg FDR",
+    "alpha": 0.05,
+    "enumerated_comparisons": 49,
+    "tree_search_correction": "not applied; validation survival and untouched holdout are the protection"
+  },
+  "model": {
+    "ensemble": "numpy.bootstrap_median_stump_ensemble",
+    "permutation_importance": {
+      "premium": 0.33579124990942155,
+      "size": 0.0,
+      "open_interest": 0.024712697350452117,
+      "volume": 0.21982109806875982,
+      "nbbo_bid": 0.12288096622944877,
+      "nbbo_ask": 0.0487803305051413,
+      "strike": 0.0025410539985371017,
+      "underlying_price": 0.11220995321427552,
+      "dte_days": -0.04077394823499425
+    },
+    "permutation_importance_method": "deterministic NumPy train-vs-permuted MSE for bootstrap stump ensemble",
+    "feature_importance": {
+      "premium": 0.13900951625300118,
+      "size": 0.029836225830616552,
+      "open_interest": 0.12056017320041411,
+      "volume": 0.1432574108248081,
+      "nbbo_bid": 0.10568323188745582,
+      "nbbo_ask": 0.13623498054704705,
+      "strike": 0.08034125144115141,
+      "underlying_price": 0.09881669958011395,
+      "dte_days": 0.14626051043539173
+    },
+    "shallow_rule_count": 5
+  },
+  "minimum_n": 5,
+  "patterns": [
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.04072346828385267,
+      "p_value": 0.8385204278582941,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.043670789942610644,
+      "p_value": 0.8269908955624785,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 4.0,
+          "upper": 95.0
+        }
+      ],
+      "effect": 0.23921621508372015,
+      "p_value": 0.6756830775607214,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 95.0,
+          "upper": 300.0
+        }
+      ],
+      "effect": -0.43407302470285847,
+      "p_value": 0.703420936339826,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 300.0,
+          "upper": 705.0
+        }
+      ],
+      "effect": 0.5445549764420277,
+      "p_value": 0.5048226119232038,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 705.0,
+          "upper": 6620.0
+        }
+      ],
+      "effect": -0.41170859892329736,
+      "p_value": 0.635484764711847,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.14679749095516292,
+      "mutual_information": 0.14679749095516292,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.05218149544369769,
+      "p_value": 0.7938893753835103,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.0025181834554525106,
+      "p_value": 0.9899541350784585,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "lower": 1.0,
+          "upper": 7.0
+        }
+      ],
+      "effect": 0.0,
+      "p_value": 1.0,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.0,
+      "mutual_information": 0.0,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "zero mutual information"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.00529700607842785,
+      "p_value": 0.9788701770624493,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.05160305584071123,
+      "p_value": 0.7961294715531326,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "lower": 0.0,
+          "upper": 484.5
+        }
+      ],
+      "effect": -0.14538146407133612,
+      "p_value": 0.8845895168598957,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "lower": 484.5,
+          "upper": 2090.0
+        }
+      ],
+      "effect": 0.250726300980514,
+      "p_value": 0.641304362558202,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "lower": 2090.0,
+          "upper": 7626.0
+        }
+      ],
+      "effect": -0.7143185110202788,
+      "p_value": 0.4292438022098307,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "lower": 7626.0,
+          "upper": 268745.0
+        }
+      ],
+      "effect": 0.6447917171083175,
+      "p_value": 0.37338370964897616,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.19814172655219597,
+      "mutual_information": 0.19814172655219597,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "volume",
+      "conditions": [
+        {
+          "feature": "volume",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.05916282583127141,
+      "p_value": 0.7669756321150458,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "volume",
+      "conditions": [
+        {
+          "feature": "volume",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.09762430325139092,
+      "p_value": 0.6238053876689462,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "volume",
+      "conditions": [
+        {
+          "feature": "volume",
+          "lower": 1.0,
+          "upper": 5.0
+        }
+      ],
+      "effect": -0.09826826965957369,
+      "p_value": 0.7050452006807407,
+      "discovery_sample_size": 19,
+      "discovery_independence_groups": 21,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "volume",
+      "conditions": [
+        {
+          "feature": "volume",
+          "lower": 5.0,
+          "upper": 243.0
+        }
+      ],
+      "effect": 0.2333871404414875,
+      "p_value": 0.7050452006807407,
+      "discovery_sample_size": 8,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "volume",
+      "conditions": [
+        {
+          "feature": "volume",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.037120403442358965,
+      "mutual_information": 0.037120403442358965,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.03386498723488104,
+      "p_value": 0.8654646305948284,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.003513059457506547,
+      "p_value": 0.9859855546847242,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "lower": 0.0,
+          "upper": 0.24
+        }
+      ],
+      "effect": 0.12421379610006883,
+      "p_value": 0.8432175450616465,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 8,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "lower": 0.24,
+          "upper": 2.16
+        }
+      ],
+      "effect": 0.6117890401836782,
+      "p_value": 0.24257546959718246,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "lower": 2.16,
+          "upper": 6.625
+        }
+      ],
+      "effect": -0.30654940934615393,
+      "p_value": 0.7867463559743315,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "lower": 6.625,
+          "upper": 60.2
+        }
+      ],
+      "effect": -0.41170859892329736,
+      "p_value": 0.635484764711847,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "nbbo_bid",
+      "conditions": [
+        {
+          "feature": "nbbo_bid",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.32020975862643036,
+      "mutual_information": 0.32020975862643036,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.015631886853575146,
+      "p_value": 0.9376936325891285,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.046579108124618206,
+      "p_value": 0.8156460179285763,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "lower": 0.04,
+          "upper": 0.46
+        }
+      ],
+      "effect": 0.23921621508372015,
+      "p_value": 0.6756830775607214,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "lower": 0.46,
+          "upper": 2.75
+        }
+      ],
+      "effect": 0.5588820920500199,
+      "p_value": 0.32402134410932415,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "lower": 2.75,
+          "upper": 7.1
+        }
+      ],
+      "effect": -0.30654940934615393,
+      "p_value": 0.7867463559743315,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "lower": 7.1,
+          "upper": 66.2
+        }
+      ],
+      "effect": -0.41170859892329736,
+      "p_value": 0.635484764711847,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "nbbo_ask",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.3008301977462619,
+      "mutual_information": 0.3008301977462619,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.08210202817391354,
+      "p_value": 0.6804121733966458,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.1305742211362248,
+      "p_value": 0.5102111766399471,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "lower": 3.0,
+          "upper": 64.5
+        }
+      ],
+      "effect": -0.6173322969189481,
+      "p_value": 0.48070589273288594,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "lower": 64.5,
+          "upper": 135.0
+        }
+      ],
+      "effect": 0.39213161325666623,
+      "p_value": 0.7013997138886614,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "lower": 135.0,
+          "upper": 268.75
+        }
+      ],
+      "effect": 0.3531875989225862,
+      "p_value": 0.704624174611153,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 6,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "lower": 268.75,
+          "upper": 764.0
+        }
+      ],
+      "effect": -0.07196811336649489,
+      "p_value": 0.8908654188859193,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 6,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "strike",
+      "conditions": [
+        {
+          "feature": "strike",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.21752128743236437,
+      "mutual_information": 0.21752128743236437,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.11568930071054181,
+      "p_value": 0.5764504485558953,
+      "discovery_sample_size": 25,
+      "discovery_independence_groups": 23,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.21243025215273756,
+      "p_value": 0.2971450828067616,
+      "discovery_sample_size": 25,
+      "discovery_independence_groups": 23,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "lower": 2.93,
+          "upper": 61.5
+        }
+      ],
+      "effect": -0.8337754781199113,
+      "p_value": 0.3904868800901351,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "lower": 61.5,
+          "upper": 125.33
+        }
+      ],
+      "effect": 0.3475169571478431,
+      "p_value": 0.7332145617367164,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "lower": 125.33,
+          "upper": 248.75
+        }
+      ],
+      "effect": 0.40938660209592714,
+      "p_value": 0.7129512913357665,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 6,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "lower": 248.75,
+          "upper": 747.03
+        }
+      ],
+      "effect": 0.06589021617954927,
+      "p_value": 0.90377835165463,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 6,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "underlying_price",
+      "conditions": [
+        {
+          "feature": "underlying_price",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.166340027408528,
+      "mutual_information": 0.166340027408528,
+      "discovery_sample_size": 25,
+      "discovery_independence_groups": 23,
+      "validation": {
+        "sample_size": 11,
+        "independence_groups": 11,
+        "mean_return": 0.8664455441589065,
+        "median_return": 0.530688129127632,
+        "effect_vs_all": 0.3195977661570103,
+        "top_3_effect_share": 0.5177784587293424,
+        "bootstrap_median_ci": {
+          "n": 11,
+          "low": -1.2680874693470952,
+          "high": 2.451640945655625
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.2096177247807119,
+      "p_value": 0.2837637650220512,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.1923664211813496,
+      "p_value": 0.32701801455730256,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "lower": -0.5625092476851852,
+          "upper": 3.437491215277778
+        }
+      ],
+      "effect": 0.2766073621596873,
+      "p_value": 0.6890603744811361,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "lower": 3.437491215277778,
+          "upper": 10.437493009259258
+        }
+      ],
+      "effect": -1.297497659543972,
+      "p_value": 0.12210262489412609,
+      "discovery_sample_size": 6,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "lower": 10.437493009259258,
+          "upper": 31.437494988425925
+        }
+      ],
+      "effect": 0.7794899830558328,
+      "p_value": 0.33090975030749814,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "lower": 31.437494988425925,
+          "upper": 178.43749671296297
+        }
+      ],
+      "effect": 0.05604350582217005,
+      "p_value": 0.9520034193105031,
+      "discovery_sample_size": 7,
+      "discovery_independence_groups": 7,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "dte_days",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.2814506368660935,
+      "mutual_information": 0.2814506368660935,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "dte_days",
+          "operator": ">=",
+          "value": 10.437493009259258
+        }
+      ],
+      "feature": "dte_days",
+      "importance": 0.14626051043539173,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 14,
+      "effect": 0.4177667444390013,
+      "validation": {
+        "sample_size": 9,
+        "independence_groups": 9,
+        "mean_return": 0.8051332294326993,
+        "median_return": 0.530688129127632,
+        "effect_vs_all": 0.25828545143080306,
+        "top_3_effect_share": 0.6323895562394835,
+        "bootstrap_median_ci": {
+          "n": 9,
+          "low": -0.9760234467690211,
+          "high": 1.5705646338183805
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "volume",
+          "operator": ">=",
+          "value": 1.0
+        }
+      ],
+      "feature": "volume",
+      "importance": 0.1432574108248081,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 25,
+      "effect": 0.0,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 12,
+        "mean_return": 0.5468477780018962,
+        "median_return": -0.06688813795357235,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.48402473530091017,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -1.5678333372635822,
+          "high": 2.022069399367156
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": ">=",
+          "value": 300.0
+        }
+      ],
+      "feature": "premium",
+      "importance": 0.13900951625300118,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 14,
+      "effect": 0.06642318875936504,
+      "validation": {
+        "sample_size": 3,
+        "independence_groups": 3,
+        "mean_return": -1.321173931309114,
+        "median_return": -1.2680874693470952,
+        "effect_vs_all": -1.86802170931101,
+        "top_3_effect_share": 1.0,
+        "bootstrap_median_ci": {
+          "n": 3,
+          "low": -2.0309699195454702,
+          "high": -0.6644644050347767
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "nbbo_ask",
+          "operator": ">=",
+          "value": 2.75
+        }
+      ],
+      "feature": "nbbo_ask",
+      "importance": 0.13623498054704705,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 14,
+      "effect": -0.3591290041347257,
+      "validation": {
+        "sample_size": 3,
+        "independence_groups": 3,
+        "mean_return": -1.2667103598539804,
+        "median_return": -1.2680874693470952,
+        "effect_vs_all": -1.8135581378558765,
+        "top_3_effect_share": 1.0,
+        "bootstrap_median_ci": {
+          "n": 3,
+          "low": -1.8675792051800693,
+          "high": -0.6644644050347767
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "operator": ">=",
+          "value": 2090.0
+        }
+      ],
+      "feature": "open_interest",
+      "importance": 0.12056017320041411,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 13,
+      "effect": -0.03476339695598074,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "mean_return": 1.8988616694548834,
+        "median_return": 2.001623271533946,
+        "effect_vs_all": 1.3520138914529873,
+        "top_3_effect_share": 0.7227427910551286,
+        "bootstrap_median_ci": {
+          "n": 6,
+          "low": -1.4218013259745452,
+          "high": 5.11676306280525
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    }
+  ],
+  "status_counts": {
+    "discovered candidate": 0,
+    "validation survivor": 2,
+    "rejected": 59,
+    "insufficient data": 2
+  },
+  "language": "ML and statistical findings are discovery evidence, not profitability claims; validation survivors require independent backtesting."
+}

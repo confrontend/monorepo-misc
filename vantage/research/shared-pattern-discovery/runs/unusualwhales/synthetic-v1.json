@@ -1,0 +1,841 @@
+{
+  "report_version": "shared-discovery-v1",
+  "project": "unusualwhales",
+  "run_id": "084ddec25bf2904f",
+  "dependencies": {
+    "numpy": true,
+    "scipy": false,
+    "statsmodels": false,
+    "sklearn": false
+  },
+  "isolation": {
+    "project": "unusualwhales",
+    "input_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\fixtures\\synthetic.json",
+    "output_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\synthetic-v1.json",
+    "cache_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\.cache\\unusualwhales\\084ddec25bf2904f",
+    "model_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\unusualwhales\\.models\\unusualwhales\\084ddec25bf2904f",
+    "shared_database_opened": false,
+    "cross_project_state": false,
+    "model_reuse": false
+  },
+  "input_contract": {
+    "schema_version": "normalized-v1",
+    "feature_allowlist_version": "uw-v1-event-time-allowlist",
+    "allow_list": [
+      {
+        "name": "signal_type",
+        "justification": "Signal classification is stored with the event."
+      },
+      {
+        "name": "underlying_symbol",
+        "justification": "Instrument identity is present on the event."
+      },
+      {
+        "name": "symbol",
+        "justification": "Instrument identity is present on the event."
+      },
+      {
+        "name": "premium",
+        "justification": "Trade premium is observed at the provider event."
+      },
+      {
+        "name": "size",
+        "justification": "Trade size is observed at the provider event."
+      },
+      {
+        "name": "open_interest",
+        "justification": "Provider open interest is captured with event provenance."
+      },
+      {
+        "name": "volume",
+        "justification": "Provider volume is captured with event provenance."
+      },
+      {
+        "name": "nbbo_bid",
+        "justification": "Quote bid is captured with the trade event."
+      },
+      {
+        "name": "nbbo_ask",
+        "justification": "Quote ask is captured with the trade event."
+      },
+      {
+        "name": "strike",
+        "justification": "Contract strike is known at the event."
+      },
+      {
+        "name": "underlying_price",
+        "justification": "Underlying price is captured at the event."
+      },
+      {
+        "name": "expiry",
+        "justification": "Contract expiry is known at the event."
+      },
+      {
+        "name": "executed_at",
+        "justification": "Execution timestamp anchors event-time ordering."
+      },
+      {
+        "name": "event_at",
+        "justification": "Event timestamp anchors event-time ordering."
+      },
+      {
+        "name": "observable_at",
+        "justification": "Provider observable timestamp anchors event-time ordering."
+      },
+      {
+        "name": "dte_days",
+        "justification": "Derived only from expiry minus executed_at, never current time."
+      },
+      {
+        "name": "volume_oi_ratio",
+        "justification": "Deterministic transform of event-time volume and open interest."
+      },
+      {
+        "name": "spread_pct",
+        "justification": "Deterministic transform of event-time NBBO quotes."
+      },
+      {
+        "name": "moneyness_pct",
+        "justification": "Deterministic transform of event-time strike and underlying price."
+      },
+      {
+        "name": "side_score",
+        "justification": "Deterministic event-time trade-side feature."
+      },
+      {
+        "name": "report_flags",
+        "justification": "Captured event labels are known at event time."
+      },
+      {
+        "name": "tags",
+        "justification": "Captured event labels are known at event time."
+      }
+    ],
+    "examined_fields": [
+      "open_interest",
+      "premium",
+      "size"
+    ],
+    "rejected_fields": [],
+    "reject_by_default": [
+      "captured_at",
+      "retrieved_at",
+      "post_event_market_bar",
+      "outcome",
+      "checkpoint",
+      "return",
+      "current_value",
+      "provider_field_with_later_timestamp",
+      "dte_from_now"
+    ],
+    "outcome": "net_return_1d"
+  },
+  "dataset_summary": {
+    "rows": 24,
+    "eligible_outcome_rows": 24,
+    "mature_rows": 24,
+    "usable_rows": 24,
+    "outcome_coverage": 1.0,
+    "independence_groups": 24,
+    "time_start": "2026-01-01T00:00:00Z",
+    "time_end": "2026-01-01T23:00:00Z"
+  },
+  "missingness_checks": [
+    {
+      "feature": "premium",
+      "with_outcome_n": 15,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 8.0,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "size",
+      "with_outcome_n": 15,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 8.0,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "open_interest",
+      "with_outcome_n": 3,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 10.0,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    }
+  ],
+  "feature_summaries": [
+    {
+      "feature": "signal_type",
+      "rows": 15,
+      "present": 15,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "call_sweep",
+          15
+        ]
+      ]
+    },
+    {
+      "feature": "premium",
+      "rows": 15,
+      "present": 15,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 15,
+        "mean": 8.0,
+        "median": 8.0,
+        "std": 4.47213595499958
+      },
+      "quantiles": {
+        "0.05": 1.7000000000000002,
+        "0.25": 4.5,
+        "0.5": 8.0,
+        "0.75": 11.5,
+        "0.95": 14.299999999999999
+      }
+    },
+    {
+      "feature": "size",
+      "rows": 15,
+      "present": 15,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 15,
+        "mean": 8.0,
+        "median": 8.0,
+        "std": 4.47213595499958
+      },
+      "quantiles": {
+        "0.05": 1.7000000000000002,
+        "0.25": 4.5,
+        "0.5": 8.0,
+        "0.75": 11.5,
+        "0.95": 14.299999999999999
+      }
+    },
+    {
+      "feature": "open_interest",
+      "rows": 15,
+      "present": 3,
+      "missing": 12,
+      "missing_fraction": 0.8,
+      "kind": "numeric",
+      "summary": {
+        "n": 3,
+        "mean": 10.0,
+        "median": 10.0,
+        "std": 0.0
+      },
+      "quantiles": {
+        "0.05": 10.0,
+        "0.25": 10.0,
+        "0.5": 10.0,
+        "0.75": 10.0,
+        "0.95": 10.0
+      }
+    }
+  ],
+  "split": {
+    "method": "chronological",
+    "discovery_uses_event_ids": [
+      "e01",
+      "e02",
+      "e03",
+      "e04",
+      "e05",
+      "e06",
+      "e07",
+      "e08",
+      "e09",
+      "e10",
+      "e11",
+      "e12",
+      "e13",
+      "e14",
+      "e15"
+    ],
+    "validation_uses_event_ids": [
+      "e16",
+      "e17",
+      "e18",
+      "e19",
+      "e20",
+      "e21"
+    ],
+    "discovery_rows": 15,
+    "discovery_eligible_rows": 15,
+    "validation_rows": 6,
+    "validation_eligible_rows": 6,
+    "untouched_holdout_rows": 3,
+    "untouched_holdout_eligible_rows": 3,
+    "validation_fraction": 0.25,
+    "holdout_fraction": 0.125,
+    "holdout_policy": "untouched: excluded from feature summaries, candidate generation, model fitting, validation, correction, and status assignment; counts only are reported",
+    "holdout_used_for_discovery": false,
+    "holdout_used_for_validation": false,
+    "holdout_used_for_model_fit": false,
+    "holdout_used_for_multiple_testing": false
+  },
+  "multiple_testing": {
+    "method": "Benjamini-Hochberg FDR",
+    "alpha": 0.05,
+    "enumerated_comparisons": 12,
+    "tree_search_correction": "not applied; validation survival and untouched holdout are the protection"
+  },
+  "model": {
+    "ensemble": "numpy.bootstrap_median_stump_ensemble",
+    "permutation_importance": {
+      "premium": 21.60124451358826,
+      "size": 0.0,
+      "open_interest": 0.0
+    },
+    "permutation_importance_method": "deterministic NumPy train-vs-permuted MSE for bootstrap stump ensemble",
+    "feature_importance": {
+      "premium": 0.5,
+      "size": 0.5
+    },
+    "shallow_rule_count": 2
+  },
+  "minimum_n": 4,
+  "patterns": [
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 1.0,
+      "p_value": 0.0,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 15,
+      "q_value": 0.0,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "coefficient": 1.0
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 1.0,
+      "p_value": 0.0,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 15,
+      "q_value": 0.0,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "coefficient": 1.0
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 1.0,
+          "upper": 4.5
+        }
+      ],
+      "effect": -5.5,
+      "p_value": 2.9523494129025137e-10,
+      "discovery_sample_size": 4,
+      "discovery_independence_groups": 4,
+      "q_value": 4.428524119353771e-10,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 4,
+        "independence_groups": 4,
+        "mean_return": 2.5,
+        "median_return": 2.5,
+        "effect_vs_all": -5.5,
+        "top_3_effect_share": 0.8181818181818182,
+        "bootstrap_median_ci": {
+          "n": 4,
+          "low": 1.0,
+          "high": 4.0
+        }
+      },
+      "validation": {
+        "sample_size": 0,
+        "independence_groups": 0,
+        "mean_return": null,
+        "median_return": null,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": null,
+        "bootstrap_median_ci": {
+          "n": 0,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 4.5,
+          "upper": 8.0
+        }
+      ],
+      "effect": -2.0,
+      "p_value": 0.1011513086115481,
+      "discovery_sample_size": 3,
+      "discovery_independence_groups": 4,
+      "q_value": 0.12138157033385773,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 8.0,
+          "upper": 11.5
+        }
+      ],
+      "effect": 1.5,
+      "p_value": 0.22197928768018432,
+      "discovery_sample_size": 4,
+      "discovery_independence_groups": 4,
+      "q_value": 0.22197928768018435,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "lower": 11.5,
+          "upper": 15.0
+        }
+      ],
+      "effect": 5.5,
+      "p_value": 2.9523494129025137e-10,
+      "discovery_sample_size": 4,
+      "discovery_independence_groups": 4,
+      "q_value": 4.428524119353771e-10,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 4,
+        "independence_groups": 4,
+        "mean_return": 13.5,
+        "median_return": 13.5,
+        "effect_vs_all": 5.5,
+        "top_3_effect_share": 0.8181818181818182,
+        "bootstrap_median_ci": {
+          "n": 4,
+          "low": 12.0,
+          "high": 15.0
+        }
+      },
+      "validation": {
+        "sample_size": 0,
+        "independence_groups": 0,
+        "mean_return": null,
+        "median_return": null,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": null,
+        "bootstrap_median_ci": {
+          "n": 0,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "premium",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 1.3792922544726758,
+      "mutual_information": 1.3792922544726758,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 15,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "mean_return": 18.5,
+        "median_return": 18.5,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.7222222222222222,
+        "bootstrap_median_ci": {
+          "n": 6,
+          "low": 17.0,
+          "high": 20.5
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 1.0,
+      "p_value": 0.0,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 15,
+      "q_value": 0.0,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "coefficient": -0.8702888011474108
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 1.0,
+      "p_value": 0.0,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 15,
+      "q_value": 0.0,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "coefficient": -0.8702888011474108
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "lower": 1.0,
+          "upper": 4.5
+        }
+      ],
+      "effect": -5.5,
+      "p_value": 2.9523494129025137e-10,
+      "discovery_sample_size": 4,
+      "discovery_independence_groups": 4,
+      "q_value": 4.428524119353771e-10,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 4,
+        "independence_groups": 4,
+        "mean_return": 2.5,
+        "median_return": 2.5,
+        "effect_vs_all": -5.5,
+        "top_3_effect_share": 0.8181818181818182,
+        "bootstrap_median_ci": {
+          "n": 4,
+          "low": 1.0,
+          "high": 4.0
+        }
+      },
+      "validation": {
+        "sample_size": 1,
+        "independence_groups": 1,
+        "mean_return": 21.0,
+        "median_return": 21.0,
+        "effect_vs_all": 2.5,
+        "top_3_effect_share": 1.0,
+        "bootstrap_median_ci": {
+          "n": 1,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "lower": 4.5,
+          "upper": 8.0
+        }
+      ],
+      "effect": -2.0,
+      "p_value": 0.1011513086115481,
+      "discovery_sample_size": 3,
+      "discovery_independence_groups": 4,
+      "q_value": 0.12138157033385773,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "lower": 8.0,
+          "upper": 11.5
+        }
+      ],
+      "effect": 1.5,
+      "p_value": 0.22197928768018432,
+      "discovery_sample_size": 4,
+      "discovery_independence_groups": 4,
+      "q_value": 0.22197928768018435,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "lower": 11.5,
+          "upper": 15.0
+        }
+      ],
+      "effect": 5.5,
+      "p_value": 2.9523494129025137e-10,
+      "discovery_sample_size": 4,
+      "discovery_independence_groups": 4,
+      "q_value": 4.428524119353771e-10,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 4,
+        "independence_groups": 4,
+        "mean_return": 13.5,
+        "median_return": 13.5,
+        "effect_vs_all": 5.5,
+        "top_3_effect_share": 0.8181818181818182,
+        "bootstrap_median_ci": {
+          "n": 4,
+          "low": 12.0,
+          "high": 15.0
+        }
+      },
+      "validation": {
+        "sample_size": 0,
+        "independence_groups": 0,
+        "mean_return": null,
+        "median_return": null,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": null,
+        "bootstrap_median_ci": {
+          "n": 0,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "size",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 1.3792922544726758,
+      "mutual_information": 1.3792922544726758,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 15,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "mean_return": 18.5,
+        "median_return": 18.5,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.7222222222222222,
+        "bootstrap_median_ci": {
+          "n": 6,
+          "low": 17.0,
+          "high": 20.5
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "open_interest",
+      "conditions": [
+        {
+          "feature": "open_interest",
+          "operator": "correlation",
+          "value": "any"
+        }
+      ],
+      "discovery_sample_size": 3,
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "discovery sample below minimum-N"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "premium",
+          "operator": ">=",
+          "value": 8.0
+        }
+      ],
+      "feature": "premium",
+      "importance": 0.5,
+      "discovery_sample_size": 8,
+      "discovery_independence_groups": 8,
+      "effect": 3.5,
+      "validation": {
+        "sample_size": 6,
+        "independence_groups": 6,
+        "mean_return": 18.5,
+        "median_return": 18.5,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.7222222222222222,
+        "bootstrap_median_ci": {
+          "n": 6,
+          "low": 17.0,
+          "high": 20.5
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "size",
+          "operator": ">=",
+          "value": 8.0
+        }
+      ],
+      "feature": "size",
+      "importance": 0.5,
+      "discovery_sample_size": 8,
+      "discovery_independence_groups": 8,
+      "effect": 3.5,
+      "validation": {
+        "sample_size": 3,
+        "independence_groups": 3,
+        "mean_return": 17.0,
+        "median_return": 17.0,
+        "effect_vs_all": -1.5,
+        "top_3_effect_share": 1.0,
+        "bootstrap_median_ci": {
+          "n": 3,
+          "low": 16.0,
+          "high": 18.0
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    }
+  ],
+  "status_counts": {
+    "discovered candidate": 0,
+    "validation survivor": 2,
+    "rejected": 9,
+    "insufficient data": 6
+  },
+  "language": "ML and statistical findings are discovery evidence, not profitability claims; validation survivors require independent backtesting."
+}

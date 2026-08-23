@@ -1,0 +1,1332 @@
+{
+  "report_version": "shared-discovery-v1",
+  "project": "crypto",
+  "run_id": "b2edfa33b1dce483",
+  "dependencies": {
+    "numpy": true,
+    "scipy": false,
+    "statsmodels": false,
+    "sklearn": false
+  },
+  "isolation": {
+    "project": "crypto",
+    "input_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787412765402\\normalized-export.json",
+    "output_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787412765402\\report.json",
+    "cache_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787412765402\\.cache\\crypto\\b2edfa33b1dce483",
+    "model_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787412765402\\.models\\crypto\\b2edfa33b1dce483",
+    "shared_database_opened": false,
+    "cross_project_state": false,
+    "model_reuse": false
+  },
+  "input_contract": {
+    "schema_version": "normalized-v1",
+    "feature_allowlist_version": "gmgn-v2-pre-event-only",
+    "allow_list": [
+      {
+        "name": "wallet_address",
+        "justification": "Wallet identity is the predeclared CopyTrade independence group, not a return-based selection feature."
+      },
+      {
+        "name": "token_symbol",
+        "justification": "Token label is copied from the normalized GMGN round-trip record."
+      },
+      {
+        "name": "signal_type",
+        "justification": "Source-normalized signal type is stored at capture."
+      },
+      {
+        "name": "token_address",
+        "justification": "Token identity is part of the captured source record."
+      },
+      {
+        "name": "chain",
+        "justification": "Chain identity is part of the captured source record."
+      },
+      {
+        "name": "prior_wallet_trade_count",
+        "justification": "Count of stored wallet buy/sell rows strictly before the current buy event."
+      },
+      {
+        "name": "prior_token_trade_count",
+        "justification": "Count of stored token buy/sell rows strictly before the current buy event."
+      },
+      {
+        "name": "prior_wallet_buy_volume_usd",
+        "justification": "Sum of positive recorded buy cost_usd for this wallet strictly before the current buy event."
+      }
+    ],
+    "examined_fields": [
+      "chain",
+      "coverage_rate_percent",
+      "coverage_status",
+      "edge_kept_percent",
+      "entry_gap_seconds",
+      "entry_trade_amount_usd",
+      "exit_gap_seconds",
+      "exit_trade_amount_usd",
+      "gas_fee_usd",
+      "hold_seconds",
+      "outcome_at",
+      "prior_token_trade_count",
+      "prior_wallet_buy_volume_usd",
+      "prior_wallet_trade_count",
+      "token_address",
+      "token_symbol",
+      "wallet_address",
+      "wallet_return_percent"
+    ],
+    "rejected_fields": [
+      "coverage_rate_percent",
+      "coverage_status",
+      "edge_kept_percent",
+      "entry_gap_seconds",
+      "entry_trade_amount_usd",
+      "exit_gap_seconds",
+      "exit_trade_amount_usd",
+      "gas_fee_usd",
+      "hold_seconds",
+      "outcome_at",
+      "wallet_return_percent"
+    ],
+    "reject_by_default": [
+      "captured_at",
+      "query_market_cap",
+      "query_ath",
+      "query_cur_data",
+      "current_wallet_statistics",
+      "post_event_rank",
+      "later_roster_membership",
+      "dune_outcome",
+      "avg_holding_period",
+      "hold_seconds",
+      "wallet_return_percent",
+      "entry_trade_amount_usd",
+      "exit_trade_amount_usd",
+      "edge_kept_percent",
+      "entry_gap_seconds",
+      "exit_gap_seconds",
+      "gas_fee_usd",
+      "outcome_at",
+      "coverage_rate_percent",
+      "coverage_status",
+      "benchmark_return",
+      "excess_return",
+      "net_return_after_costs"
+    ],
+    "outcome": "net_return_after_costs"
+  },
+  "dataset_summary": {
+    "rows": 171,
+    "eligible_outcome_rows": 171,
+    "mature_rows": 171,
+    "usable_rows": 171,
+    "outcome_coverage": 1.0,
+    "independence_groups": 5,
+    "time_start": "2026-07-23T16:01:19.000Z",
+    "time_end": "2026-08-19T23:37:04.000Z"
+  },
+  "missingness_checks": [
+    {
+      "feature": "prior_wallet_trade_count",
+      "with_outcome_n": 85,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 337.3764705882353,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "prior_token_trade_count",
+      "with_outcome_n": 85,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 20.705882352941178,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "prior_wallet_buy_volume_usd",
+      "with_outcome_n": 85,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 32012.50469824588,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    }
+  ],
+  "feature_summaries": [
+    {
+      "feature": "wallet_address",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ",
+          39
+        ],
+        [
+          "9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ",
+          13
+        ],
+        [
+          "Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd",
+          13
+        ],
+        [
+          "DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt",
+          10
+        ],
+        [
+          "FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP",
+          10
+        ]
+      ]
+    },
+    {
+      "feature": "token_symbol",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "CATE",
+          14
+        ],
+        [
+          "FRANK",
+          7
+        ],
+        [
+          "旺旺",
+          7
+        ],
+        [
+          "RACCOONG",
+          6
+        ],
+        [
+          "BADSEM",
+          4
+        ],
+        [
+          "FRIG",
+          4
+        ],
+        [
+          "TRUMP2028",
+          4
+        ],
+        [
+          "ChooChoo",
+          3
+        ],
+        [
+          "RACCOONBER",
+          3
+        ],
+        [
+          "Bernhard",
+          2
+        ],
+        [
+          "CRABSEM",
+          2
+        ],
+        [
+          "Cybercat",
+          2
+        ],
+        [
+          "EVE",
+          2
+        ],
+        [
+          "Fraudci",
+          2
+        ],
+        [
+          "RACCOONE",
+          2
+        ],
+        [
+          "RIKA",
+          2
+        ],
+        [
+          "WHITESEM",
+          2
+        ],
+        [
+          "hwg",
+          2
+        ],
+        [
+          "ANCEROS",
+          1
+        ],
+        [
+          "ANPUS",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "signal_type",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "gmgn_copy_round_trip",
+          85
+        ]
+      ]
+    },
+    {
+      "feature": "token_address",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+          14
+        ],
+        [
+          "7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+          7
+        ],
+        [
+          "9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+          6
+        ],
+        [
+          "2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+          4
+        ],
+        [
+          "8dqCotj4N9P4atWbn5vJqa2aen24WuVCi6W55QVupump",
+          4
+        ],
+        [
+          "FtbWmH2XfF4WJcWnKcCcPnxhAiQ9UQd2vShpGTMrpump",
+          4
+        ],
+        [
+          "G1zujAaykkTPDZTcemBTjRV7d4dHJyrebs1mMuz7pump",
+          4
+        ],
+        [
+          "6yVk3Uf6HLqJCqC8ebo2RCW7McGy9LLjNiUnYzhypump",
+          3
+        ],
+        [
+          "GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+          3
+        ],
+        [
+          "3DrBHMJ1rnWp7mMRNmNbWbp4zNiHkM483GqXSzRPpump",
+          2
+        ],
+        [
+          "3aqXuwp6HuVXs9vdD9Gpg4dzJaUx443RjK7GXzphpump",
+          2
+        ],
+        [
+          "51RW9qvZHRqmDna9gmxEsrmwhZESRJKUo85UvBgcpump",
+          2
+        ],
+        [
+          "5Kvqfc6KyVPqaZJJPSdkpk534nnzmorZLyEXncQ9pump",
+          2
+        ],
+        [
+          "79xAcXoajNSuhGsFHZB93sMBALtoPF2xqeSaHHPVpump",
+          2
+        ],
+        [
+          "9cGm3VfZSk8dDLNiJRmenQ3FCmw9jdBQUEEkrqb3pump",
+          2
+        ],
+        [
+          "A6mrpBeeNKm743fiNg8Mrz7pj7uGML5rgDjWo4nrpump",
+          2
+        ],
+        [
+          "BQYc6c5hivsPrEEmTxBVjGT16setk2gmPvbv7YBxpump",
+          2
+        ],
+        [
+          "DAKc5yijHX1YmQPqCUJzyXKQRkSaUZjUSTZZV7m6pump",
+          2
+        ],
+        [
+          "EqCEZ759TfwgN7CN57aUsBEy3rZRFs3sz5c6pP91pump",
+          2
+        ],
+        [
+          "2EYxrppnbqMiSMvhRGrLLEjowvyZA8aL3CJ3YGuUpump",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "chain",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "sol",
+          85
+        ]
+      ]
+    },
+    {
+      "feature": "prior_wallet_trade_count",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 85,
+        "mean": 337.3764705882353,
+        "median": 113.0,
+        "std": 331.37591861777753
+      },
+      "quantiles": {
+        "0.05": 1.2000000000000002,
+        "0.25": 8.0,
+        "0.5": 113.0,
+        "0.75": 692.0,
+        "0.95": 721.0
+      }
+    },
+    {
+      "feature": "prior_token_trade_count",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 85,
+        "mean": 20.705882352941178,
+        "median": 8.0,
+        "std": 45.698500425905344
+      },
+      "quantiles": {
+        "0.05": 0.0,
+        "0.25": 0.0,
+        "0.5": 8.0,
+        "0.75": 19.0,
+        "0.95": 58.0
+      }
+    },
+    {
+      "feature": "prior_wallet_buy_volume_usd",
+      "rows": 85,
+      "present": 85,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 85,
+        "mean": 32012.50469824588,
+        "median": 27370.215435055172,
+        "std": 27773.405195844603
+      },
+      "quantiles": {
+        "0.05": 43.58924938057201,
+        "0.25": 851.4225332466,
+        "0.5": 27370.215435055172,
+        "0.75": 60348.59392775192,
+        "0.95": 61798.27039374851
+      }
+    }
+  ],
+  "split": {
+    "method": "chronological",
+    "discovery_uses_event_ids": [
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:0:2026-07-23T16:01:19.000Z:2026-07-23T16:13:18.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:1:2026-07-24T02:10:39.000Z:2026-07-24T03:32:55.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:2:2026-07-24T02:10:39.000Z:2026-07-24T03:32:58.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:3:2026-07-24T02:10:39.000Z:2026-07-24T04:13:57.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:9:2026-07-24T02:10:39.000Z:2026-07-26T00:32:03.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:4:2026-07-24T09:08:09.000Z:2026-07-24T09:09:44.000Z:4MbUUGzydudW21ZPvjuj8STMCkvMb48Vxxx1hTgXpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:5:2026-07-25T02:47:33.000Z:2026-07-25T02:48:17.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:6:2026-07-25T02:47:33.000Z:2026-07-25T02:48:19.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:7:2026-07-25T02:47:33.000Z:2026-07-25T02:48:33.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:8:2026-07-25T02:47:33.000Z:2026-07-25T02:49:20.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:0:2026-07-26T04:12:05.000Z:2026-07-26T04:25:53.000Z:6e6rYehb8FJHRF33NLJ2UT73bG4PcvMRedEgjCzHpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:1:2026-07-26T05:58:25.000Z:2026-07-26T05:59:38.000Z:HjF3cACqcc2UdL3qyfKJetgbB9ggNSY1JoBRvtbEpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:2:2026-07-26T06:12:14.000Z:2026-07-26T06:12:16.000Z:Abudg87eD5UkyhBQDKuS1HEFt5AhdGASUr8sLQH2pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:3:2026-07-26T06:44:23.000Z:2026-07-26T06:45:37.000Z:4ic8jnv8cGAKGkTvXQDf2eTfLADxKpspiK1CQspSpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:4:2026-07-26T08:28:50.000Z:2026-07-26T08:43:06.000Z:9cGm3VfZSk8dDLNiJRmenQ3FCmw9jdBQUEEkrqb3pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:5:2026-07-26T08:28:50.000Z:2026-07-26T08:43:47.000Z:9cGm3VfZSk8dDLNiJRmenQ3FCmw9jdBQUEEkrqb3pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:6:2026-07-26T09:26:07.000Z:2026-07-26T09:40:42.000Z:3LJVcSuARBReo2xt86fMxbXxKgSuAHh7hr2xTAwwpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:7:2026-07-27T13:43:08.000Z:2026-07-27T13:54:41.000Z:FmGQaAnT2F1vhrYbeoee5pBxave4QgPoZ9m89GaApump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:10:2026-07-27T13:53:53.000Z:2026-07-28T12:40:11.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:8:2026-07-27T14:07:45.000Z:2026-07-27T14:50:11.000Z:DAKc5yijHX1YmQPqCUJzyXKQRkSaUZjUSTZZV7m6pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:9:2026-07-27T14:07:45.000Z:2026-07-27T14:50:13.000Z:DAKc5yijHX1YmQPqCUJzyXKQRkSaUZjUSTZZV7m6pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:10:2026-07-27T17:33:31.000Z:2026-07-27T17:33:38.000Z:EwU94G6twCtkQxFKhDa8P4jGx9Cwwmu3fpJstND7pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:11:2026-07-27T18:00:11.000Z:2026-07-27T18:09:27.000Z:2EYxrppnbqMiSMvhRGrLLEjowvyZA8aL3CJ3YGuUpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:11:2026-07-28T12:40:28.000Z:2026-07-28T12:44:15.000Z:CEJHtZ38DWcKsbtsF2FmGPJ3GnmyeGLRMnSqm1Ygpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:12:2026-07-28T12:44:22.000Z:2026-08-02T01:31:54.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:2:2026-07-28T16:32:35.000Z:2026-07-28T19:44:42.000Z:3aqXuwp6HuVXs9vdD9Gpg4dzJaUx443RjK7GXzphpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:5:2026-07-28T16:32:35.000Z:2026-07-29T14:39:43.000Z:3aqXuwp6HuVXs9vdD9Gpg4dzJaUx443RjK7GXzphpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:0:2026-07-28T16:34:53.000Z:2026-07-28T19:02:59.000Z:BQYc6c5hivsPrEEmTxBVjGT16setk2gmPvbv7YBxpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:1:2026-07-28T16:34:53.000Z:2026-07-28T19:04:03.000Z:BQYc6c5hivsPrEEmTxBVjGT16setk2gmPvbv7YBxpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:0:2026-07-28T21:47:26.000Z:2026-07-28T21:48:30.000Z:CNsaVjYMpAZgmYfasDgYdyLMjspXGqBT3aasQYmTpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:2:2026-07-28T23:48:01.000Z:2026-07-29T00:02:12.000Z:4b7sMi7CheXMr7k5HbbzrJgxVn7icpxVupK3jhuCpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:1:2026-07-28T23:48:49.000Z:2026-07-28T23:58:05.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:3:2026-07-29T00:00:59.000Z:2026-07-29T00:10:44.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:4:2026-07-29T00:00:59.000Z:2026-07-29T00:14:41.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:5:2026-07-29T00:00:59.000Z:2026-07-29T00:20:08.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:6:2026-07-29T00:00:59.000Z:2026-07-29T00:45:32.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:7:2026-07-29T00:00:59.000Z:2026-07-29T01:01:04.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:8:2026-07-29T02:14:52.000Z:2026-07-29T02:52:15.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:9:2026-07-29T02:14:52.000Z:2026-07-29T02:59:39.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:0:2026-07-29T02:42:49.000Z:2026-07-29T02:44:30.000Z:51RW9qvZHRqmDna9gmxEsrmwhZESRJKUo85UvBgcpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:1:2026-07-29T02:42:49.000Z:2026-07-29T02:45:00.000Z:51RW9qvZHRqmDna9gmxEsrmwhZESRJKUo85UvBgcpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:12:2026-07-29T03:30:29.000Z:2026-07-29T03:50:57.000Z:G1zujAaykkTPDZTcemBTjRV7d4dHJyrebs1mMuz7pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:13:2026-07-29T03:30:29.000Z:2026-07-29T03:51:05.000Z:G1zujAaykkTPDZTcemBTjRV7d4dHJyrebs1mMuz7pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:14:2026-07-29T03:30:29.000Z:2026-07-29T03:51:06.000Z:G1zujAaykkTPDZTcemBTjRV7d4dHJyrebs1mMuz7pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:15:2026-07-29T04:04:59.000Z:2026-07-29T04:10:34.000Z:G1zujAaykkTPDZTcemBTjRV7d4dHJyrebs1mMuz7pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:16:2026-07-29T04:28:11.000Z:2026-07-29T04:41:47.000Z:4EvRb9CS1tBqrYNvURmbRD1NZTCBHXQccsMkiYFMpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:17:2026-07-29T05:18:15.000Z:2026-07-29T05:25:38.000Z:5s6tVtLZV6GcbZAnrsryimCMyQpT9cSc7bkymAVRpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:18:2026-07-29T05:41:40.000Z:2026-07-29T06:06:20.000Z:FtbWmH2XfF4WJcWnKcCcPnxhAiQ9UQd2vShpGTMrpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:19:2026-07-29T05:41:40.000Z:2026-07-29T06:06:28.000Z:FtbWmH2XfF4WJcWnKcCcPnxhAiQ9UQd2vShpGTMrpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:20:2026-07-29T05:41:40.000Z:2026-07-29T06:06:33.000Z:FtbWmH2XfF4WJcWnKcCcPnxhAiQ9UQd2vShpGTMrpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:21:2026-07-29T06:33:40.000Z:2026-07-29T06:54:27.000Z:FtbWmH2XfF4WJcWnKcCcPnxhAiQ9UQd2vShpGTMrpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:22:2026-07-29T07:39:36.000Z:2026-07-29T07:49:44.000Z:BesbtTzGEERFf8ywwwBT9PeR7enqQj8sSRfL4ugCpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:23:2026-07-29T09:03:28.000Z:2026-07-29T09:13:51.000Z:5Kvqfc6KyVPqaZJJPSdkpk534nnzmorZLyEXncQ9pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:24:2026-07-29T09:03:28.000Z:2026-07-29T09:13:53.000Z:5Kvqfc6KyVPqaZJJPSdkpk534nnzmorZLyEXncQ9pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:25:2026-07-29T10:41:03.000Z:2026-07-29T10:56:35.000Z:8dqCotj4N9P4atWbn5vJqa2aen24WuVCi6W55QVupump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:26:2026-07-29T10:41:03.000Z:2026-07-29T10:57:17.000Z:8dqCotj4N9P4atWbn5vJqa2aen24WuVCi6W55QVupump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:27:2026-07-29T10:41:03.000Z:2026-07-29T10:57:24.000Z:8dqCotj4N9P4atWbn5vJqa2aen24WuVCi6W55QVupump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:28:2026-07-29T10:41:03.000Z:2026-07-29T10:57:27.000Z:8dqCotj4N9P4atWbn5vJqa2aen24WuVCi6W55QVupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:2:2026-07-29T10:58:31.000Z:2026-07-29T11:00:11.000Z:79xAcXoajNSuhGsFHZB93sMBALtoPF2xqeSaHHPVpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:3:2026-07-29T10:58:31.000Z:2026-07-29T11:00:41.000Z:79xAcXoajNSuhGsFHZB93sMBALtoPF2xqeSaHHPVpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:3:2026-07-29T11:37:47.000Z:2026-07-29T11:49:08.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:4:2026-07-29T11:37:47.000Z:2026-07-29T11:54:42.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:6:2026-07-29T11:37:47.000Z:2026-07-29T23:25:56.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:7:2026-07-29T11:37:47.000Z:2026-07-29T23:29:52.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:8:2026-07-29T11:37:47.000Z:2026-07-29T23:56:17.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:16:2026-07-29T11:37:47.000Z:2026-08-19T17:19:26.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:4:2026-07-29T15:54:13.000Z:2026-07-29T15:55:53.000Z:A6mrpBeeNKm743fiNg8Mrz7pj7uGML5rgDjWo4nrpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:5:2026-07-29T15:54:13.000Z:2026-07-29T15:56:23.000Z:A6mrpBeeNKm743fiNg8Mrz7pj7uGML5rgDjWo4nrpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:6:2026-07-29T20:47:34.000Z:2026-07-29T20:49:14.000Z:3DrBHMJ1rnWp7mMRNmNbWbp4zNiHkM483GqXSzRPpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:7:2026-07-29T20:47:34.000Z:2026-07-29T20:49:44.000Z:3DrBHMJ1rnWp7mMRNmNbWbp4zNiHkM483GqXSzRPpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:10:2026-07-29T22:53:50.000Z:2026-07-29T23:08:01.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:11:2026-07-29T22:53:50.000Z:2026-07-29T23:35:57.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:12:2026-07-29T22:53:50.000Z:2026-07-30T00:01:37.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:29:2026-07-30T00:34:12.000Z:2026-07-30T00:40:27.000Z:3Mx1rE9JE12nbRffHFJRJcaGHtr3ks3byJ57jFEwpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:8:2026-07-30T01:38:46.000Z:2026-07-30T01:40:26.000Z:EqCEZ759TfwgN7CN57aUsBEy3rZRFs3sz5c6pP91pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:9:2026-07-30T01:38:46.000Z:2026-07-30T01:40:57.000Z:EqCEZ759TfwgN7CN57aUsBEy3rZRFs3sz5c6pP91pump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:30:2026-07-30T02:43:44.000Z:2026-07-30T03:09:42.000Z:6yVk3Uf6HLqJCqC8ebo2RCW7McGy9LLjNiUnYzhypump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:31:2026-07-30T02:43:44.000Z:2026-07-30T03:09:45.000Z:6yVk3Uf6HLqJCqC8ebo2RCW7McGy9LLjNiUnYzhypump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:32:2026-07-30T03:39:02.000Z:2026-07-30T04:02:38.000Z:6yVk3Uf6HLqJCqC8ebo2RCW7McGy9LLjNiUnYzhypump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:33:2026-07-30T05:12:21.000Z:2026-07-30T05:28:43.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:34:2026-07-30T05:12:21.000Z:2026-07-30T05:28:52.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:35:2026-07-30T05:12:21.000Z:2026-07-30T05:29:00.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:36:2026-07-30T05:12:21.000Z:2026-07-30T05:29:13.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:37:2026-07-30T06:15:40.000Z:2026-07-30T06:50:12.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:38:2026-07-30T06:15:40.000Z:2026-07-30T06:50:17.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump"
+    ],
+    "validation_uses_event_ids": [
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:39:2026-07-30T06:15:40.000Z:2026-07-30T06:50:21.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:40:2026-07-30T08:19:19.000Z:2026-07-30T08:37:39.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:41:2026-07-30T08:19:19.000Z:2026-07-30T08:37:43.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:42:2026-07-30T10:58:57.000Z:2026-07-30T11:22:20.000Z:9CGg2mfaL37Nrw3pkdumb1eVtRmPSLp9A3t4fDLFpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:10:2026-07-30T11:02:29.000Z:2026-07-30T11:04:09.000Z:H78WENHosTWPFuQvtm8swi83ipTqANJi921iG51Apump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:11:2026-07-30T11:02:29.000Z:2026-07-30T11:04:39.000Z:H78WENHosTWPFuQvtm8swi83ipTqANJi921iG51Apump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:12:2026-07-30T16:38:31.000Z:2026-07-30T16:40:11.000Z:EUGsb7SNoJ3CPoW1Hr7e2A3nGmMtBGGxge56uBR8pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:13:2026-07-30T16:38:31.000Z:2026-07-30T16:40:41.000Z:EUGsb7SNoJ3CPoW1Hr7e2A3nGmMtBGGxge56uBR8pump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:13:2026-07-30T18:10:22.000Z:2026-07-30T19:57:19.000Z:BmH3twUxDs5mHzBd8yi7KashW7B6n34HRtb4sdHNwHcM",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:14:2026-07-30T18:10:22.000Z:2026-07-30T20:05:34.000Z:BmH3twUxDs5mHzBd8yi7KashW7B6n34HRtb4sdHNwHcM",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:14:2026-07-30T20:40:45.000Z:2026-07-30T20:42:25.000Z:Agmu8Xgn7rU4zFv4DMPrEBhYDdPsmiEG5hCiYyvSpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:15:2026-07-30T20:40:45.000Z:2026-07-30T20:42:56.000Z:Agmu8Xgn7rU4zFv4DMPrEBhYDdPsmiEG5hCiYyvSpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:43:2026-07-31T05:06:05.000Z:2026-07-31T05:13:28.000Z:7EQ27Tb5yYWjS1q4cTK3m9NZA9qNwsAc2ZgBhSwepump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:44:2026-07-31T05:47:47.000Z:2026-07-31T06:01:48.000Z:eSFTpyMCtNNDgjdLFspxUJf3jB2iaU1NbuZJqPSpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:45:2026-07-31T05:47:47.000Z:2026-07-31T06:01:55.000Z:eSFTpyMCtNNDgjdLFspxUJf3jB2iaU1NbuZJqPSpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:46:2026-07-31T07:54:13.000Z:2026-07-31T08:05:14.000Z:6J5M8jYTvQZnw2BdA1LZrZqPk5YiH2jFh9QvGxCxpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:47:2026-07-31T07:54:13.000Z:2026-07-31T08:05:18.000Z:6J5M8jYTvQZnw2BdA1LZrZqPk5YiH2jFh9QvGxCxpump",
+      "gmgn-copy-round-trip:2rD4gBaVtCZBRUnAmMjmUTiH9dVkn2AuDZ234pKuxJJQ:48:2026-07-31T07:54:13.000Z:2026-07-31T08:05:20.000Z:6J5M8jYTvQZnw2BdA1LZrZqPk5YiH2jFh9QvGxCxpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:16:2026-07-31T09:46:27.000Z:2026-07-31T09:48:07.000Z:7cok2xaMZTzbae7ETiFC3n9GeFT1kCPeNnwLxsRRpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:17:2026-07-31T09:46:27.000Z:2026-07-31T09:48:36.000Z:7cok2xaMZTzbae7ETiFC3n9GeFT1kCPeNnwLxsRRpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:15:2026-07-31T11:39:45.000Z:2026-07-31T12:04:05.000Z:szVXzMs29NDFhkqY86zsmLKhCKXmtzGAX6TZqjEpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:16:2026-07-31T11:39:45.000Z:2026-07-31T12:11:20.000Z:szVXzMs29NDFhkqY86zsmLKhCKXmtzGAX6TZqjEpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:18:2026-07-31T17:48:48.000Z:2026-07-31T17:50:28.000Z:CdEiTZdJx8WAsRQSHmQ1T3mnAWkBBaL9JwxvvjJRpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:19:2026-07-31T17:48:48.000Z:2026-07-31T17:50:58.000Z:CdEiTZdJx8WAsRQSHmQ1T3mnAWkBBaL9JwxvvjJRpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:9:2026-07-31T19:21:30.000Z:2026-07-31T20:26:22.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:10:2026-07-31T19:21:30.000Z:2026-07-31T20:31:57.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:11:2026-07-31T19:21:30.000Z:2026-07-31T20:38:03.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:12:2026-07-31T19:21:30.000Z:2026-07-31T20:53:01.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:13:2026-07-31T19:21:30.000Z:2026-07-31T20:53:50.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:14:2026-07-31T19:21:30.000Z:2026-07-31T21:04:46.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:20:2026-07-31T21:50:36.000Z:2026-07-31T21:52:16.000Z:2NSHQefnzYtgNayCbbSPKSJgypi7dUf4QD4MhyvYUvxD",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:21:2026-07-31T21:50:36.000Z:2026-07-31T21:52:46.000Z:2NSHQefnzYtgNayCbbSPKSJgypi7dUf4QD4MhyvYUvxD",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:17:2026-08-01T02:19:16.000Z:2026-08-01T02:26:02.000Z:Bc57iLh72YxznGU5EJa2xTEhPwdpUNBEuErV8AGgpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:22:2026-08-01T05:52:43.000Z:2026-08-01T05:54:23.000Z:CsmPN87BHt79sLnvr9TGrqjiceSzVvGh1UZMnfaapump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:23:2026-08-01T05:52:43.000Z:2026-08-01T05:54:53.000Z:CsmPN87BHt79sLnvr9TGrqjiceSzVvGh1UZMnfaapump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:24:2026-08-01T12:32:02.000Z:2026-08-01T12:33:42.000Z:GAa2Yot5syUt3cthf9xHpoBfRJSFJbC7pBwY4noKpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:25:2026-08-01T12:32:02.000Z:2026-08-01T12:34:12.000Z:GAa2Yot5syUt3cthf9xHpoBfRJSFJbC7pBwY4noKpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:18:2026-08-01T13:23:29.000Z:2026-08-01T13:31:27.000Z:CeyZtFUiYP5oxCZ99urwHMvdCW67cY2yALknfrQppump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:19:2026-08-01T13:23:29.000Z:2026-08-01T13:31:29.000Z:CeyZtFUiYP5oxCZ99urwHMvdCW67cY2yALknfrQppump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:15:2026-08-01T15:23:47.000Z:2026-08-01T16:35:40.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:26:2026-08-01T16:34:07.000Z:2026-08-01T16:35:47.000Z:8Jqs2Le4HsNUxfEWy44vQaDWrR3gqR3cvSJigDMcpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:27:2026-08-01T16:34:07.000Z:2026-08-01T16:36:17.000Z:8Jqs2Le4HsNUxfEWy44vQaDWrR3gqR3cvSJigDMcpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:22:2026-08-01T20:16:15.000Z:2026-08-01T21:08:37.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:28:2026-08-01T20:36:11.000Z:2026-08-01T20:37:51.000Z:8wtdds5LPt7nu4jKifGpcxysF5AvJ1xCVti2rQ6Ppump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:29:2026-08-01T20:36:11.000Z:2026-08-01T20:38:21.000Z:8wtdds5LPt7nu4jKifGpcxysF5AvJ1xCVti2rQ6Ppump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:20:2026-08-01T20:39:32.000Z:2026-08-01T21:04:26.000Z:9oPdLeCJcVCbmJC6No1uySj5MmbV3pjqLieHZCUmpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:21:2026-08-01T20:39:32.000Z:2026-08-01T21:06:14.000Z:9oPdLeCJcVCbmJC6No1uySj5MmbV3pjqLieHZCUmpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:30:2026-08-01T22:07:32.000Z:2026-08-01T22:07:46.000Z:7vYVLzMCDAoh57Sw1jPQWwrKCn3MQ4Ws2N2zvhLcpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:13:2026-08-03T07:43:25.000Z:2026-08-03T07:51:34.000Z:6N46H85p5mhR7BQWiJtUTaDeEhQZXyP1dPqxovhqpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:14:2026-08-04T03:52:38.000Z:2026-08-04T05:03:29.000Z:89RAitwPJBEfLK4Gcg5iv7AjFABHWNvoD5rkvRkvpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:15:2026-08-05T01:49:54.000Z:2026-08-05T02:04:13.000Z:UMGAp8U5dBdsPHw5TcfaVib3JVTqJuyxDTBVArzpump"
+    ],
+    "discovery_rows": 85,
+    "discovery_eligible_rows": 85,
+    "validation_rows": 51,
+    "validation_eligible_rows": 51,
+    "untouched_holdout_rows": 35,
+    "untouched_holdout_eligible_rows": 35,
+    "validation_fraction": 0.3,
+    "holdout_fraction": 0.2,
+    "holdout_policy": "untouched: excluded from feature summaries, candidate generation, model fitting, validation, correction, and status assignment; counts only are reported",
+    "holdout_used_for_discovery": false,
+    "holdout_used_for_validation": false,
+    "holdout_used_for_model_fit": false,
+    "holdout_used_for_multiple_testing": false
+  },
+  "multiple_testing": {
+    "method": "Benjamini-Hochberg FDR",
+    "alpha": 0.05,
+    "enumerated_comparisons": 17,
+    "tree_search_correction": "not applied; validation survival and untouched holdout are the protection"
+  },
+  "model": {
+    "ensemble": "numpy.bootstrap_median_stump_ensemble",
+    "permutation_importance": {
+      "prior_wallet_trade_count": 2125.767029674287,
+      "prior_token_trade_count": 10485.957648028256,
+      "prior_wallet_buy_volume_usd": 0.0
+    },
+    "permutation_importance_method": "deterministic NumPy train-vs-permuted MSE for bootstrap stump ensemble",
+    "feature_importance": {
+      "prior_wallet_trade_count": 0.30139593375371293,
+      "prior_token_trade_count": 0.39720813249257425,
+      "prior_wallet_buy_volume_usd": 0.30139593375371293
+    },
+    "shallow_rule_count": 3
+  },
+  "minimum_n": 10,
+  "patterns": [
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.23440595345567686,
+      "p_value": 0.028038749924037414,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "q_value": 0.05296208318984845,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.27831682584368767,
+      "p_value": 0.00829327391588205,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "q_value": 0.023497609428332473,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 51,
+        "independence_groups": 5,
+        "coefficient": 0.1288766701287069
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "lower": 0.0,
+          "upper": 8.0
+        }
+      ],
+      "effect": 1.7593137254903013,
+      "p_value": 0.986057916543675,
+      "discovery_sample_size": 18,
+      "discovery_independence_groups": 3,
+      "q_value": 0.9860579165436749,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "lower": 8.0,
+          "upper": 113.0
+        }
+      ],
+      "effect": -103.51140056022405,
+      "p_value": 0.018238074583819347,
+      "discovery_sample_size": 21,
+      "discovery_independence_groups": 4,
+      "q_value": 0.03875590849061611,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 25,
+        "independence_groups": 4,
+        "mean_return": 109.498,
+        "median_return": 28.63,
+        "effect_vs_all": -122.18435294117641,
+        "top_3_effect_share": 0.16819254499645966,
+        "bootstrap_median_ci": {
+          "n": 25,
+          "low": 15.53,
+          "high": 125.36
+        }
+      },
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 3,
+        "mean_return": 22.626315789473683,
+        "median_return": 0.6950000000000001,
+        "effect_vs_all": -4.76250773993808,
+        "top_3_effect_share": 0.2903238569470982,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -6.1850000000000005,
+          "high": 8.865375
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "lower": 113.0,
+          "upper": 692.0
+        }
+      ],
+      "effect": -47.776519607843085,
+      "p_value": 0.4655010896719829,
+      "discovery_sample_size": 24,
+      "discovery_independence_groups": 2,
+      "q_value": 0.5652513231731221,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "lower": 692.0,
+          "upper": 726.0
+        }
+      ],
+      "effect": 149.48673796791445,
+      "p_value": 0.003108412627084206,
+      "discovery_sample_size": 22,
+      "discovery_independence_groups": 1,
+      "q_value": 0.017614338220143834,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 22,
+        "independence_groups": 1,
+        "mean_return": 381.16909090909087,
+        "median_return": 456.78999999999996,
+        "effect_vs_all": 149.48673796791445,
+        "top_3_effect_share": 0.2045616754663791,
+        "bootstrap_median_ci": {
+          "n": 22,
+          "low": 359.95,
+          "high": 558.82
+        }
+      },
+      "validation": {
+        "sample_size": 1,
+        "independence_groups": 1,
+        "mean_return": 167.41,
+        "median_return": 167.41,
+        "effect_vs_all": 140.02117647058824,
+        "top_3_effect_share": 1.0,
+        "bootstrap_median_ci": {
+          "n": 1,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "prior_wallet_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.1973941054936475,
+      "mutual_information": 0.1973941054936475,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "validation": {
+        "sample_size": 51,
+        "independence_groups": 5,
+        "mean_return": 27.388823529411763,
+        "median_return": 6.12,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.20575032108843166,
+        "bootstrap_median_ci": {
+          "n": 51,
+          "low": -5.05,
+          "high": 14.52
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "prior_token_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.19480540334663585,
+      "p_value": 0.0703847152428813,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "q_value": 0.10877637810263474,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "prior_token_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.31493396116278094,
+      "p_value": 0.0025026955349635263,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "q_value": 0.017614338220143834,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 51,
+        "independence_groups": 5,
+        "coefficient": -0.22491530538363
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_token_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "lower": 0.0,
+          "upper": 8.0
+        }
+      ],
+      "effect": 75.72526610644263,
+      "p_value": 0.046488816274243276,
+      "discovery_sample_size": 42,
+      "discovery_independence_groups": 5,
+      "q_value": 0.07903098766621357,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_token_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "lower": 8.0,
+          "upper": 19.0
+        }
+      ],
+      "effect": -12.362977941176439,
+      "p_value": 0.914848172818194,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 5,
+      "q_value": 0.9819886153313148,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_token_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "lower": 19.0,
+          "upper": 284.0
+        }
+      ],
+      "effect": -110.46864923747272,
+      "p_value": 0.00783916861155571,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 4,
+      "q_value": 0.023497609428332473,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 27,
+        "independence_groups": 4,
+        "mean_return": 121.2137037037037,
+        "median_return": 21.15,
+        "effect_vs_all": -110.46864923747272,
+        "top_3_effect_share": 0.16169135689698952,
+        "bootstrap_median_ci": {
+          "n": 27,
+          "low": 11.67,
+          "high": 145.13
+        }
+      },
+      "validation": {
+        "sample_size": 30,
+        "independence_groups": 5,
+        "mean_return": 10.195,
+        "median_return": 6.5600000000000005,
+        "effect_vs_all": -17.193823529411763,
+        "top_3_effect_share": 0.26019658046204086,
+        "bootstrap_median_ci": {
+          "n": 30,
+          "low": -7.340374999999999,
+          "high": 14.52
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "prior_token_trade_count",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.0951980400485211,
+      "mutual_information": 0.0951980400485211,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "validation": {
+        "sample_size": 51,
+        "independence_groups": 5,
+        "mean_return": 27.388823529411763,
+        "median_return": 6.12,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.20575032108843166,
+        "bootstrap_median_ci": {
+          "n": 51,
+          "low": -5.05,
+          "high": 14.52
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.1901676468786861,
+      "p_value": 0.0776120385135504,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "q_value": 0.10995038789419641,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.2616233488733431,
+      "p_value": 0.013529625633512614,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "q_value": 0.03285766225281635,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 51,
+        "independence_groups": 5,
+        "coefficient": 0.10789274366970374
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "lower": 0.0,
+          "upper": 851.4225332466
+        }
+      ],
+      "effect": 7.958123249299774,
+      "p_value": 0.924224579135355,
+      "discovery_sample_size": 21,
+      "discovery_independence_groups": 3,
+      "q_value": 0.9819886153313148,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "lower": 851.4225332466,
+          "upper": 27370.215435055172
+        }
+      ],
+      "effect": -128.28846405228754,
+      "p_value": 0.004854649517614729,
+      "discovery_sample_size": 18,
+      "discovery_independence_groups": 3,
+      "q_value": 0.020632260449862598,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 22,
+        "independence_groups": 3,
+        "mean_return": 86.67954545454545,
+        "median_return": 19.205,
+        "effect_vs_all": -145.00280748663096,
+        "top_3_effect_share": 0.1830123245276702,
+        "bootstrap_median_ci": {
+          "n": 22,
+          "low": 11.67,
+          "high": 115.24
+        }
+      },
+      "validation": {
+        "sample_size": 34,
+        "independence_groups": 3,
+        "mean_return": 8.258529411764707,
+        "median_return": -2.15,
+        "effect_vs_all": -19.130294117647054,
+        "top_3_effect_share": 0.30461239785052807,
+        "bootstrap_median_ci": {
+          "n": 34,
+          "low": -8.462874999999999,
+          "high": 5.218374999999992
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "lower": 27370.215435055172,
+          "upper": 60348.59392775192
+        }
+      ],
+      "effect": -47.776519607843085,
+      "p_value": 0.4655010896719829,
+      "discovery_sample_size": 24,
+      "discovery_independence_groups": 2,
+      "q_value": 0.5652513231731221,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "lower": 60348.59392775192,
+          "upper": 61913.23546824116
+        }
+      ],
+      "effect": 149.48673796791445,
+      "p_value": 0.003108412627084206,
+      "discovery_sample_size": 22,
+      "discovery_independence_groups": 1,
+      "q_value": 0.017614338220143834,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 22,
+        "independence_groups": 1,
+        "mean_return": 381.16909090909087,
+        "median_return": 456.78999999999996,
+        "effect_vs_all": 149.48673796791445,
+        "top_3_effect_share": 0.2045616754663791,
+        "bootstrap_median_ci": {
+          "n": 22,
+          "low": 359.95,
+          "high": 558.82
+        }
+      },
+      "validation": {
+        "sample_size": 1,
+        "independence_groups": 1,
+        "mean_return": 167.41,
+        "median_return": 167.41,
+        "effect_vs_all": 140.02117647058824,
+        "top_3_effect_share": 1.0,
+        "bootstrap_median_ci": {
+          "n": 1,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "prior_wallet_buy_volume_usd",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.18142733019695265,
+      "mutual_information": 0.18142733019695265,
+      "discovery_sample_size": 85,
+      "discovery_independence_groups": 5,
+      "validation": {
+        "sample_size": 51,
+        "independence_groups": 5,
+        "mean_return": 27.388823529411763,
+        "median_return": 6.12,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.20575032108843166,
+        "bootstrap_median_ci": {
+          "n": 51,
+          "low": -5.05,
+          "high": 14.52
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "prior_token_trade_count",
+          "operator": ">=",
+          "value": 8.0
+        }
+      ],
+      "feature": "prior_token_trade_count",
+      "importance": 0.39720813249257425,
+      "discovery_sample_size": 43,
+      "discovery_independence_groups": 5,
+      "effect": -73.96421340629269,
+      "validation": {
+        "sample_size": 35,
+        "independence_groups": 5,
+        "mean_return": 23.902857142857147,
+        "median_return": 7.0,
+        "effect_vs_all": -3.4859663865546153,
+        "top_3_effect_share": 0.29847840996321656,
+        "bootstrap_median_ci": {
+          "n": 35,
+          "low": -5.49,
+          "high": 14.52
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "prior_wallet_trade_count",
+          "operator": ">=",
+          "value": 113.0
+        }
+      ],
+      "feature": "prior_wallet_trade_count",
+      "importance": 0.30139593375371293,
+      "discovery_sample_size": 46,
+      "discovery_independence_groups": 2,
+      "effect": 46.566777493606196,
+      "validation": {
+        "sample_size": 13,
+        "independence_groups": 2,
+        "mean_return": 41.309999999999995,
+        "median_return": 52.56,
+        "effect_vs_all": 13.921176470588232,
+        "top_3_effect_share": 0.45350045623079793,
+        "bootstrap_median_ci": {
+          "n": 13,
+          "low": 13.59,
+          "high": 88.89
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "prior_wallet_buy_volume_usd",
+          "operator": ">=",
+          "value": 27370.215435055172
+        }
+      ],
+      "feature": "prior_wallet_buy_volume_usd",
+      "importance": 0.30139593375371293,
+      "discovery_sample_size": 46,
+      "discovery_independence_groups": 2,
+      "effect": 46.566777493606196,
+      "validation": {
+        "sample_size": 13,
+        "independence_groups": 2,
+        "mean_return": 41.309999999999995,
+        "median_return": 52.56,
+        "effect_vs_all": 13.921176470588232,
+        "top_3_effect_share": 0.45350045623079793,
+        "bootstrap_median_ci": {
+          "n": 13,
+          "low": 13.59,
+          "high": 88.89
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    }
+  ],
+  "status_counts": {
+    "discovered candidate": 0,
+    "validation survivor": 9,
+    "rejected": 12,
+    "insufficient data": 2
+  },
+  "language": "ML and statistical findings are discovery evidence, not profitability claims; validation survivors require independent backtesting."
+}

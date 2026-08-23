@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { defaultDatabasePath } from '../db/client.js';
+import { defaultDatabasePath } from '../platform/db/client.js';
 
 const iconDirectory = path.join(path.dirname(defaultDatabasePath), 'wallet-icons');
 

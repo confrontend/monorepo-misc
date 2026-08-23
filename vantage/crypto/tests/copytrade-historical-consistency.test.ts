@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { computeHistoricalConsistency, type HistoricalConsistencyTrade } from '../src/copytrade/historicalConsistency.js';
+import { computeHistoricalConsistency, type HistoricalConsistencyTrade } from '../src/copytrade/scrutiny/historicalConsistency.js';
 
 const NOW = new Date('2026-08-15T00:00:00.000Z');
 const DAY = 86_400;

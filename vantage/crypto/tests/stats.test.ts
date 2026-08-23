@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { readDatabaseStats } from '../src/db/stats.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { readDatabaseStats } from '../src/platform/db/stats.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
 
 test('database statistics include counts, timestamp ranges, and signal type groups', () => {
   const database = openDatabase(':memory:');

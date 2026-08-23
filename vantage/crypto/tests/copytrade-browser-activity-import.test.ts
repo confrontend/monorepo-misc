@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
 import { importBrowserWalletActivity } from '../src/copytrade/browserActivityImport.js';
 
 const setup = (): DatabaseSync => {

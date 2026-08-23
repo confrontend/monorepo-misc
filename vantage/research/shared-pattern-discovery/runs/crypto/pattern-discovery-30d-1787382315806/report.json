@@ -1,0 +1,2508 @@
+{
+  "report_version": "shared-discovery-v1",
+  "project": "crypto",
+  "run_id": "f6c5ef76f791c135",
+  "dependencies": {
+    "numpy": true,
+    "scipy": false,
+    "statsmodels": false,
+    "sklearn": false
+  },
+  "isolation": {
+    "project": "crypto",
+    "input_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787382315806\\normalized-export.json",
+    "output_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787382315806\\report.json",
+    "cache_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787382315806\\.cache\\crypto\\f6c5ef76f791c135",
+    "model_path": "C:\\Code\\monorepo-misc\\vantage\\research\\shared-pattern-discovery\\runs\\crypto\\pattern-discovery-30d-1787382315806\\.models\\crypto\\f6c5ef76f791c135",
+    "shared_database_opened": false,
+    "cross_project_state": false,
+    "model_reuse": false
+  },
+  "input_contract": {
+    "schema_version": "normalized-v1",
+    "feature_allowlist_version": "gmgn-copy-outcome-v1",
+    "allow_list": [
+      {
+        "name": "wallet_address",
+        "justification": "Wallet identity is the predeclared CopyTrade independence group, not a return-based selection feature."
+      },
+      {
+        "name": "token_symbol",
+        "justification": "Token label is copied from the normalized GMGN round-trip record."
+      },
+      {
+        "name": "hold_seconds",
+        "justification": "Round-trip holding duration is known at the copy event and is not derived from returns."
+      },
+      {
+        "name": "wallet_return_percent",
+        "justification": "Original wallet return is retained as a benchmark beside the delayed-copy outcome."
+      },
+      {
+        "name": "entry_trade_amount_usd",
+        "justification": "Timestamped matched entry size is a source-observed activity/liquidity proxy."
+      },
+      {
+        "name": "exit_trade_amount_usd",
+        "justification": "Timestamped matched exit size is a source-observed activity/liquidity proxy."
+      },
+      {
+        "name": "edge_kept_percent",
+        "justification": "Stored comparison of delayed-copy and wallet return for the same simulated round trip."
+      },
+      {
+        "name": "entry_gap_seconds",
+        "justification": "Observed match gap after the configured copy delay."
+      },
+      {
+        "name": "exit_gap_seconds",
+        "justification": "Observed match gap after the configured copy delay."
+      },
+      {
+        "name": "gas_fee_usd",
+        "justification": "Stored simulated gas cost for the copied round trip."
+      },
+      {
+        "name": "outcome_at",
+        "justification": "Round-trip exit time is the observed maturity boundary for the copy outcome."
+      },
+      {
+        "name": "coverage_rate_percent",
+        "justification": "Explicit 100% outcome-coverage gate carried from the project adapter."
+      },
+      {
+        "name": "coverage_status",
+        "justification": "Explicit copy-simulation coverage status carried from the project adapter."
+      },
+      {
+        "name": "signal_type",
+        "justification": "Source-normalized signal type is stored at capture."
+      },
+      {
+        "name": "observed_at",
+        "justification": "Verified source timestamp is the event-time anchor."
+      },
+      {
+        "name": "trigger_at",
+        "justification": "Verified source trigger timestamp is the event-time anchor."
+      },
+      {
+        "name": "token_address",
+        "justification": "Token identity is part of the captured source record."
+      },
+      {
+        "name": "chain",
+        "justification": "Chain identity is part of the captured source record."
+      },
+      {
+        "name": "market_cap",
+        "justification": "Allow only when source-provided at the trigger."
+      },
+      {
+        "name": "trigger_mc",
+        "justification": "Allow only when source-provided at the trigger."
+      },
+      {
+        "name": "first_trigger_mc",
+        "justification": "Allow only when source-provided at the first trigger."
+      },
+      {
+        "name": "ingestion_latency_ms",
+        "justification": "Capture-time diagnostic, not a market condition."
+      }
+    ],
+    "examined_fields": [
+      "coverage_rate_percent",
+      "coverage_status",
+      "edge_kept_percent",
+      "entry_gap_seconds",
+      "entry_trade_amount_usd",
+      "exit_gap_seconds",
+      "exit_trade_amount_usd",
+      "gas_fee_usd",
+      "hold_seconds",
+      "outcome_at",
+      "token_address",
+      "token_symbol",
+      "wallet_address",
+      "wallet_return_percent"
+    ],
+    "rejected_fields": [],
+    "reject_by_default": [
+      "captured_at",
+      "query_market_cap",
+      "query_ath",
+      "query_cur_data",
+      "current_wallet_statistics",
+      "post_event_rank",
+      "later_roster_membership",
+      "dune_outcome",
+      "avg_holding_period"
+    ],
+    "outcome": "net_return_after_costs"
+  },
+  "dataset_summary": {
+    "rows": 126,
+    "eligible_outcome_rows": 126,
+    "mature_rows": 126,
+    "usable_rows": 126,
+    "outcome_coverage": 1.0,
+    "independence_groups": 4,
+    "time_start": "2026-07-15T06:49:22.000Z",
+    "time_end": "2026-08-19T23:37:04.000Z"
+  },
+  "missingness_checks": [
+    {
+      "feature": "hold_seconds",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 79246.43548387097,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "wallet_return_percent",
+      "with_outcome_n": 57,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 162.2719298245614,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "entry_trade_amount_usd",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 28.784715788509615,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "exit_trade_amount_usd",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 100.77442187868915,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "edge_kept_percent",
+      "with_outcome_n": 54,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 69.44814814814816,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "entry_gap_seconds",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 5.387096774193548,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "exit_gap_seconds",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 6.451612903225806,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "gas_fee_usd",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 0.9729032258064516,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    },
+    {
+      "feature": "coverage_rate_percent",
+      "with_outcome_n": 62,
+      "without_outcome_n": 0,
+      "with_outcome_mean": 100.0,
+      "without_outcome_mean": null,
+      "mean_difference": null,
+      "standardized_difference": null,
+      "flagged_material_difference": false
+    }
+  ],
+  "feature_summaries": [
+    {
+      "feature": "wallet_address",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt",
+          18
+        ],
+        [
+          "9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ",
+          17
+        ],
+        [
+          "Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd",
+          17
+        ],
+        [
+          "FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP",
+          10
+        ]
+      ]
+    },
+    {
+      "feature": "token_symbol",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "CATE",
+          14
+        ],
+        [
+          "旺旺",
+          8
+        ],
+        [
+          "TRUMP2028",
+          4
+        ],
+        [
+          "ChooChoo",
+          3
+        ],
+        [
+          "neet",
+          3
+        ],
+        [
+          "Bernhard",
+          2
+        ],
+        [
+          "CTO",
+          2
+        ],
+        [
+          "Cybercat",
+          2
+        ],
+        [
+          "EVE",
+          2
+        ],
+        [
+          "FRANK",
+          2
+        ],
+        [
+          "Fraggle",
+          2
+        ],
+        [
+          "Fraudci",
+          2
+        ],
+        [
+          "HALO",
+          2
+        ],
+        [
+          "LUNA",
+          2
+        ],
+        [
+          "MARS",
+          2
+        ],
+        [
+          "RIKA",
+          2
+        ],
+        [
+          "hwg",
+          2
+        ],
+        [
+          "puffercat",
+          2
+        ],
+        [
+          "CigCat",
+          1
+        ],
+        [
+          "HUH",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "hold_seconds",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 79246.43548387097,
+        "median": 851.0,
+        "std": 277418.70488561835
+      },
+      "quantiles": {
+        "0.05": 65.55000000000001,
+        "0.25": 129.25,
+        "0.5": 851.0,
+        "0.75": 6788.25,
+        "0.95": 690531.4999999986
+      }
+    },
+    {
+      "feature": "wallet_return_percent",
+      "rows": 62,
+      "present": 57,
+      "missing": 5,
+      "missing_fraction": 0.08064516129032258,
+      "kind": "numeric",
+      "summary": {
+        "n": 57,
+        "mean": 162.2719298245614,
+        "median": 49.87,
+        "std": 321.26028586334
+      },
+      "quantiles": {
+        "0.05": 2.5700000000000016,
+        "0.25": 24.18,
+        "0.5": 49.87,
+        "0.75": 178.51,
+        "0.95": 489.48399999999947
+      }
+    },
+    {
+      "feature": "entry_trade_amount_usd",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 28.784715788509615,
+        "median": 11.04265249868,
+        "std": 43.54419310310349
+      },
+      "quantiles": {
+        "0.05": 0.11597155886,
+        "0.25": 4.8595025343,
+        "0.5": 11.04265249868,
+        "0.75": 32.783418245025,
+        "0.95": 92.84871403583347
+      }
+    },
+    {
+      "feature": "exit_trade_amount_usd",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 100.77442187868915,
+        "median": 34.1320106283,
+        "std": 160.68854380788233
+      },
+      "quantiles": {
+        "0.05": 1.175015746257,
+        "0.25": 7.9266515898,
+        "0.5": 34.1320106283,
+        "0.75": 97.09258755583,
+        "0.95": 451.8916016120178
+      }
+    },
+    {
+      "feature": "edge_kept_percent",
+      "rows": 62,
+      "present": 54,
+      "missing": 8,
+      "missing_fraction": 0.12903225806451613,
+      "kind": "numeric",
+      "summary": {
+        "n": 54,
+        "mean": 69.44814814814816,
+        "median": 55.099999999999994,
+        "std": 72.05504117527164
+      },
+      "quantiles": {
+        "0.05": -22.389999999999997,
+        "0.25": 29.425,
+        "0.5": 55.099999999999994,
+        "0.75": 100.975,
+        "0.95": 218.5899999999999
+      }
+    },
+    {
+      "feature": "entry_gap_seconds",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 5.387096774193548,
+        "median": 1.0,
+        "std": 12.148473342270552
+      },
+      "quantiles": {
+        "0.05": 0.0,
+        "0.25": 0.0,
+        "0.5": 1.0,
+        "0.75": 4.0,
+        "0.95": 28.0
+      }
+    },
+    {
+      "feature": "exit_gap_seconds",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 6.451612903225806,
+        "median": 0.0,
+        "std": 17.408945711860877
+      },
+      "quantiles": {
+        "0.05": 0.0,
+        "0.25": 0.0,
+        "0.5": 0.0,
+        "0.75": 2.75,
+        "0.95": 30.849999999999987
+      }
+    },
+    {
+      "feature": "gas_fee_usd",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 0.9729032258064516,
+        "median": 0.52,
+        "std": 1.0697408711762086
+      },
+      "quantiles": {
+        "0.05": 0.04,
+        "0.25": 0.11,
+        "0.5": 0.52,
+        "0.75": 1.9525000000000001,
+        "0.95": 2.9595
+      }
+    },
+    {
+      "feature": "outcome_at",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "2026-07-23T11:00:24.000Z",
+          1
+        ],
+        [
+          "2026-07-23T12:56:10.000Z",
+          1
+        ],
+        [
+          "2026-07-23T13:02:20.000Z",
+          1
+        ],
+        [
+          "2026-07-23T14:19:07.000Z",
+          1
+        ],
+        [
+          "2026-07-23T16:13:18.000Z",
+          1
+        ],
+        [
+          "2026-07-24T03:32:55.000Z",
+          1
+        ],
+        [
+          "2026-07-24T03:32:58.000Z",
+          1
+        ],
+        [
+          "2026-07-24T04:13:57.000Z",
+          1
+        ],
+        [
+          "2026-07-24T09:09:44.000Z",
+          1
+        ],
+        [
+          "2026-07-25T02:48:17.000Z",
+          1
+        ],
+        [
+          "2026-07-25T02:48:19.000Z",
+          1
+        ],
+        [
+          "2026-07-25T02:48:33.000Z",
+          1
+        ],
+        [
+          "2026-07-25T02:49:20.000Z",
+          1
+        ],
+        [
+          "2026-07-26T00:32:03.000Z",
+          1
+        ],
+        [
+          "2026-07-28T12:40:11.000Z",
+          1
+        ],
+        [
+          "2026-07-28T12:44:15.000Z",
+          1
+        ],
+        [
+          "2026-07-28T19:02:59.000Z",
+          1
+        ],
+        [
+          "2026-07-28T19:04:03.000Z",
+          1
+        ],
+        [
+          "2026-07-28T19:44:42.000Z",
+          1
+        ],
+        [
+          "2026-07-28T21:48:30.000Z",
+          1
+        ]
+      ]
+    },
+    {
+      "feature": "coverage_rate_percent",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "numeric",
+      "summary": {
+        "n": 62,
+        "mean": 100.0,
+        "median": 100.0,
+        "std": 0.0
+      },
+      "quantiles": {
+        "0.05": 100.0,
+        "0.25": 100.0,
+        "0.5": 100.0,
+        "0.75": 100.0,
+        "0.95": 100.0
+      }
+    },
+    {
+      "feature": "coverage_status",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "fully_covered",
+          62
+        ]
+      ]
+    },
+    {
+      "feature": "signal_type",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "gmgn_copy_round_trip",
+          62
+        ]
+      ]
+    },
+    {
+      "feature": "token_address",
+      "rows": 62,
+      "present": 62,
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "kind": "categorical",
+      "top_values": [
+        [
+          "6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+          14
+        ],
+        [
+          "7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+          8
+        ],
+        [
+          "2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+          4
+        ],
+        [
+          "Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+          3
+        ],
+        [
+          "GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+          3
+        ],
+        [
+          "3DrBHMJ1rnWp7mMRNmNbWbp4zNiHkM483GqXSzRPpump",
+          2
+        ],
+        [
+          "3aqXuwp6HuVXs9vdD9Gpg4dzJaUx443RjK7GXzphpump",
+          2
+        ],
+        [
+          "51RW9qvZHRqmDna9gmxEsrmwhZESRJKUo85UvBgcpump",
+          2
+        ],
+        [
+          "79xAcXoajNSuhGsFHZB93sMBALtoPF2xqeSaHHPVpump",
+          2
+        ],
+        [
+          "7cok2xaMZTzbae7ETiFC3n9GeFT1kCPeNnwLxsRRpump",
+          2
+        ],
+        [
+          "A6mrpBeeNKm743fiNg8Mrz7pj7uGML5rgDjWo4nrpump",
+          2
+        ],
+        [
+          "Agmu8Xgn7rU4zFv4DMPrEBhYDdPsmiEG5hCiYyvSpump",
+          2
+        ],
+        [
+          "BQYc6c5hivsPrEEmTxBVjGT16setk2gmPvbv7YBxpump",
+          2
+        ],
+        [
+          "BmH3twUxDs5mHzBd8yi7KashW7B6n34HRtb4sdHNwHcM",
+          2
+        ],
+        [
+          "EUGsb7SNoJ3CPoW1Hr7e2A3nGmMtBGGxge56uBR8pump",
+          2
+        ],
+        [
+          "EqCEZ759TfwgN7CN57aUsBEy3rZRFs3sz5c6pP91pump",
+          2
+        ],
+        [
+          "H78WENHosTWPFuQvtm8swi83ipTqANJi921iG51Apump",
+          2
+        ],
+        [
+          "szVXzMs29NDFhkqY86zsmLKhCKXmtzGAX6TZqjEpump",
+          2
+        ],
+        [
+          "4MbUUGzydudW21ZPvjuj8STMCkvMb48Vxxx1hTgXpump",
+          1
+        ],
+        [
+          "4b7sMi7CheXMr7k5HbbzrJgxVn7icpxVupK3jhuCpump",
+          1
+        ]
+      ]
+    }
+  ],
+  "split": {
+    "method": "chronological",
+    "discovery_uses_event_ids": [
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:0:2026-07-15T06:49:22.000Z:2026-07-23T11:00:24.000Z:Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:1:2026-07-15T06:49:22.000Z:2026-07-23T12:56:10.000Z:Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:2:2026-07-15T06:49:22.000Z:2026-07-23T13:02:20.000Z:Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:3:2026-07-23T13:02:28.000Z:2026-07-23T14:19:07.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:4:2026-07-23T16:01:19.000Z:2026-07-23T16:13:18.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:5:2026-07-24T02:10:39.000Z:2026-07-24T03:32:55.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:6:2026-07-24T02:10:39.000Z:2026-07-24T03:32:58.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:7:2026-07-24T02:10:39.000Z:2026-07-24T04:13:57.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:13:2026-07-24T02:10:39.000Z:2026-07-26T00:32:03.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:8:2026-07-24T09:08:09.000Z:2026-07-24T09:09:44.000Z:4MbUUGzydudW21ZPvjuj8STMCkvMb48Vxxx1hTgXpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:9:2026-07-25T02:47:33.000Z:2026-07-25T02:48:17.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:10:2026-07-25T02:47:33.000Z:2026-07-25T02:48:19.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:11:2026-07-25T02:47:33.000Z:2026-07-25T02:48:33.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:12:2026-07-25T02:47:33.000Z:2026-07-25T02:49:20.000Z:2d2GZdehy2YGrj1MJ3y3yhXjficMa2J3GtncxkTQpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:14:2026-07-27T13:53:53.000Z:2026-07-28T12:40:11.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:15:2026-07-28T12:40:28.000Z:2026-07-28T12:44:15.000Z:CEJHtZ38DWcKsbtsF2FmGPJ3GnmyeGLRMnSqm1Ygpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:16:2026-07-28T12:44:22.000Z:2026-08-02T01:31:54.000Z:7z5KZpYj7BEnGKGCY3kDkaX32ueBSNp8QjvFq8Lxpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:2:2026-07-28T16:32:35.000Z:2026-07-28T19:44:42.000Z:3aqXuwp6HuVXs9vdD9Gpg4dzJaUx443RjK7GXzphpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:5:2026-07-28T16:32:35.000Z:2026-07-29T14:39:43.000Z:3aqXuwp6HuVXs9vdD9Gpg4dzJaUx443RjK7GXzphpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:0:2026-07-28T16:34:53.000Z:2026-07-28T19:02:59.000Z:BQYc6c5hivsPrEEmTxBVjGT16setk2gmPvbv7YBxpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:1:2026-07-28T16:34:53.000Z:2026-07-28T19:04:03.000Z:BQYc6c5hivsPrEEmTxBVjGT16setk2gmPvbv7YBxpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:0:2026-07-28T21:47:26.000Z:2026-07-28T21:48:30.000Z:CNsaVjYMpAZgmYfasDgYdyLMjspXGqBT3aasQYmTpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:2:2026-07-28T23:48:01.000Z:2026-07-29T00:02:12.000Z:4b7sMi7CheXMr7k5HbbzrJgxVn7icpxVupK3jhuCpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:1:2026-07-28T23:48:49.000Z:2026-07-28T23:58:05.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:3:2026-07-29T00:00:59.000Z:2026-07-29T00:10:44.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:4:2026-07-29T00:00:59.000Z:2026-07-29T00:14:41.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:5:2026-07-29T00:00:59.000Z:2026-07-29T00:20:08.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:6:2026-07-29T00:00:59.000Z:2026-07-29T00:45:32.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:7:2026-07-29T00:00:59.000Z:2026-07-29T01:01:04.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:8:2026-07-29T02:14:52.000Z:2026-07-29T02:52:15.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:9:2026-07-29T02:14:52.000Z:2026-07-29T02:59:39.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:0:2026-07-29T02:42:49.000Z:2026-07-29T02:44:30.000Z:51RW9qvZHRqmDna9gmxEsrmwhZESRJKUo85UvBgcpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:1:2026-07-29T02:42:49.000Z:2026-07-29T02:45:00.000Z:51RW9qvZHRqmDna9gmxEsrmwhZESRJKUo85UvBgcpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:2:2026-07-29T10:58:31.000Z:2026-07-29T11:00:11.000Z:79xAcXoajNSuhGsFHZB93sMBALtoPF2xqeSaHHPVpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:3:2026-07-29T10:58:31.000Z:2026-07-29T11:00:41.000Z:79xAcXoajNSuhGsFHZB93sMBALtoPF2xqeSaHHPVpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:3:2026-07-29T11:37:47.000Z:2026-07-29T11:49:08.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:4:2026-07-29T11:37:47.000Z:2026-07-29T11:54:42.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:6:2026-07-29T11:37:47.000Z:2026-07-29T23:25:56.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:7:2026-07-29T11:37:47.000Z:2026-07-29T23:29:52.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:8:2026-07-29T11:37:47.000Z:2026-07-29T23:56:17.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:16:2026-07-29T11:37:47.000Z:2026-08-19T17:19:26.000Z:6YCYaiuXQubALutWr1eJB8HZ9i72hpTKgAvjR6qzpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:4:2026-07-29T15:54:13.000Z:2026-07-29T15:55:53.000Z:A6mrpBeeNKm743fiNg8Mrz7pj7uGML5rgDjWo4nrpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:5:2026-07-29T15:54:13.000Z:2026-07-29T15:56:23.000Z:A6mrpBeeNKm743fiNg8Mrz7pj7uGML5rgDjWo4nrpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:6:2026-07-29T20:47:34.000Z:2026-07-29T20:49:14.000Z:3DrBHMJ1rnWp7mMRNmNbWbp4zNiHkM483GqXSzRPpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:7:2026-07-29T20:47:34.000Z:2026-07-29T20:49:44.000Z:3DrBHMJ1rnWp7mMRNmNbWbp4zNiHkM483GqXSzRPpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:10:2026-07-29T22:53:50.000Z:2026-07-29T23:08:01.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:11:2026-07-29T22:53:50.000Z:2026-07-29T23:35:57.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:12:2026-07-29T22:53:50.000Z:2026-07-30T00:01:37.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:8:2026-07-30T01:38:46.000Z:2026-07-30T01:40:26.000Z:EqCEZ759TfwgN7CN57aUsBEy3rZRFs3sz5c6pP91pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:9:2026-07-30T01:38:46.000Z:2026-07-30T01:40:57.000Z:EqCEZ759TfwgN7CN57aUsBEy3rZRFs3sz5c6pP91pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:10:2026-07-30T11:02:29.000Z:2026-07-30T11:04:09.000Z:H78WENHosTWPFuQvtm8swi83ipTqANJi921iG51Apump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:11:2026-07-30T11:02:29.000Z:2026-07-30T11:04:39.000Z:H78WENHosTWPFuQvtm8swi83ipTqANJi921iG51Apump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:12:2026-07-30T16:38:31.000Z:2026-07-30T16:40:11.000Z:EUGsb7SNoJ3CPoW1Hr7e2A3nGmMtBGGxge56uBR8pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:13:2026-07-30T16:38:31.000Z:2026-07-30T16:40:41.000Z:EUGsb7SNoJ3CPoW1Hr7e2A3nGmMtBGGxge56uBR8pump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:13:2026-07-30T18:10:22.000Z:2026-07-30T19:57:19.000Z:BmH3twUxDs5mHzBd8yi7KashW7B6n34HRtb4sdHNwHcM",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:14:2026-07-30T18:10:22.000Z:2026-07-30T20:05:34.000Z:BmH3twUxDs5mHzBd8yi7KashW7B6n34HRtb4sdHNwHcM",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:14:2026-07-30T20:40:45.000Z:2026-07-30T20:42:25.000Z:Agmu8Xgn7rU4zFv4DMPrEBhYDdPsmiEG5hCiYyvSpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:15:2026-07-30T20:40:45.000Z:2026-07-30T20:42:56.000Z:Agmu8Xgn7rU4zFv4DMPrEBhYDdPsmiEG5hCiYyvSpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:16:2026-07-31T09:46:27.000Z:2026-07-31T09:48:07.000Z:7cok2xaMZTzbae7ETiFC3n9GeFT1kCPeNnwLxsRRpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:17:2026-07-31T09:46:27.000Z:2026-07-31T09:48:36.000Z:7cok2xaMZTzbae7ETiFC3n9GeFT1kCPeNnwLxsRRpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:15:2026-07-31T11:39:45.000Z:2026-07-31T12:04:05.000Z:szVXzMs29NDFhkqY86zsmLKhCKXmtzGAX6TZqjEpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:16:2026-07-31T11:39:45.000Z:2026-07-31T12:11:20.000Z:szVXzMs29NDFhkqY86zsmLKhCKXmtzGAX6TZqjEpump"
+    ],
+    "validation_uses_event_ids": [
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:18:2026-07-31T17:48:48.000Z:2026-07-31T17:50:28.000Z:CdEiTZdJx8WAsRQSHmQ1T3mnAWkBBaL9JwxvvjJRpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:19:2026-07-31T17:48:48.000Z:2026-07-31T17:50:58.000Z:CdEiTZdJx8WAsRQSHmQ1T3mnAWkBBaL9JwxvvjJRpump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:9:2026-07-31T19:21:30.000Z:2026-07-31T20:26:22.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:10:2026-07-31T19:21:30.000Z:2026-07-31T20:31:57.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:11:2026-07-31T19:21:30.000Z:2026-07-31T20:38:03.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:12:2026-07-31T19:21:30.000Z:2026-07-31T20:53:01.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:13:2026-07-31T19:21:30.000Z:2026-07-31T20:53:50.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:14:2026-07-31T19:21:30.000Z:2026-07-31T21:04:46.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:20:2026-07-31T21:50:36.000Z:2026-07-31T21:52:16.000Z:2NSHQefnzYtgNayCbbSPKSJgypi7dUf4QD4MhyvYUvxD",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:21:2026-07-31T21:50:36.000Z:2026-07-31T21:52:46.000Z:2NSHQefnzYtgNayCbbSPKSJgypi7dUf4QD4MhyvYUvxD",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:17:2026-08-01T02:19:16.000Z:2026-08-01T02:26:02.000Z:Bc57iLh72YxznGU5EJa2xTEhPwdpUNBEuErV8AGgpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:22:2026-08-01T05:52:43.000Z:2026-08-01T05:54:23.000Z:CsmPN87BHt79sLnvr9TGrqjiceSzVvGh1UZMnfaapump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:23:2026-08-01T05:52:43.000Z:2026-08-01T05:54:53.000Z:CsmPN87BHt79sLnvr9TGrqjiceSzVvGh1UZMnfaapump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:24:2026-08-01T12:32:02.000Z:2026-08-01T12:33:42.000Z:GAa2Yot5syUt3cthf9xHpoBfRJSFJbC7pBwY4noKpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:25:2026-08-01T12:32:02.000Z:2026-08-01T12:34:12.000Z:GAa2Yot5syUt3cthf9xHpoBfRJSFJbC7pBwY4noKpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:18:2026-08-01T13:23:29.000Z:2026-08-01T13:31:27.000Z:CeyZtFUiYP5oxCZ99urwHMvdCW67cY2yALknfrQppump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:19:2026-08-01T13:23:29.000Z:2026-08-01T13:31:29.000Z:CeyZtFUiYP5oxCZ99urwHMvdCW67cY2yALknfrQppump",
+      "gmgn-copy-round-trip:FxdjThiqoX1GnN8n6ApMbWEpqYLaYb3DdqfPiqXgNcfP:15:2026-08-01T15:23:47.000Z:2026-08-01T16:35:40.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:26:2026-08-01T16:34:07.000Z:2026-08-01T16:35:47.000Z:8Jqs2Le4HsNUxfEWy44vQaDWrR3gqR3cvSJigDMcpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:27:2026-08-01T16:34:07.000Z:2026-08-01T16:36:17.000Z:8Jqs2Le4HsNUxfEWy44vQaDWrR3gqR3cvSJigDMcpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:22:2026-08-01T20:16:15.000Z:2026-08-01T21:08:37.000Z:GB68eELgf864nrQHjNvrXHF6Xywpp1kYsb7fsGBupump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:28:2026-08-01T20:36:11.000Z:2026-08-01T20:37:51.000Z:8wtdds5LPt7nu4jKifGpcxysF5AvJ1xCVti2rQ6Ppump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:29:2026-08-01T20:36:11.000Z:2026-08-01T20:38:21.000Z:8wtdds5LPt7nu4jKifGpcxysF5AvJ1xCVti2rQ6Ppump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:20:2026-08-01T20:39:32.000Z:2026-08-01T21:04:26.000Z:9oPdLeCJcVCbmJC6No1uySj5MmbV3pjqLieHZCUmpump",
+      "gmgn-copy-round-trip:9774G8tLqX82TM1bmo46wqxtwbyJxRqikF6bwQRU1tFZ:21:2026-08-01T20:39:32.000Z:2026-08-01T21:06:14.000Z:9oPdLeCJcVCbmJC6No1uySj5MmbV3pjqLieHZCUmpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:30:2026-08-01T22:07:32.000Z:2026-08-01T22:07:46.000Z:7vYVLzMCDAoh57Sw1jPQWwrKCn3MQ4Ws2N2zvhLcpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:17:2026-08-03T07:43:25.000Z:2026-08-03T07:51:34.000Z:6N46H85p5mhR7BQWiJtUTaDeEhQZXyP1dPqxovhqpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:18:2026-08-04T03:52:38.000Z:2026-08-04T05:03:29.000Z:89RAitwPJBEfLK4Gcg5iv7AjFABHWNvoD5rkvRkvpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:19:2026-08-05T01:49:54.000Z:2026-08-05T02:04:13.000Z:UMGAp8U5dBdsPHw5TcfaVib3JVTqJuyxDTBVArzpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:31:2026-08-07T01:56:03.000Z:2026-08-07T01:56:42.000Z:szCDnaEsNX5LbNu6xoGqpy4jQYmcgopWwkwogTTpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:20:2026-08-07T02:53:13.000Z:2026-08-07T02:54:06.000Z:5HJRqL8Fx9gQD5aKKdQmMrhJFzoftDLq4muuN3Nrpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:32:2026-08-07T12:25:06.000Z:2026-08-07T12:26:46.000Z:76vPMYvU7Gv1h1GsuY45XxcuF19JKfkYgKdmwe7Ypump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:33:2026-08-07T12:25:06.000Z:2026-08-07T12:27:16.000Z:76vPMYvU7Gv1h1GsuY45XxcuF19JKfkYgKdmwe7Ypump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:34:2026-08-07T17:47:52.000Z:2026-08-07T17:49:32.000Z:7U3io2T7S9ce2hpyLCejHBDQV5Q4UEDAPeshxSm2pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:35:2026-08-07T17:47:52.000Z:2026-08-07T17:50:02.000Z:7U3io2T7S9ce2hpyLCejHBDQV5Q4UEDAPeshxSm2pump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:36:2026-08-07T22:28:13.000Z:2026-08-07T22:29:53.000Z:AKsiofzfj1U2YZRweks8qtuzk484MtaeYGiVhxXxpump",
+      "gmgn-copy-round-trip:DxYXV2QtafnHeyUNFuhJXvPB731Uv7LuLE38qRehwBRt:37:2026-08-07T22:28:13.000Z:2026-08-07T22:30:23.000Z:AKsiofzfj1U2YZRweks8qtuzk484MtaeYGiVhxXxpump",
+      "gmgn-copy-round-trip:Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd:21:2026-08-08T04:13:13.000Z:2026-08-08T04:22:24.000Z:9NyH2MG44Dxem1CUtbKDdDVDRSzn9yV2vmoN4xghpump"
+    ],
+    "discovery_rows": 62,
+    "discovery_eligible_rows": 62,
+    "validation_rows": 38,
+    "validation_eligible_rows": 38,
+    "untouched_holdout_rows": 26,
+    "untouched_holdout_eligible_rows": 26,
+    "validation_fraction": 0.3,
+    "holdout_fraction": 0.2,
+    "holdout_policy": "untouched: excluded from feature summaries, candidate generation, model fitting, validation, correction, and status assignment; counts only are reported",
+    "holdout_used_for_discovery": false,
+    "holdout_used_for_validation": false,
+    "holdout_used_for_model_fit": false,
+    "holdout_used_for_multiple_testing": false
+  },
+  "multiple_testing": {
+    "method": "Benjamini-Hochberg FDR",
+    "alpha": 0.05,
+    "enumerated_comparisons": 46,
+    "tree_search_correction": "not applied; validation survival and untouched holdout are the protection"
+  },
+  "model": {
+    "ensemble": "numpy.bootstrap_median_stump_ensemble",
+    "permutation_importance": {
+      "hold_seconds": 0.0,
+      "wallet_return_percent": 14358.578787538296,
+      "entry_trade_amount_usd": 0.0,
+      "exit_trade_amount_usd": 0.0,
+      "edge_kept_percent": 5026.311723297695,
+      "entry_gap_seconds": 0.0,
+      "exit_gap_seconds": 0.0,
+      "gas_fee_usd": 0.0,
+      "coverage_rate_percent": 0.0
+    },
+    "permutation_importance_method": "deterministic NumPy train-vs-permuted MSE for bootstrap stump ensemble",
+    "feature_importance": {
+      "hold_seconds": 0.12661886493669836,
+      "wallet_return_percent": 0.28500139995456186,
+      "entry_trade_amount_usd": 0.07784771369334621,
+      "exit_trade_amount_usd": 0.0759034666614914,
+      "edge_kept_percent": 0.23497732728555232,
+      "entry_gap_seconds": 0.11896651287147665,
+      "exit_gap_seconds": 0.029506597294768077,
+      "gas_fee_usd": 0.051178117302105086
+    },
+    "shallow_rule_count": 5
+  },
+  "minimum_n": 10,
+  "patterns": [
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.09885525746513812,
+      "p_value": 0.44159733234012216,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.561531547313142,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.2545108502103243,
+      "p_value": 0.04149370094767114,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.14682386489175941,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "lower": 44.0,
+          "upper": 129.25
+        }
+      ],
+      "effect": -106.61006048387097,
+      "p_value": 0.004393750816072126,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 3,
+      "q_value": 0.02887321964847397,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 16,
+        "independence_groups": 3,
+        "mean_return": 16.906875000000003,
+        "median_return": 12.254999999999999,
+        "effect_vs_all": -106.61006048387097,
+        "top_3_effect_share": 0.2158689367473679,
+        "bootstrap_median_ci": {
+          "n": 16,
+          "low": 6.76,
+          "high": 18.59
+        }
+      },
+      "validation": {
+        "sample_size": 10,
+        "independence_groups": 2,
+        "mean_return": -7.419,
+        "median_return": -7.9,
+        "effect_vs_all": -18.156894736842105,
+        "top_3_effect_share": 0.5513787405911511,
+        "bootstrap_median_ci": {
+          "n": 10,
+          "low": -17.55,
+          "high": 4.09
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "lower": 129.25,
+          "upper": 851.0
+        }
+      ],
+      "effect": -48.97050691244242,
+      "p_value": 0.2756277101056101,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 4,
+      "q_value": 0.4226291554952688,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "lower": 851.0,
+          "upper": 6788.25
+        }
+      ],
+      "effect": 21.098689516129,
+      "p_value": 0.6359738860061467,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 3,
+      "q_value": 0.713531676982506,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "lower": 6788.25,
+          "upper": 1834899.0
+        }
+      ],
+      "effect": 128.360564516129,
+      "p_value": 0.2113619726653543,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 3,
+      "q_value": 0.36009817565208513,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "hold_seconds",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.22982091119158693,
+      "mutual_information": 0.22982091119158693,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.9682211727686586,
+      "p_value": 2.7720708587937287e-181,
+      "discovery_sample_size": 57,
+      "discovery_independence_groups": 4,
+      "q_value": 1.2751525950451152e-179,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "coefficient": 0.8972914813991584
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.8809307752138968,
+      "p_value": 2.3771517005879515e-43,
+      "discovery_sample_size": 57,
+      "discovery_independence_groups": 4,
+      "q_value": 5.4674489113522884e-42,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "coefficient": 0.8972914813991584
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "lower": -39.04,
+          "upper": 24.18
+        }
+      ],
+      "effect": -131.5646365914787,
+      "p_value": 0.0010673962340381855,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 3,
+      "q_value": 0.009820045353151306,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 15,
+        "independence_groups": 3,
+        "mean_return": 1.393333333333333,
+        "median_return": 4.3,
+        "effect_vs_all": -122.12360215053764,
+        "top_3_effect_share": 0.24309841210583846,
+        "bootstrap_median_ci": {
+          "n": 15,
+          "low": -6.92,
+          "high": 16.45
+        }
+      },
+      "validation": {
+        "sample_size": 28,
+        "independence_groups": 4,
+        "mean_return": -10.856071428571429,
+        "median_return": -8.435,
+        "effect_vs_all": -21.593966165413534,
+        "top_3_effect_share": 0.26263782439022065,
+        "bootstrap_median_ci": {
+          "n": 28,
+          "low": -16.236875,
+          "high": -1.97
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "lower": 24.18,
+          "upper": 49.87
+        }
+      ],
+      "effect": -112.08035087719298,
+      "p_value": 0.006152612713707992,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 3,
+      "q_value": 0.03537752310382095,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 15,
+        "independence_groups": 3,
+        "mean_return": 26.662,
+        "median_return": 11.67,
+        "effect_vs_all": -96.85493548387097,
+        "top_3_effect_share": 0.2644716757984921,
+        "bootstrap_median_ci": {
+          "n": 15,
+          "low": 0.39,
+          "high": 19.82
+        }
+      },
+      "validation": {
+        "sample_size": 5,
+        "independence_groups": 3,
+        "mean_return": 30.139999999999997,
+        "median_return": 24.17,
+        "effect_vs_all": 19.402105263157893,
+        "top_3_effect_share": 0.8306107629502615,
+        "bootstrap_median_ci": {
+          "n": 5,
+          "low": -11.22,
+          "high": 109.22
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "lower": 49.87,
+          "upper": 178.51
+        }
+      ],
+      "effect": -40.75963659147871,
+      "p_value": 0.34378448048110427,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 3,
+      "q_value": 0.4651201794744352,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "lower": 178.51,
+          "upper": 2205.79
+        }
+      ],
+      "effect": 265.44431578947376,
+      "p_value": 0.007883766371375067,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 2,
+      "q_value": 0.04029480589813923,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 15,
+        "independence_groups": 2,
+        "mean_return": 397.58466666666675,
+        "median_return": 222.04,
+        "effect_vs_all": 274.0677311827958,
+        "top_3_effect_share": 0.667869690139777,
+        "bootstrap_median_ci": {
+          "n": 15,
+          "low": 165.12,
+          "high": 418.5
+        }
+      },
+      "validation": {
+        "sample_size": 0,
+        "independence_groups": 0,
+        "mean_return": null,
+        "median_return": null,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": null,
+        "bootstrap_median_ci": {
+          "n": 0,
+          "low": null,
+          "high": null
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "wallet_return_percent",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.6156919751627108,
+      "mutual_information": 0.6156919751627108,
+      "discovery_sample_size": 57,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.1530813588990795,
+      "p_value": 0.23017597034530365,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.36510671158220576,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.18904520909728606,
+      "p_value": 0.13590187399009188,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.28415846379746484,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "lower": 0.07748261084,
+          "upper": 4.8595025343
+        }
+      ],
+      "effect": -3.3062688172043266,
+      "p_value": 0.9444399505730003,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 3,
+      "q_value": 0.9654275050301782,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "lower": 4.8595025343,
+          "upper": 11.04265249868
+        }
+      ],
+      "effect": -97.53693548387096,
+      "p_value": 0.010714056668546103,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 3,
+      "q_value": 0.04928466067531208,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 18,
+        "independence_groups": 3,
+        "mean_return": 22.75444444444444,
+        "median_return": 14.059999999999999,
+        "effect_vs_all": -100.76249103942652,
+        "top_3_effect_share": 0.21613576551694455,
+        "bootstrap_median_ci": {
+          "n": 18,
+          "low": 6.76,
+          "high": 21.15
+        }
+      },
+      "validation": {
+        "sample_size": 8,
+        "independence_groups": 2,
+        "mean_return": 52.5675,
+        "median_return": 11.21,
+        "effect_vs_all": 41.829605263157895,
+        "top_3_effect_share": 0.8381743399713659,
+        "bootstrap_median_ci": {
+          "n": 8,
+          "low": -6.81,
+          "high": 192.61
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "lower": 11.04265249868,
+          "upper": 32.783418245025
+        }
+      ],
+      "effect": -51.37928842504745,
+      "p_value": 0.20838353614528146,
+      "discovery_sample_size": 17,
+      "discovery_independence_groups": 3,
+      "q_value": 0.36009817565208513,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "lower": 32.783418245025,
+          "upper": 276.13349156364
+        }
+      ],
+      "effect": 143.03493951612904,
+      "p_value": 0.16174581583327105,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 4,
+      "q_value": 0.3182790917439957,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "entry_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.14576124027147316,
+      "mutual_information": 0.14576124027147316,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.053556341940108804,
+      "p_value": 0.6778184603897334,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.7423725994744699,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.13328800584220996,
+      "p_value": 0.29753245447588905,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.4334451413669292,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "lower": 8.066865000000001e-05,
+          "upper": 7.9266515898
+        }
+      ],
+      "effect": -57.11443548387096,
+      "p_value": 0.1759002340978785,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 4,
+      "q_value": 0.3236564307400965,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "lower": 7.9266515898,
+          "upper": 34.1320106283
+        }
+      ],
+      "effect": -37.980935483870965,
+      "p_value": 0.3816003689249361,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 4,
+      "q_value": 0.5015319134442018,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "lower": 34.1320106283,
+          "upper": 97.09258755583
+        }
+      ],
+      "effect": -34.39560215053764,
+      "p_value": 0.45166667936057076,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 4,
+      "q_value": 0.561531547313142,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "lower": 97.09258755583,
+          "upper": 671.49556975584
+        }
+      ],
+      "effect": 124.967439516129,
+      "p_value": 0.22368816508697106,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 4,
+      "q_value": 0.36510671158220576,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "exit_trade_amount_usd",
+      "conditions": [
+        {
+          "feature": "exit_trade_amount_usd",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.05108467207788425,
+      "mutual_information": 0.05108467207788425,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.20253314376845902,
+      "p_value": 0.13585759986784424,
+      "discovery_sample_size": 54,
+      "discovery_independence_groups": 4,
+      "q_value": 0.28415846379746484,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.6808210563663847,
+      "p_value": 2.0445170449659247e-11,
+      "discovery_sample_size": 54,
+      "discovery_independence_groups": 4,
+      "q_value": 3.134926135614418e-10,
+      "multiple_testing_rejected": false,
+      "validation": {
+        "sample_size": 22,
+        "independence_groups": 4,
+        "coefficient": 0.6625674323851262
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "lower": -107.9,
+          "upper": 29.425
+        }
+      ],
+      "effect": -140.13682539682537,
+      "p_value": 0.0008190617151986895,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 4,
+      "q_value": 0.00941920972478493,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 14,
+        "independence_groups": 4,
+        "mean_return": 0.11928571428571441,
+        "median_return": -0.97,
+        "effect_vs_all": -123.39764976958526,
+        "top_3_effect_share": 0.2381504065571983,
+        "bootstrap_median_ci": {
+          "n": 14,
+          "low": -3.6688749999999994,
+          "high": 6.52
+        }
+      },
+      "validation": {
+        "sample_size": 7,
+        "independence_groups": 2,
+        "mean_return": -8.155714285714284,
+        "median_return": -11.22,
+        "effect_vs_all": -18.89360902255639,
+        "top_3_effect_share": 0.5682472093439719,
+        "bootstrap_median_ci": {
+          "n": 7,
+          "low": -14.42,
+          "high": -1.97
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "lower": 29.425,
+          "upper": 55.099999999999994
+        }
+      ],
+      "effect": -73.4438034188034,
+      "p_value": 0.10872450656674525,
+      "discovery_sample_size": 13,
+      "discovery_independence_groups": 4,
+      "q_value": 0.2500663651035141,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "lower": 55.099999999999994,
+          "upper": 100.975
+        }
+      ],
+      "effect": 53.532350427350394,
+      "p_value": 0.30403703003852606,
+      "discovery_sample_size": 13,
+      "discovery_independence_groups": 4,
+      "q_value": 0.4334451413669292,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "lower": 100.975,
+          "upper": 249.3
+        }
+      ],
+      "effect": 158.6260317460317,
+      "p_value": 0.1660586565620847,
+      "discovery_sample_size": 14,
+      "discovery_independence_groups": 4,
+      "q_value": 0.3182790917439957,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "edge_kept_percent",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.3650743676780153,
+      "mutual_information": 0.3650743676780153,
+      "discovery_sample_size": 54,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 22,
+        "independence_groups": 4,
+        "mean_return": 32.58681818181818,
+        "median_return": 1.06,
+        "effect_vs_all": 21.848923444976073,
+        "top_3_effect_share": 0.531442725684177,
+        "bootstrap_median_ci": {
+          "n": 22,
+          "low": -11.754999999999999,
+          "high": 25.815
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "entry_gap_seconds",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.0631004819803036,
+      "p_value": 0.6243106628114621,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.713531676982506,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "entry_gap_seconds",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.22480393306432822,
+      "p_value": 0.07392690723351762,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.2151294926408087,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_gap_seconds",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "lower": 0.0,
+          "upper": 1.0
+        }
+      ],
+      "effect": -81.64308933002482,
+      "p_value": 0.03089998169511673,
+      "discovery_sample_size": 26,
+      "discovery_independence_groups": 3,
+      "q_value": 0.11844992983128082,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_gap_seconds",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "lower": 1.0,
+          "upper": 4.0
+        }
+      ],
+      "effect": -21.59875366568916,
+      "p_value": 0.6091259269679892,
+      "discovery_sample_size": 11,
+      "discovery_independence_groups": 4,
+      "q_value": 0.713531676982506,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "entry_gap_seconds",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "lower": 4.0,
+          "upper": 62.0
+        }
+      ],
+      "effect": 94.41226451612904,
+      "p_value": 0.0816888511480229,
+      "discovery_sample_size": 25,
+      "discovery_independence_groups": 3,
+      "q_value": 0.2174848833485731,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "entry_gap_seconds",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.11116999746819406,
+      "mutual_information": 0.11116999746819406,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "exit_gap_seconds",
+      "conditions": [
+        {
+          "feature": "exit_gap_seconds",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.12970263629643733,
+      "p_value": 0.3109497753284492,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.4334451413669292,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "exit_gap_seconds",
+      "conditions": [
+        {
+          "feature": "exit_gap_seconds",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.09360693446334171,
+      "p_value": 0.4664459491637537,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.5646450963561229,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "exit_gap_seconds",
+      "conditions": [
+        {
+          "feature": "exit_gap_seconds",
+          "lower": 0.0,
+          "upper": 2.75
+        }
+      ],
+      "effect": 24.004368863955122,
+      "p_value": 0.08983071268745411,
+      "discovery_sample_size": 46,
+      "discovery_independence_groups": 4,
+      "q_value": 0.2174848833485731,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "exit_gap_seconds",
+      "conditions": [
+        {
+          "feature": "exit_gap_seconds",
+          "lower": 2.75,
+          "upper": 95.0
+        }
+      ],
+      "effect": -69.01256048387097,
+      "p_value": 0.08983071268745411,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 3,
+      "q_value": 0.2174848833485731,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "exit_gap_seconds",
+      "conditions": [
+        {
+          "feature": "exit_gap_seconds",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.013047762062685833,
+      "mutual_information": 0.013047762062685833,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "pearson",
+      "kind": "correlation",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "operator": "correlation",
+          "value": "negative"
+        }
+      ],
+      "effect": -0.011551089799176031,
+      "p_value": 0.9287001879410843,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.9654275050301782,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "spearman",
+      "kind": "correlation",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "operator": "correlation",
+          "value": "positive"
+        }
+      ],
+      "effect": 0.22414135887901745,
+      "p_value": 0.07482764961419433,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 0.2151294926408087,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "lower": 0.04,
+          "upper": 0.11
+        }
+      ],
+      "effect": -89.61760215053764,
+      "p_value": 0.022275911877251788,
+      "discovery_sample_size": 15,
+      "discovery_independence_groups": 2,
+      "q_value": 0.0931538133048711,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "lower": 0.11,
+          "upper": 0.52
+        }
+      ],
+      "effect": 234.10767990074447,
+      "p_value": 0.07236766406539803,
+      "discovery_sample_size": 13,
+      "discovery_independence_groups": 3,
+      "q_value": 0.2151294926408087,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "lower": 0.52,
+          "upper": 1.9525000000000001
+        }
+      ],
+      "effect": -107.97471326164874,
+      "p_value": 0.0038427614556421244,
+      "discovery_sample_size": 18,
+      "discovery_independence_groups": 2,
+      "q_value": 0.02887321964847397,
+      "multiple_testing_rejected": false,
+      "discovery_effect_summary": {
+        "sample_size": 18,
+        "independence_groups": 2,
+        "mean_return": 15.542222222222222,
+        "median_return": 9.355,
+        "effect_vs_all": -107.97471326164874,
+        "top_3_effect_share": 0.20936013327161263,
+        "bootstrap_median_ci": {
+          "n": 18,
+          "low": 1.895,
+          "high": 18.134999999999998
+        }
+      },
+      "validation": {
+        "sample_size": 16,
+        "independence_groups": 1,
+        "mean_return": -2.27,
+        "median_return": -1.615,
+        "effect_vs_all": -13.007894736842106,
+        "top_3_effect_share": 0.39498595672297165,
+        "bootstrap_median_ci": {
+          "n": 16,
+          "low": -11.22,
+          "high": 7.0
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "lower": 1.9525000000000001,
+          "upper": 2.99
+        }
+      ],
+      "effect": 15.275564516129052,
+      "p_value": 0.7156108743850951,
+      "discovery_sample_size": 16,
+      "discovery_independence_groups": 1,
+      "q_value": 0.7655372144584739,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "gas_fee_usd",
+      "conditions": [
+        {
+          "feature": "gas_fee_usd",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.26256809875328957,
+      "mutual_information": 0.26256809875328957,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validation": {
+        "sample_size": 38,
+        "independence_groups": 4,
+        "mean_return": 10.737894736842106,
+        "median_return": -5.87,
+        "effect_vs_all": 0.0,
+        "top_3_effect_share": 0.36130453193640344,
+        "bootstrap_median_ci": {
+          "n": 38,
+          "low": -12.303249999999998,
+          "high": 1.97
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "quantile_bucket",
+      "kind": "bucket",
+      "feature": "coverage_rate_percent",
+      "conditions": [
+        {
+          "feature": "coverage_rate_percent",
+          "lower": 100.0,
+          "upper": 100.0
+        }
+      ],
+      "effect": 0.0,
+      "p_value": 1.0,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "q_value": 1.0,
+      "multiple_testing_rejected": true,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "enumerated-search FDR correction failed"
+    },
+    {
+      "source": "mutual_information",
+      "kind": "mutual_information",
+      "feature": "coverage_rate_percent",
+      "conditions": [
+        {
+          "feature": "coverage_rate_percent",
+          "operator": "information",
+          "value": "quantile_binned"
+        }
+      ],
+      "effect": 0.0,
+      "mutual_information": 0.0,
+      "discovery_sample_size": 62,
+      "discovery_independence_groups": 4,
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "zero mutual information"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "wallet_return_percent",
+          "operator": ">=",
+          "value": 49.87
+        }
+      ],
+      "feature": "wallet_return_percent",
+      "importance": 0.28500139995456186,
+      "discovery_sample_size": 29,
+      "discovery_independence_groups": 3,
+      "effect": 126.24513348164628,
+      "validation": {
+        "sample_size": 4,
+        "independence_groups": 3,
+        "mean_return": 157.48250000000002,
+        "median_return": 188.13,
+        "effect_vs_all": 146.74460526315792,
+        "top_3_effect_share": 0.9241844271151365,
+        "bootstrap_median_ci": {
+          "n": 4,
+          "low": 55.24,
+          "high": 198.43
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "edge_kept_percent",
+          "operator": ">=",
+          "value": 55.099999999999994
+        }
+      ],
+      "feature": "edge_kept_percent",
+      "importance": 0.23497732728555232,
+      "discovery_sample_size": 27,
+      "discovery_independence_groups": 4,
+      "effect": 124.76454599761054,
+      "validation": {
+        "sample_size": 9,
+        "independence_groups": 4,
+        "mean_return": 94.1511111111111,
+        "median_return": 55.24,
+        "effect_vs_all": 83.413216374269,
+        "top_3_effect_share": 0.722609063872807,
+        "bootstrap_median_ci": {
+          "n": 9,
+          "low": 27.46,
+          "high": 183.8739999999998
+        }
+      },
+      "validationStatus": "insufficient data",
+      "validation_status": "insufficient_data",
+      "reason": "validation sample below minimum-N"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "hold_seconds",
+          "operator": ">=",
+          "value": 851.0
+        }
+      ],
+      "feature": "hold_seconds",
+      "importance": 0.12661886493669836,
+      "discovery_sample_size": 32,
+      "discovery_independence_groups": 3,
+      "effect": 74.72962701612902,
+      "validation": {
+        "sample_size": 12,
+        "independence_groups": 3,
+        "mean_return": -8.891666666666666,
+        "median_return": -14.86,
+        "effect_vs_all": -19.629561403508774,
+        "top_3_effect_share": 0.5100707126719125,
+        "bootstrap_median_ci": {
+          "n": 12,
+          "low": -27.56,
+          "high": -5.05
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "entry_gap_seconds",
+          "operator": ">=",
+          "value": 1.0
+        }
+      ],
+      "feature": "entry_gap_seconds",
+      "importance": 0.11896651287147665,
+      "discovery_sample_size": 36,
+      "discovery_independence_groups": 4,
+      "effect": 58.96445340501792,
+      "validation": {
+        "sample_size": 17,
+        "independence_groups": 4,
+        "mean_return": 11.62058823529412,
+        "median_return": -12.29,
+        "effect_vs_all": 0.8826934984520136,
+        "top_3_effect_share": 0.5324053441248134,
+        "bootstrap_median_ci": {
+          "n": 17,
+          "low": -18.11,
+          "high": 23.0
+        }
+      },
+      "validationStatus": "validation survivor",
+      "validation_status": "validation_survivor"
+    },
+    {
+      "source": "shallow_tree_rule",
+      "conditions": [
+        {
+          "feature": "entry_trade_amount_usd",
+          "operator": ">=",
+          "value": 11.04265249868
+        }
+      ],
+      "feature": "entry_trade_amount_usd",
+      "importance": 0.07784771369334621,
+      "discovery_sample_size": 33,
+      "discovery_independence_groups": 4,
+      "effect": 42.88215542521995,
+      "validation": {
+        "sample_size": 25,
+        "independence_groups": 4,
+        "mean_return": -5.838800000000001,
+        "median_return": -12.29,
+        "effect_vs_all": -16.576694736842107,
+        "top_3_effect_share": 0.3091697734198117,
+        "bootstrap_median_ci": {
+          "n": 25,
+          "low": -16.78,
+          "high": 4.09
+        }
+      },
+      "validationStatus": "rejected",
+      "validation_status": "rejected",
+      "reason": "direction or effect did not survive chronological validation"
+    }
+  ],
+  "status_counts": {
+    "discovered candidate": 0,
+    "validation survivor": 8,
+    "rejected": 46,
+    "insufficient data": 6
+  },
+  "language": "ML and statistical findings are discovery evidence, not profitability claims; validation survivors require independent backtesting."
+}

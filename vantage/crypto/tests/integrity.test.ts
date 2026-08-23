@@ -4,11 +4,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { zipStored } from '../src/dune/archive.js';
-import { openDatabase } from '../src/db/client.js';
-import { readIntegrityReport } from '../src/db/integrity.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
-import { startGmgnPoll, completeGmgnPoll, failGmgnPoll } from '../src/gmgn/polls.js';
+import { zipStored } from '../src/dune/ingest/archive.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { readIntegrityReport } from '../src/signals/integrity.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
+import { startGmgnPoll, completeGmgnPoll, failGmgnPoll } from '../src/gmgn/capture/polls.js';
 
 const emptyArchiveDirectory = path.join(tmpdir(), 'crypto-integrity-no-archives');
 

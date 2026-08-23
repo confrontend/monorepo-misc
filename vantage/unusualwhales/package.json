@@ -1,0 +1,42 @@
+{
+  "name": "vantage-unusual-whales-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first research shell for Unusual Whales data.",
+  "scripts": {
+    "build": "npm run build:server && npm run build:ui",
+    "build:server": "tsc -p tsconfig.json",
+    "build:ui": "vite build --config vite.config.ts",
+    "dev": "concurrently -k -n api,ui -c green,cyan \"npm run dev:api\" \"npm run dev:ui\"",
+    "dev:api": "tsx watch src/scripts/server.ts",
+    "dev:ui": "vite --config vite.config.ts --host",
+    "probe:unusual-whales": "tsx src/scripts/probe-unusual-whales.ts",
+    "sync:unusual-whales": "tsx src/scripts/sync-unusual-whales.ts",
+    "validate:oos": "tsx src/scripts/run-oos-validation.ts",
+    "validate:walk-forward": "tsx src/scripts/run-walk-forward.ts",
+    "start": "npm run build && node dist/src/scripts/server.js",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "bullmq": "^6.1.2",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

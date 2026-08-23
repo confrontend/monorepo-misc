@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { openDatabase } from '../db/client.js';
-import { readDatabaseStats } from '../db/stats.js';
-import { importDuneFile } from '../dune/importer.js';
+import { openDatabase } from '../platform/db/client.js';
+import { readDatabaseStats } from '../platform/db/stats.js';
+import { importDuneFile } from '../dune/ingest/importer.js';
 
 const usage = (): never => {
   console.error(`Usage:

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
-import { computeRobustPatternReport } from '../src/db/robustPatterns.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
+import { computeRobustPatternReport } from '../src/signals/robustPatterns.js';
 
 const seedSignal = (database: ReturnType<typeof openDatabase>, id: string, signalType: number, token: string, observedAt: string): number =>
   storeGmgnSignal(database, { id, token_address: token, signal_type: signalType, observed_at: observedAt, market_cap: 1000 }, { source: 'gmgn-cli', chain: 'sol', capturedAt: new Date(observedAt) }).id;

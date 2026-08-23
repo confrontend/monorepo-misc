@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { importGmgnBrowserCapture } from '../src/gmgn/browserImport.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { importGmgnBrowserCapture } from '../src/gmgn/capture/browserImport.js';
 
 const exportJson = (events: unknown[], coverageWindows: unknown[] = [], extraCaptures: unknown[] = []) => JSON.stringify({
   formatVersion: 1,

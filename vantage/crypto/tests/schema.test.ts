@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations, latestSchemaVersion } from '../src/db/schema.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations, latestSchemaVersion } from '../src/platform/db/schema.js';
 
 test('schema initialization creates V1 tables and is idempotent', () => {
   const database = openDatabase(':memory:');
@@ -14,7 +14,6 @@ test('schema initialization creates V1 tables and is idempotent', () => {
       ORDER BY name
     `).all().map((row) => (row as { name: string }).name);
     assert.deepEqual(tables, [
-      'birdeye_probe_batches',
       'copytrade_copy_simulation_runs',
       'copytrade_dune_fetch_audits',
       'copytrade_experiment_wallets',

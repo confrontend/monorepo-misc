@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { readDataQuality } from '../src/db/quality.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { readDataQuality } from '../src/signals/quality.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
 
 test('data quality links GMGN signals to cohort tokens without dropping unmatched observations', () => {
   const database = openDatabase(':memory:');

@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { importDuneFile, importDuneContent, type ImportLogger } from '../src/dune/importer.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { importDuneFile, importDuneContent, type ImportLogger } from '../src/dune/ingest/importer.js';
 
 const silentLogger: ImportLogger = { info() {}, warn() {}, error() {} };
 

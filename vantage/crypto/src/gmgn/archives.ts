@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readZipEntries } from '../dune/archive.js';
-import { redactSensitiveText } from '../security/redaction.js';
+import { readZipEntries } from '../dune/ingest/archive.js';
+import { redactSensitiveText } from '../platform/security/redaction.js';
 
 const findProjectRoot = (): string => {
   let current = path.dirname(fileURLToPath(import.meta.url));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { splitByDate, suggestSplitDate } from '../src/stats/holdout.js';
+import { splitByDate, suggestSplitDate } from '../src/platform/stats-utils/holdout.js';
 
 test('splitByDate: partitions strictly by the cutoff, boundary date goes to test not discovery', () => {
   const observations = [

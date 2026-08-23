@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REPRESENTATIVE_SAMPLE_METHOD, selectRepresentativeTrades } from '../src/copytrade/representativeSample.js';
+import { REPRESENTATIVE_SAMPLE_METHOD, selectRepresentativeTrades } from '../src/copytrade/scrutiny/representativeSample.js';
 
 const row = (id: number, walletAddress: string, timestamp: number, eventType: 'buy' | 'sell', tokenAddress = 'TOKEN'): {
   id: number; walletAddress: string; observedTimestamp: number; eventType: string; tokenAddress: string;

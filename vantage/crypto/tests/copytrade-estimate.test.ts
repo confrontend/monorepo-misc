@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
-import { syncCopyTradeRoster } from '../src/copytrade/roster.js';
-import { storeActivityPage } from '../src/copytrade/fetch.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
+import { syncCopyTradeRoster } from '../src/copytrade/screening/roster.js';
+import { storeActivityPage } from '../src/copytrade/screening/fetch.js';
 import {
   DEFAULT_REQUESTS_PER_FRESH_WALLET, DEFAULT_SECONDS_PER_REQUEST,
   estimateRemainingSeconds, projectFetchDuration, readFetchEstimateBasis, recordFetchRunEstimate,
-} from '../src/copytrade/estimate.js';
+} from '../src/copytrade/screening/estimate.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');

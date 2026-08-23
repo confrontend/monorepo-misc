@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { zipStored } from '../src/dune/archive.js';
+import { zipStored } from '../src/dune/ingest/archive.js';
 import { listGmgnArchives } from '../src/gmgn/archives.js';
 
 const buildCaptureArchive = (options: {

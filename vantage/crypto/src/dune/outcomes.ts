@@ -1,15 +1,12 @@
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
-import { readDuneApiKey } from './credentials.js';
-import { waitForDuneCapacity, withDuneSubmissionLock } from '../copytrade/duneScheduler.js';
+import { readDuneApiKey } from './client/credentials.js';
+import { waitForDuneCapacity, withDuneSubmissionLock } from '../copytrade/simulation/duneScheduler.js';
 import { MIN_SIGNAL_AGE_MS } from './prescreen.js';
+import { archiveJsonWithHash } from '../platform/archive.js';
 
-type Signal = { id: number; tokenAddress: string; symbol: string | null; signalType: string | null; observedAt: string; marketCap: number | null };
+export type OutcomeCandidate = { id: number; tokenAddress: string; symbol: string | null; signalType: string | null; observedAt: string; marketCap: number | null };
+type Signal = OutcomeCandidate;
 export type DuneOutcome = { signal: Signal; checkpoints: Array<{ label: string; targetTimestamp: string; result: { priceUsd: number | null; status: string; priceHttpStatus: number | null; archivePath: string | null; matchedTradeAt: string | null; matchedTxId: string | null; matchedOuterInstructionIndex: number | null; matchedInnerInstructionIndex: number | null; matchedTradeAgeSeconds: number | null; sourceRunId: number | null } }> };
-const root = (() => { let current = path.dirname(fileURLToPath(import.meta.url)); while (current !== path.dirname(current)) { if (existsSync(path.join(current, 'package.json'))) return current; current = path.dirname(current); } return process.cwd(); })();
 
 // Every horizon after 'signal' itself. Adding a checkpoint here costs nothing extra against
 // Dune — it's one more UNION ALL row scanned against trade data already fetched for the same
@@ -23,10 +20,34 @@ const CHECKPOINT_OFFSETS: Array<{ label: string; unit: 'minute' | 'hour'; amount
 ];
 export const CHECKPOINT_LABELS = ['signal', ...CHECKPOINT_OFFSETS.map((offset) => offset.label)];
 
+export const listOutcomeCandidates = (database: DatabaseSync, limit?: number): OutcomeCandidate[] => {
+  const base = `
+    SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap
+    FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address
+    WHERE g.token_address IS NOT NULL AND g.observed_at IS NOT NULL
+    ORDER BY observed_at DESC, id DESC`;
+  if (limit === undefined) return database.prepare(base).all() as unknown as OutcomeCandidate[];
+  const safeLimit = Math.max(1, Math.floor(limit));
+  return database.prepare(`${base} LIMIT ?`).all(safeLimit) as unknown as OutcomeCandidate[];
+};
+
+// Each checkpoint matches against a 24h lookback from its own target_at (signal_at + offset), so
+// the union of every checkpoint's valid window for one signal spans [signal_at - 24h, signal_at +
+// latest offset]. Bounding normalized_trades' scan to that span (across every signal in the
+// batch) is a pure optimization — every excluded row was already unreachable by the JOIN's own
+// predicate below — but without it the scan had no time bound at all and read every trade
+// dex_solana.trades has ever recorded for the matched tokens, regardless of age.
+const LATEST_CHECKPOINT_OFFSET_MS = 3 * 60 * 60_000; // '+3h', the widest CHECKPOINT_OFFSETS entry
+const CHECKPOINT_LOOKBACK_MS = 24 * 60 * 60_000;
+
 const sqlFor = (signals: Signal[]): string => {
   const values = signals.map((s) => `(${s.id}, '${s.tokenAddress.replaceAll("'", "''")}', '${(s.signalType ?? '').replaceAll("'", "''")}', from_iso8601_timestamp('${s.observedAt}'))`).join(',\n        ');
   const checkpointUnions = CHECKPOINT_OFFSETS.map((offset) => `UNION ALL SELECT signal_id, token_address, signal_type, signal_at, '${offset.label}', date_add('${offset.unit}', ${offset.amount}, signal_at) FROM target_signals`).join('\n    ');
-  return `WITH target_signals (signal_id, token_address, signal_type, signal_at) AS (\n    VALUES\n        ${values}\n), checkpoints AS (\n    SELECT signal_id, token_address, signal_type, signal_at, 'signal' AS checkpoint, signal_at AS target_at FROM target_signals\n    ${checkpointUnions}\n), normalized_trades AS (\n    SELECT token_bought_mint_address AS token_address, block_time, amount_usd / NULLIF(token_bought_amount, 0) AS price_usd, tx_id, outer_instruction_index, inner_instruction_index FROM dex_solana.trades WHERE token_bought_mint_address IN (SELECT token_address FROM target_signals) AND amount_usd > 0 AND token_bought_amount > 0\n    UNION ALL SELECT token_sold_mint_address, block_time, amount_usd / NULLIF(token_sold_amount, 0), tx_id, outer_instruction_index, inner_instruction_index FROM dex_solana.trades WHERE token_sold_mint_address IN (SELECT token_address FROM target_signals) AND amount_usd > 0 AND token_sold_amount > 0\n), ranked AS (\n    SELECT c.signal_id, c.checkpoint, c.target_at, t.price_usd, t.block_time AS matched_trade_at, t.tx_id AS matched_tx_id, t.outer_instruction_index AS matched_outer_instruction_index, t.inner_instruction_index AS matched_inner_instruction_index, row_number() OVER (PARTITION BY c.signal_id, c.checkpoint ORDER BY t.block_time DESC, t.tx_id DESC, t.outer_instruction_index DESC, t.inner_instruction_index DESC) AS rn\n    FROM checkpoints c LEFT JOIN normalized_trades t ON t.token_address = c.token_address AND t.block_time <= c.target_at AND t.block_time > c.target_at - INTERVAL '24' HOUR\n) SELECT signal_id, checkpoint, target_at, price_usd, matched_trade_at, matched_tx_id, matched_outer_instruction_index, matched_inner_instruction_index FROM ranked WHERE rn = 1 ORDER BY signal_id, target_at`;
+  const signalTimesMs = signals.map((s) => Date.parse(s.observedAt));
+  const scanFrom = new Date(Math.min(...signalTimesMs) - CHECKPOINT_LOOKBACK_MS).toISOString();
+  const scanTo = new Date(Math.max(...signalTimesMs) + LATEST_CHECKPOINT_OFFSET_MS).toISOString();
+  const timeBound = `AND block_time >= from_iso8601_timestamp('${scanFrom}') AND block_time <= from_iso8601_timestamp('${scanTo}')`;
+  return `WITH target_signals (signal_id, token_address, signal_type, signal_at) AS (\n    VALUES\n        ${values}\n), checkpoints AS (\n    SELECT signal_id, token_address, signal_type, signal_at, 'signal' AS checkpoint, signal_at AS target_at FROM target_signals\n    ${checkpointUnions}\n), normalized_trades AS (\n    SELECT token_bought_mint_address AS token_address, block_time, amount_usd / NULLIF(token_bought_amount, 0) AS price_usd, tx_id, outer_instruction_index, inner_instruction_index FROM dex_solana.trades WHERE token_bought_mint_address IN (SELECT token_address FROM target_signals) AND amount_usd > 0 AND token_bought_amount > 0 ${timeBound}\n    UNION ALL SELECT token_sold_mint_address, block_time, amount_usd / NULLIF(token_sold_amount, 0), tx_id, outer_instruction_index, inner_instruction_index FROM dex_solana.trades WHERE token_sold_mint_address IN (SELECT token_address FROM target_signals) AND amount_usd > 0 AND token_sold_amount > 0 ${timeBound}\n), ranked AS (\n    SELECT c.signal_id, c.checkpoint, c.target_at, t.price_usd, t.block_time AS matched_trade_at, t.tx_id AS matched_tx_id, t.outer_instruction_index AS matched_outer_instruction_index, t.inner_instruction_index AS matched_inner_instruction_index, row_number() OVER (PARTITION BY c.signal_id, c.checkpoint ORDER BY t.block_time DESC, t.tx_id DESC, t.outer_instruction_index DESC, t.inner_instruction_index DESC) AS rn\n    FROM checkpoints c LEFT JOIN normalized_trades t ON t.token_address = c.token_address AND t.block_time <= c.target_at AND t.block_time > c.target_at - INTERVAL '24' HOUR\n) SELECT signal_id, checkpoint, target_at, price_usd, matched_trade_at, matched_tx_id, matched_outer_instruction_index, matched_inner_instruction_index FROM ranked WHERE rn = 1 ORDER BY signal_id, target_at`;
 };
 
 const fetchWithRetry = async (url: string, init: RequestInit, attempts = 3): Promise<Response> => {
@@ -144,9 +165,9 @@ export const measureDuneOutcomes = async (database: DatabaseSync, signalIds: num
     throw new Error(`Dune query did not complete within 60 seconds (run ${runId} remains protected from duplicate retries).`);
   }
   const resultResponse = await fetch(`https://api.dune.com/api/v1/execution/${execution.execution_id}/results`, { headers }); resultRaw = await resultResponse.text(); if (!resultResponse.ok) throw new Error(`Dune results HTTP ${resultResponse.status}`);
-  const archivePayload = JSON.stringify({ runId, requestedAt, execution: executionRaw, query, result: JSON.parse(resultRaw) }, null, 2); const buffer = Buffer.from(archivePayload); const sha = createHash('sha256').update(buffer).digest('hex'); const dir = path.join(root, '.data', 'archive', 'dune-outcomes'); mkdirSync(dir, { recursive: true }); const archivePath = path.join(dir, `dune-outcome-${runId}-${sha.slice(0, 16)}.json`); if (!existsSync(archivePath)) writeFileSync(archivePath, buffer, { flag: 'wx' });
+  const { archivePath, sha256 } = archiveJsonWithHash('dune-outcomes', 'dune-outcome', runId, { runId, requestedAt, execution: executionRaw, query, result: JSON.parse(resultRaw) });
   const completedAt = new Date().toISOString();
-  database.prepare(`UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`).run(resultRaw, archivePath, sha, completedAt, runId);
+  database.prepare(`UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`).run(resultRaw, archivePath, sha256, completedAt, runId);
   const rows = ((JSON.parse(resultRaw) as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? []);
    return rowsToOutcomes(signals, rows, completedAt, runId);
 };
@@ -196,15 +217,9 @@ export const reconcileDuneRun = async (
   const resultRaw = await resultResponse.text();
   if (!resultResponse.ok) return 'still_running'; // transient Dune-side issue; try again next reconcile pass
 
-  const archivePayload = JSON.stringify({ runId, requestedAt: run.requestedAt, query: run.querySql, reconciledFrom: 'status-poll', statusAtReconcile: statusBody, result: JSON.parse(resultRaw) }, null, 2);
-  const buffer = Buffer.from(archivePayload);
-  const sha = createHash('sha256').update(buffer).digest('hex');
-  const dir = path.join(root, '.data', 'archive', 'dune-outcomes');
-  mkdirSync(dir, { recursive: true });
-  const archivePath = path.join(dir, `dune-outcome-${runId}-${sha.slice(0, 16)}.json`);
-  if (!existsSync(archivePath)) writeFileSync(archivePath, buffer, { flag: 'wx' });
+  const { archivePath, sha256 } = archiveJsonWithHash('dune-outcomes', 'dune-outcome', runId, { runId, requestedAt: run.requestedAt, query: run.querySql, reconciledFrom: 'status-poll', statusAtReconcile: statusBody, result: JSON.parse(resultRaw) });
   const completedAt = new Date().toISOString();
-  database.prepare(`UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`).run(resultRaw, archivePath, sha, completedAt, runId);
+  database.prepare(`UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`).run(resultRaw, archivePath, sha256, completedAt, runId);
   return 'completed';
 };
 

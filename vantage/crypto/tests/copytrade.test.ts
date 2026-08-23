@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
-import { listRosterWallets, rankItemToWallet, readLeaderboardProvenance, readWalletRankHistory, resolveSingleTrader, syncCopyTradeRoster } from '../src/copytrade/roster.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
+import { listRosterWallets, rankItemToWallet, readLeaderboardProvenance, readWalletRankHistory, resolveSingleTrader, syncCopyTradeRoster } from '../src/copytrade/screening/roster.js';
 import { storeWalletRankSnapshot } from '../src/gmgn/walletRank.js';
 import {
   detectRateLimit, hasActiveFetchRun, parseActivityPage, readFetchRunState,
   reconcileStaleFetchRuns, requestCopyTradeFetchStop, storeActivityPage,
   listWalletCoverageHistory, recordCoverage,
-} from '../src/copytrade/fetch.js';
+} from '../src/copytrade/screening/fetch.js';
 import {
   compoundCapital, computeCopyTradeReport, computeProfitConcentration, decideVerdict, equalWeightCapital,
   holdSecondsPerSell, mean, median,
   performanceByPeriod, readCopyTradeSummary, saveCopyTradeSnapshot, summarizeTrades,
-} from '../src/copytrade/evaluate.js';
+} from '../src/copytrade/scrutiny/evaluate.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');
@@ -459,6 +459,9 @@ test('evaluate: a risk flag comes with measured evidence, not just the tag', () 
 
     const row = computeCopyTradeReport(database, { now }).rows[0];
     assert.equal(row.riskEvidence.fastRoundTripPercent, 100, 'both measurable round trips closed inside a minute');
+    assert.equal(row.riskEvidence.under15SecondsPercent, 100, 'both measurable round trips closed within 15 seconds');
+    assert.equal(row.riskEvidence.under15SecondsCount, 2);
+    assert.equal(row.riskEvidence.pairedTradeCount, 2);
     assert.equal(row.riskEvidence.noCostBasisPercent, 33.3, '1 of 3 sells had no recorded purchase');
     assert.equal(row.riskEvidence.medianHoldSeconds, 6, 'median of a 7s and a 5s hold');
     assert.equal(row.riskEvidence.fundedByAddress, 'AxiomRXZAq1Jgjj9pHmNqVP7Lhu67wLXZJZbaK87TTSk');

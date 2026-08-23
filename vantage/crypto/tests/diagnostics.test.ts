@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { logDiagnostic, readRecentDiagnostics } from '../src/db/diagnostics.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { logDiagnostic, readRecentDiagnostics } from '../src/platform/db/diagnostics.js';
 
 test('diagnostic logs are appended and read back newest first', () => {
   const database = openDatabase(':memory:');

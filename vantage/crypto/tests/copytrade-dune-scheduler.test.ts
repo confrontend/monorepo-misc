@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
-import { activeDuneExecutionCount, activeExecutionCount, allowedApplicationExecutions, canSubmitExecution, latestReportedLimit, waitForDuneCapacity, withDuneSubmissionLock } from '../src/copytrade/duneScheduler.js';
-import { alreadyCoveredTradeIds } from '../src/copytrade/copySimulationDune.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
+import { activeDuneExecutionCount, activeExecutionCount, allowedApplicationExecutions, canSubmitExecution, latestReportedLimit, waitForDuneCapacity, withDuneSubmissionLock } from '../src/copytrade/simulation/duneScheduler.js';
+import { alreadyCoveredTradeIds } from '../src/copytrade/simulation/copySimulationDune.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');

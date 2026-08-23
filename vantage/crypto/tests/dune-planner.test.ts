@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
+import { openDatabase } from '../src/platform/db/client.js';
 import { CHECKPOINT_LABELS } from '../src/dune/outcomes.js';
 import { buildMeasurementPlan } from '../src/dune/planner.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
 
 const seed = (database: ReturnType<typeof openDatabase>, id: string, observedAt: string): number => storeGmgnSignal(
   database,

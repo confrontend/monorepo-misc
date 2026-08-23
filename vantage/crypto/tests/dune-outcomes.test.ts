@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
+import { openDatabase } from '../src/platform/db/client.js';
 import { measureDuneOutcomes, readAllDuneOutcomes, readLatestDuneOutcomes } from '../src/dune/outcomes.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
-import { computeSignalPatternReport } from '../src/db/patterns.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
+import { computeSignalPatternReport } from '../src/signals/patterns.js';
 
 const seedSignal = (database: ReturnType<typeof openDatabase>, id: string, signalType: number, token: string, observedAt = '2026-03-01T00:00:00Z'): number =>
   storeGmgnSignal(database, { id, token_address: token, signal_type: signalType, observed_at: observedAt, market_cap: 1000 }, { source: 'gmgn-cli', chain: 'sol', capturedAt: new Date('2026-03-01T00:00:01Z') }).id;

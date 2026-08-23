@@ -4,101 +4,85 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
-import { defaultArchivePath, openDatabase } from '../db/client.js';
-import { readDatabaseStats } from '../db/stats.js';
-import { readDataQuality } from '../db/quality.js';
-import { readIntegrityReport } from '../db/integrity.js';
-import { readSnapshotAnalysis } from '../db/analysis.js';
-import { readSignalScoringReport } from '../db/scoring.js';
-import { archiveDuneSource } from '../dune/archive.js';
-import { importDuneContent } from '../dune/importer.js';
-import { storeGmgnSignal } from '../gmgn/ingest.js';
+import { defaultArchivePath, openDatabase } from '../platform/db/client.js';
+import { readDatabaseStats } from '../platform/db/stats.js';
+import { readDataQuality } from '../signals/quality.js';
+import { readIntegrityReport } from '../signals/integrity.js';
+import { readSnapshotAnalysis } from '../signals/analysis.js';
+import { readSignalScoringReport } from '../signals/scoring.js';
+import { archiveDuneSource } from '../dune/ingest/archive.js';
+import { importDuneContent } from '../dune/ingest/importer.js';
+import { storeGmgnSignal } from '../gmgn/capture/ingest.js';
+import { asRecord, normalizeGmgnProfitStat } from '../gmgn/normalize.js';
 import { listGmgnTokenAddresses } from '../gmgn/tokenAddresses.js';
-import { readGmgnCredentialStatus } from '../gmgn/credentials.js';
-import { probeGmgn } from '../gmgn/probe.js';
-import { captureGmgnSignals } from '../gmgn/capture.js';
-import { importGmgnBrowserCapture } from '../gmgn/browserImport.js';
+import { readGmgnCredentialStatus } from '../gmgn/client/credentials.js';
+import { probeGmgn } from '../gmgn/capture/probe.js';
+import { captureGmgnSignals } from '../gmgn/capture/capture.js';
+import { importGmgnBrowserCapture } from '../gmgn/capture/browserImport.js';
 import { listGmgnArchives } from '../gmgn/archives.js';
-import { getGmgnWatchStatus, startGmgnWatch, stopGmgnWatch } from '../gmgn/watch.js';
 import { RESEARCH_QUESTION } from '../research/question.js';
-import { logDiagnostic, readRecentDiagnostics } from '../db/diagnostics.js';
-import { redactSensitiveText } from '../security/redaction.js';
-import { probeBirdeye } from '../birdeye/probe.js';
-import { listOutcomeCandidates, measureSignalsOutcome } from '../birdeye/outcome.js';
-import { measureDuneOutcomes, readAllDuneOutcomes, readLatestDuneOutcomes, reconcileStuckDuneRuns } from '../dune/outcomes.js';
+import { logDiagnostic, readRecentDiagnostics } from '../platform/db/diagnostics.js';
+import { redactSensitiveText } from '../platform/security/redaction.js';
+import { listOutcomeCandidates, measureDuneOutcomes, readAllDuneOutcomes, readLatestDuneOutcomes, reconcileStuckDuneRuns } from '../dune/outcomes.js';
 import { buildMeasurementPlan } from '../dune/planner.js';
-import { computeSignalPatternReport, computeSignalPatternSubgroupReport, listSignalPatternSnapshots, saveSignalPatternSnapshot, type SubgroupProperty } from '../db/patterns.js';
-import { listRadarSnapshots, listWalletRankSnapshots, listSmartMoneyWalletStats, listTwitterMessages, readRawEndpointSummary } from '../gmgn/rawEndpointReads.js';
-import { computeRobustPatternReport, type RobustPatternReport } from '../db/robustPatterns.js';
-import { computeCopyTradeReport, readCopyTradeSummary, saveCopyTradeSnapshot } from '../copytrade/evaluate.js';
-import { computeHistoricalConsistency } from '../copytrade/historicalConsistency.js';
-import { computeCopyCandidates, computeHighUpsideEligibleCandidates, computeScreenPassCandidates, type CopySimulationSurvivalInput } from '../copytrade/copyCandidates.js';
-import { listLeaderboardSnapshotStatuses, listRosterWallets, readCaptureHealth, resolveSingleTrader, syncCopyTradeRoster } from '../copytrade/roster.js';
+import { computeSignalPatternReport, computeSignalPatternSubgroupReport, listSignalPatternSnapshots, saveSignalPatternSnapshot, type SubgroupProperty } from '../signals/patterns.js';
+import { listRadarSnapshots, listWalletRankSnapshots, listSmartMoneyWalletStats, listTwitterMessages, readRawEndpointSummary } from '../gmgn/client/rawEndpointReads.js';
+import { computeRobustPatternReport, type RobustPatternReport } from '../signals/robustPatterns.js';
+import { computeCopyTradeReport, readCopyTradeSummary, saveCopyTradeSnapshot } from '../copytrade/scrutiny/evaluate.js';
+import { computeHistoricalConsistency } from '../copytrade/scrutiny/historicalConsistency.js';
+import { computeCopyCandidates, computeHighUpsideEligibleCandidates, computeScreenPassCandidates, type CopySimulationSurvivalInput } from '../copytrade/scrutiny/copyCandidates.js';
+import { listLeaderboardSnapshotStatuses, listRosterWallets, readCaptureHealth, resolveSingleTrader, syncCopyTradeRoster } from '../copytrade/screening/roster.js';
 import { refreshCurrentWalletRank, RESEARCH_RANK_MIN_WINRATE_30D, RESEARCH_RANK_ORDERBY } from '../gmgn/walletRankFetch.js';
-import { compareLatestRosterSnapshots } from '../copytrade/roster.js';
-import { hasActiveFetchRun, readFetchRunState, reconcileStaleFetchRuns, requestCopyTradeFetchStop, resetCopyTradeFetchResume, startCopyTradeFetch } from '../copytrade/fetch.js';
-import { readGmgnStatsFetchStatus, startGmgnStatsFetch, stopGmgnStatsFetch } from '../copytrade/statsFetch.js';
-import { projectFetchDuration } from '../copytrade/estimate.js';
-import { evaluateExperiment, freezeExperiment, listExperiments } from '../copytrade/experiments.js';
-import { computeCopySimulationReport, computeLiquidityImpactReport, runCopySimulationBatch } from '../copytrade/copySimulation.js';
-import { computeEliminationReport, estimateDuneRefetchDuration } from '../copytrade/eliminationFilter.js';
-import { computeCandidateScrutinyBatch, MAX_SCRUTINY_WALLETS } from '../copytrade/candidateScrutiny.js';
-import { DEFAULT_FULLY_COVERED_PERIOD_DAYS, readFullyCoveredWallets } from '../copytrade/fullyCovered.js';
-import { DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS, MAX_PATTERN_DISCOVERY_PERIOD_DAYS, readPatternDiscoveryExport } from '../copytrade/patternDiscovery.js';
-import { PatternDiscoveryRunnerError, runPatternDiscoveryReport } from '../copytrade/patternDiscoveryRunner.js';
-import { waitForGmgnRequest } from '../gmgn/rateLimit.js';
+import { compareLatestRosterSnapshots } from '../copytrade/screening/roster.js';
+import { hasActiveFetchRun, readFetchRunState, reconcileStaleFetchRuns, requestCopyTradeFetchStop, resetCopyTradeFetchResume, startCopyTradeFetch } from '../copytrade/screening/fetch.js';
+import { readGmgnStatsFetchStatus, startGmgnStatsFetch, stopGmgnStatsFetch } from '../copytrade/screening/statsFetch.js';
+import { projectFetchDuration } from '../copytrade/screening/estimate.js';
+import { computeCopySimulationReport, computeLiquidityImpactReport, runCopySimulationBatch } from '../copytrade/simulation/copySimulation.js';
+import { computeEliminationReport, estimateDuneRefetchDuration } from '../copytrade/scrutiny/eliminationFilter.js';
+import { computeCandidateScrutinyBatch, MAX_SCRUTINY_WALLETS } from '../copytrade/scrutiny/candidateScrutiny.js';
+import { DEFAULT_FULLY_COVERED_PERIOD_DAYS, readFullyCoveredWallets } from '../copytrade/scrutiny/fullyCovered.js';
+import { DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS, MAX_PATTERN_DISCOVERY_PERIOD_DAYS, readPatternDiscoveryExport } from '../copytrade/discovery/patternDiscovery.js';
+import { PatternDiscoveryRunnerError, runPatternDiscoveryReport } from '../copytrade/discovery/patternDiscoveryRunner.js';
+import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
-import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/gmgnRisk.js';
+import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
 
 /** Scrutiny interrogates individually-pinned wallets, not a ranked top-N — so its roster scope
  *  must cover the whole roster (well above its current ~113-wallet size), unlike /winners's
  *  deliberate top-25 cutoff. */
 const SCRUTINY_ROSTER_LIMIT = 500;
 
-const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const firstValue = (source: Record<string, unknown>, keys: string[]): unknown => keys.map((key) => source[key]).find((value) => value !== undefined && value !== null);
-const numberValue = (source: Record<string, unknown>, keys: string[]): number | null => {
-  const value = firstValue(source, keys);
-  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-};
-const normalizeGmgnProfitStat = (payload: unknown) => {
-  const outer = asRecord(payload);
-  const source = asRecord(outer.data ?? outer.result ?? payload);
-  const risk = asRecord(source.risk);
-  return {
-    realizedProfit: numberValue(source, ['realized_profit', 'realizedProfit', 'profit']),
-    realizedPnlPercent: numberValue(source, ['realized_profit_pnl', 'realized_profit_pnl_percent', 'pnl', 'pnl_percent']),
-    winRate: numberValue(source, ['winrate', 'win_rate', 'winRate']),
-    buys: numberValue(source, ['buy', 'buy_count', 'buys']),
-    sells: numberValue(source, ['sell', 'sell_count', 'sells']),
-    fees: numberValue(source, ['fee', 'fees', 'total_fee', 'total_fees']),
-    averageHoldingSeconds: numberValue(source, ['avg_holding_period', 'avg_holding_period_seconds', 'avg_hold_time']),
-    nativeBalance: numberValue(source, ['native_balance', 'nativeBalance', 'sol_balance']),
-    tokenCount: numberValue(source, ['token_num', 'token_count', 'tokens']),
-    risk: {
-      noBuyHold: numberValue(risk, ['no_buy_hold']), noBuyHoldRatio: numberValue(risk, ['no_buy_hold_ratio']),
-      sellPassBuy: numberValue(risk, ['sell_pass_buy']), sellPassBuyRatio: numberValue(risk, ['sell_pass_buy_ratio']),
-      fastTx: numberValue(risk, ['fast_tx']), fastTxRatio: numberValue(risk, ['fast_tx_ratio']),
-    },
-    pnlDistribution: Object.fromEntries(Object.entries(source).filter(([key]) => /pnl|profit/i.test(key) && typeof source[key] === 'number' || /pnl|profit/i.test(key) && typeof source[key] === 'string')),
-  };
-};
-import type { DunePollUpdate } from '../copytrade/copySimulationDune.js';
+import type { DunePollUpdate } from '../copytrade/simulation/copySimulationDune.js';
 import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
-import {
-  computeCallerCheckpointBreakdown, computeCallerEvaluationReport, hasActiveCollectionRun, readCallerDetail, readCollectionRunState,
-  readLeaderboard, startCollectionRun, stopCollectionRuns, trackCaller, untrackCaller,
-  LEADERBOARD_CAPTURE_COOLDOWN_MS, msSinceLastCollectionStart, reconcileOrphanedCollectionRuns, rearmPausedCollectionRuns, resumeCollectionRun,
-  type CollectionKind,
-} from '../copytrade/topCallers.js';
 
 const database = openDatabase();
 // A CopyTrade fetch only runs inside the process that started it, so anything still marked
 // running at startup was orphaned by a restart and would otherwise latch the single-run guard.
-reconcileStaleFetchRuns(database);
-reconcileOrphanedCollectionRuns(database);
-rearmPausedCollectionRuns(database);
+const interruptedFetches = reconcileStaleFetchRuns(database);
+// In development, a Vite/tsx restart is common and should not turn a partially fetched GMGN
+// snapshot into a manual recovery task. Resume only the exact restart-interruption marker; a
+// user-cancelled run, reset snapshot, ordinary provider failure, or completed run remains idle.
+// The cursor and idempotent trade storage make this safe: already-saved pages are skipped or
+// deduplicated, while the next saved cursor continues the unfinished wallet.
+if (interruptedFetches > 0 && process.env.CRYPTO_AUTO_RESUME_INTERRUPTED_FETCHES !== 'false') {
+  const interrupted = database.prepare(
+    `SELECT id, requested_period_days AS periodDays, trader_limit AS traderLimit
+     FROM copytrade_fetch_runs
+     WHERE fetch_scope = 'roster'
+       AND status = 'failed'
+       AND error = 'Interrupted: the server restarted while this fetch was running. Already-fetched trades were kept.'
+       AND COALESCE(resume_disabled, 0) = 0
+     ORDER BY id DESC LIMIT 1`,
+  ).get() as { id: number; periodDays: number | null; traderLimit: number | null } | undefined;
+  if (interrupted) {
+    console.log(`[copytrade] automatically resuming interrupted GMGN fetch ${interrupted.id}`);
+    startCopyTradeFetch(database, {
+      limit: interrupted.traderLimit ?? 100,
+      periodDays: interrupted.periodDays ?? 30,
+      scope: 'roster',
+    });
+  }
+}
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const uiRoot = path.join(projectRoot, 'dist-ui');
 const port = Number(process.env.CRYPTO_RESEARCH_PORT ?? 4173);
@@ -158,10 +142,21 @@ const readCachedResearch = <T>(key: string, compute: () => T): T => {
   return value;
 };
 
+// Bump the v-suffix whenever CopySimulationReport/CopySimulationWalletReport's shape changes
+// (new/renamed/removed fields). readCachedResearch's fingerprint only tracks DATA changes (row
+// counts/max ids); it has no way to detect that the CODE summarizing that data changed shape.
+// Without a version bump here, a stale JSON already persisted in copytrade_report_cache (which
+// survives server restarts, unlike the in-memory Map layered on top of it) keeps being served
+// forever once the underlying trade/simulation rows stop changing — confirmed live, 2026-08-23:
+// adding pendingDuneTargets/duneNoMatchTargets/duneMatchedTargets to CopySimulationWalletReport
+// was correctly computed by fresh calls but kept invisible to a browser tab that had already
+// triggered a cache write, and no server restart or browser action fixed it — only this bump
+// does. Same pattern this file already uses for the wallet-stats results cache (`results-v3`).
+const COPY_SIMULATION_CACHE_VERSION = 2;
 const copySimulationCacheKey = (walletAddresses: string[], periodDays?: number): string => {
   const scope = [...new Set(walletAddresses)].sort().join(',');
   const scopeHash = createHash('sha256').update(scope, 'utf8').digest('hex').slice(0, 24);
-  return `copy-simulation:${periodDays ?? 'all'}:${scopeHash}`;
+  return `copy-simulation-v${COPY_SIMULATION_CACHE_VERSION}:${periodDays ?? 'all'}:${scopeHash}`;
 };
 
 /** `batches` records every batch this run attempted and how it ended, so "it stopped" can always
@@ -202,7 +197,6 @@ let copySimulationBatchStartedAt = 0;
 // runway on the manual one-off capture path first. /status and /stop stay live (harmless,
 // idempotent) so the UI can still reflect state; only /start is blocked. Flip this back to
 // true to re-enable — no other changes needed.
-const GMGN_WATCH_MODE_ENABLED = false;
 
 const json = (response: ServerResponse, status: number, value: unknown): void => {
   const body = JSON.stringify(value);
@@ -361,23 +355,11 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, RESEARCH_QUESTION);
       return;
     }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/birdeye/probe') {
-      const payload = await readJsonBody(request) as { tokenAddress?: unknown; targetTimestamp?: unknown };
-      if (typeof payload.tokenAddress !== 'string' || typeof payload.targetTimestamp !== 'string') { respond(400, { error: 'Probe requires tokenAddress and targetTimestamp.' }); return; }
-      respond(200, await probeBirdeye(database, payload.tokenAddress, payload.targetTimestamp));
-      return;
-    }
     if (request.method === 'GET' && requestUrl.pathname === '/api/dune/candidates') {
       const rawLimit = requestUrl.searchParams.get('limit');
       const limit = rawLimit === null ? undefined : Number(rawLimit);
       if (rawLimit !== null && (!Number.isFinite(limit) || (limit as number) <= 0)) { respond(400, { error: 'limit must be a positive number when provided.' }); return; }
       respond(200, listOutcomeCandidates(database, limit));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/birdeye/outcomes') {
-      const payload = await readJsonBody(request) as { signalIds?: unknown };
-      if (!Array.isArray(payload.signalIds) || payload.signalIds.some((id) => typeof id !== 'number' || !Number.isInteger(id))) { respond(400, { error: 'Outcome measurement requires signal ids.' }); return; }
-      respond(200, await measureSignalsOutcome(database, payload.signalIds));
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/dune/outcomes') {
@@ -693,50 +675,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, compareLatestRosterSnapshots(database, { chain: 'sol', limit: 100 }));
       return;
     }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/experiments/freeze') {
-      const payload = (await readJsonBody(request)) as { snapshotId?: unknown; primaryTopN?: unknown; rosterTopN?: unknown; evaluationWindowsDays?: unknown };
-      const snapshotId = Number(payload.snapshotId);
-      if (!Number.isInteger(snapshotId) || snapshotId <= 0) { respond(400, { error: 'snapshotId must be a positive integer.' }); return; }
-      const primaryTopN = Number.isInteger(payload.primaryTopN) && Number(payload.primaryTopN) > 0 ? Number(payload.primaryTopN) : undefined;
-      const rosterTopN = Number.isInteger(payload.rosterTopN) && Number(payload.rosterTopN) > 0 ? Number(payload.rosterTopN) : undefined;
-      const evaluationWindowsDays = Array.isArray(payload.evaluationWindowsDays) && payload.evaluationWindowsDays.every((value) => Number.isInteger(value) && value > 0)
-        ? payload.evaluationWindowsDays as number[] : undefined;
-      try {
-        respond(200, freezeExperiment(database, snapshotId, { primaryTopN, rosterTopN, evaluationWindowsDays }));
-      } catch (error: unknown) {
-        respond(400, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/experiments') {
-      respond(200, listExperiments(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/copytrade/experiments/')) {
-      const experimentId = Number(requestUrl.pathname.slice('/api/copytrade/experiments/'.length));
-      if (!Number.isInteger(experimentId) || experimentId <= 0) { respond(400, { error: 'Experiment id must be a positive integer.' }); return; }
-      try {
-        // Forward validation is intentionally scoped to the first-stage Winners set. The frozen
-        // roster remains 25 wallets for provenance/comparison, but only wallets that currently
-        // clear the research gates should consume attention in this detailed report.
-        const screenReport = computeCopyTradeReport(database, { periodDays: 90, traderLimit: 25 });
-        const { computed: historicalConsistency } = readHistoricalConsistencyForRoster(database, 25);
-        const winnerAddresses = new Set(computeCopyCandidates(
-          screenReport,
-          historicalConsistency,
-          readCopySimulationSurvivalMap(database, screenReport, historicalConsistency),
-        ).candidates.map((candidate) => candidate.walletAddress));
-        const report = evaluateExperiment(database, experimentId);
-        respond(200, {
-          ...report,
-          wallets: report.wallets.filter((wallet) => winnerAddresses.has(wallet.walletAddress)),
-          evaluatedScope: { kind: 'first_stage_winners', winnerCount: winnerAddresses.size, frozenRosterCount: report.wallets.length },
-        });
-      } catch (error: unknown) {
-        respond(404, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/results') {
       const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '');
       const periodDays = Number.isInteger(periodParam) && periodParam > 0 ? periodParam : undefined;
@@ -744,7 +682,9 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const traderLimit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : undefined;
       const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
       const rosterSnapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
-      const key = `results:${periodDays ?? 'default'}:${traderLimit ?? 'default'}:${rosterSnapshotId ?? 'latest'}`;
+      // Bump when the report row contract changes. Otherwise a valid fingerprint can
+      // resurrect an older persisted JSON report that lacks newly-added evidence fields.
+      const key = `results-v3:${periodDays ?? 'default'}:${traderLimit ?? 'default'}:${rosterSnapshotId ?? 'latest'}`;
       respond(200, readCachedResearch(key, () => computeCopyTradeReport(database, { periodDays, traderLimit, rosterSnapshotId })));
       return;
     }
@@ -1249,104 +1189,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, copySimulationRunState);
       return;
     }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/top-callers/leaderboard') {
-      respond(200, readLeaderboard(database));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/track') {
-      const payload = (await readJsonBody(request)) as { callerKey?: unknown };
-      if (typeof payload.callerKey !== 'string' || !payload.callerKey.trim()) { respond(400, { error: 'callerKey is required.' }); return; }
-      trackCaller(database, payload.callerKey.trim());
-      respond(200, { tracked: true });
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/untrack') {
-      const payload = (await readJsonBody(request)) as { callerKey?: unknown };
-      if (typeof payload.callerKey !== 'string' || !payload.callerKey.trim()) { respond(400, { error: 'callerKey is required.' }); return; }
-      untrackCaller(database, payload.callerKey.trim());
-      respond(200, { tracked: false });
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/collect') {
-      const payload = (await readJsonBody(request)) as { kind?: unknown };
-      const validKinds: CollectionKind[] = ['leaderboard', 'callouts', 'checkpoints'];
-      if (typeof payload.kind !== 'string' || !validKinds.includes(payload.kind as CollectionKind)) {
-        respond(400, { error: `kind must be one of: ${validKinds.join(', ')}.` });
-        return;
-      }
-      const kind = payload.kind as CollectionKind;
-      if (kind === 'leaderboard') {
-        const elapsed = msSinceLastCollectionStart(database, kind);
-        if (elapsed !== null && elapsed < LEADERBOARD_CAPTURE_COOLDOWN_MS) {
-          const retryAfterSeconds = Math.ceil((LEADERBOARD_CAPTURE_COOLDOWN_MS - elapsed) / 1000);
-          respond(429, {
-            error: `Leaderboard capture cooldown active. Try again in ${retryAfterSeconds}s.`,
-            retryAfterSeconds,
-          });
-          return;
-        }
-      }
-      if (hasActiveCollectionRun(database, kind)) { respond(409, { error: `A collection run of kind "${kind}" is already in progress.` }); return; }
-      // Start the network work in the background so the browser receives an immediate running
-      // state and can show progress/countdown instead of appearing frozen until GMGN/Dune
-      // finishes. The durable run row is the source of truth polled by the UI.
-      void startCollectionRun(database, kind).catch((error: unknown) => {
-        logDiagnostic(database, { level: 'error', event: 'top_caller_collection_background_failure', method: request.method, path: requestUrl.pathname, message: error instanceof Error ? error.message : String(error) });
-      });
-      respond(202, { status: 'running', kind });
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/top-callers/collect/status') {
-      const kindParam = requestUrl.searchParams.get('kind');
-      const validKinds: CollectionKind[] = ['leaderboard', 'callouts', 'checkpoints'];
-      if (!kindParam || !validKinds.includes(kindParam as CollectionKind)) { respond(400, { error: `kind must be one of: ${validKinds.join(', ')}.` }); return; }
-      respond(200, readCollectionRunState(database, kindParam as CollectionKind));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/collect/stop') {
-      const payload = (await readJsonBody(request)) as { kind?: unknown };
-      const validKinds: CollectionKind[] = ['leaderboard', 'callouts', 'checkpoints'];
-      const kind = typeof payload.kind === 'string' && validKinds.includes(payload.kind as CollectionKind)
-        ? payload.kind as CollectionKind : undefined;
-      if (payload.kind !== undefined && kind === undefined) { respond(400, { error: `kind must be one of: ${validKinds.join(', ')}.` }); return; }
-      respond(200, { stopped: stopCollectionRuns(database, kind), status: 'cancelled', message: 'Stopped by user; data already fetched is retained.' });
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/top-callers/resume') {
-      const payload = (await readJsonBody(request)) as { runId?: unknown };
-      const runId = payload.runId === undefined ? undefined : Number(payload.runId);
-      if (runId !== undefined && (!Number.isInteger(runId) || runId <= 0)) { respond(400, { error: 'runId must be a positive integer.' }); return; }
-      try {
-        const row = (runId
-          ? database.prepare(`SELECT id FROM top_caller_collection_runs WHERE id = ? AND status = 'paused'`).get(runId)
-          : database.prepare(`SELECT id FROM top_caller_collection_runs WHERE status = 'paused' ORDER BY id DESC LIMIT 1`).get()) as { id: number } | undefined;
-        if (!row) { respond(404, { error: 'No paused Top Caller collection run exists.' }); return; }
-        void resumeCollectionRun(database, row.id).catch((error: unknown) => {
-          logDiagnostic(database, { level: 'error', event: 'top_caller_resume_background_failure', message: error instanceof Error ? error.message : String(error) });
-        });
-        respond(200, { runId: row.id, status: 'running' });
-      } catch (error) {
-        respond(404, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/top-callers/callers') {
-      const checkpoint = requestUrl.searchParams.get('checkpoint') ?? undefined;
-      respond(200, checkpoint ? computeCallerEvaluationReport(database, checkpoint) : computeCallerEvaluationReport(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/top-callers/callers/') && requestUrl.pathname.endsWith('/checkpoints')) {
-      const callerKey = decodeURIComponent(requestUrl.pathname.slice('/api/top-callers/callers/'.length, -'/checkpoints'.length));
-      if (!callerKey) { respond(400, { error: 'callerKey is required.' }); return; }
-      respond(200, { callerKey, rows: computeCallerCheckpointBreakdown(database, callerKey) });
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/top-callers/callers/')) {
-      const callerKey = decodeURIComponent(requestUrl.pathname.slice('/api/top-callers/callers/'.length));
-      if (!callerKey) { respond(400, { error: 'callerKey is required.' }); return; }
-      respond(200, readCallerDetail(database, callerKey));
-      return;
-    }
     if (request.method === 'GET' && requestUrl.pathname === '/api/logs') {
       const limitParam = Number(requestUrl.searchParams.get('limit') ?? '100');
       const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : 100;
@@ -1369,25 +1211,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/gmgn/archives') {
       respond(200, listGmgnArchives());
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/gmgn/watch/status') {
-      respond(200, getGmgnWatchStatus());
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/gmgn/watch/start') {
-      // See GMGN_WATCH_MODE_ENABLED above — continuous polling is intentionally disabled for now.
-      if (!GMGN_WATCH_MODE_ENABLED) {
-        respond(503, { error: 'Watch mode is temporarily disabled. Use "Fetch once" for now.' });
-        return;
-      }
-      const payload = await readJsonBody(request).catch(() => ({})) as { intervalSeconds?: unknown };
-      const intervalSeconds = typeof payload.intervalSeconds === 'number' ? payload.intervalSeconds : undefined;
-      respond(200, startGmgnWatch(database, intervalSeconds));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/gmgn/watch/stop') {
-      respond(200, stopGmgnWatch(database));
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/imports') {

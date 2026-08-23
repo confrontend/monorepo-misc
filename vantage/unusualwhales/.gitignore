@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-ui/
+.data/
+.secrets/
+.env
+*.pem
+*.key
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.tsbuildinfo

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
-import { readPatternDiscoveryExport, readPreEventFeatures } from '../src/copytrade/patternDiscovery.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
+import { readPatternDiscoveryExport, readPreEventFeatures } from '../src/copytrade/discovery/patternDiscovery.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');

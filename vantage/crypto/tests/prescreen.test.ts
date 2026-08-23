@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
+import { openDatabase } from '../src/platform/db/client.js';
 import { runPrescreen, selectRetryQueueIds, type PrescreenCandidate } from '../src/dune/prescreen.js';
 
 const candidate = (id: number, token: string, type: string, observedAt: string, capturedAt = observedAt): PrescreenCandidate => ({ id, tokenAddress: token, signalType: type, observedAt, capturedAt, cohortMatched: false, plannerState: 'not_measured' });

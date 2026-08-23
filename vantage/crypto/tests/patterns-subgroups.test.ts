@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
-import { computeSignalPatternSubgroupReport } from '../src/db/patterns.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
+import { computeSignalPatternSubgroupReport } from '../src/signals/patterns.js';
 
 // Mirrors tests/patterns.test.ts's fixture pattern. Extends the raw event with the fields the
 // subgroup extractor reads (trigger_at plus either the verbose `data.*` or abbreviated

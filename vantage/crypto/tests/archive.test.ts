@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { archiveDuneSource, readZipEntries, zipStored } from '../src/dune/archive.js';
+import { archiveDuneSource, readZipEntries, zipStored } from '../src/dune/ingest/archive.js';
 
 test('processed Dune source is written as a ZIP with source and manifest entries', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'crypto-archive-'));

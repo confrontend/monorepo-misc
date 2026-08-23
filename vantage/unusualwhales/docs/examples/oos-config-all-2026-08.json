@@ -1,0 +1,21 @@
+{
+  "methodologyVersion": "unusual-whales-oos-v2-generic-events-2026-08",
+  "inSample": { "start": "2026-07-20T00:00:00.000Z", "end": "2026-08-01T00:00:00.000Z" },
+  "outOfSample": { "start": "2026-08-08T00:00:00.000Z", "end": "2026-08-19T00:00:00.000Z" },
+  "asOf": "2026-08-21T00:00:00.000Z",
+  "embargoMs": 604800000,
+  "selections": [
+    { "signalId": "call_sweep", "direction": "bullish" },
+    { "signalId": "put_sweep", "direction": "bearish" },
+    { "signalId": "flow_imbalance", "direction": "signed" },
+    { "signalId": "dark_pool_block", "direction": "signed" },
+    { "signalId": "open_interest_spike", "direction": "signed" },
+    { "signalId": "market_etf_flow", "direction": "signed" },
+    { "signalId": "gex_gamma", "direction": "signed" },
+    { "signalId": "insider_activity", "direction": "signed" },
+    { "signalId": "congress_activity", "direction": "signed" }
+  ],
+  "horizons": ["+1d", "+3d"],
+  "costsBpsPerSide": [10, 25, 50],
+  "minimumUsableOutcomes": 30
+}

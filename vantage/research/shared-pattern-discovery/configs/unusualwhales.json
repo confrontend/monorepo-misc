@@ -1,0 +1,32 @@
+{
+  "project": "unusualwhales",
+  "version": "uw-v1-event-time-allowlist",
+  "allow_list": [
+    {"name": "signal_type", "justification": "Signal classification is stored with the event."},
+    {"name": "underlying_symbol", "justification": "Instrument identity is present on the event."},
+    {"name": "symbol", "justification": "Instrument identity is present on the event."},
+    {"name": "premium", "justification": "Trade premium is observed at the provider event."},
+    {"name": "size", "justification": "Trade size is observed at the provider event."},
+    {"name": "open_interest", "justification": "Provider open interest is captured with event provenance."},
+    {"name": "volume", "justification": "Provider volume is captured with event provenance."},
+    {"name": "nbbo_bid", "justification": "Quote bid is captured with the trade event."},
+    {"name": "nbbo_ask", "justification": "Quote ask is captured with the trade event."},
+    {"name": "strike", "justification": "Contract strike is known at the event."},
+    {"name": "underlying_price", "justification": "Underlying price is captured at the event."},
+    {"name": "expiry", "justification": "Contract expiry is known at the event."},
+    {"name": "executed_at", "justification": "Execution timestamp anchors event-time ordering."},
+    {"name": "event_at", "justification": "Event timestamp anchors event-time ordering."},
+    {"name": "observable_at", "justification": "Provider observable timestamp anchors event-time ordering."},
+    {"name": "dte_days", "justification": "Derived only from expiry minus executed_at, never current time."},
+    {"name": "volume_oi_ratio", "justification": "Deterministic transform of event-time volume and open interest."},
+    {"name": "spread_pct", "justification": "Deterministic transform of event-time NBBO quotes."},
+    {"name": "moneyness_pct", "justification": "Deterministic transform of event-time strike and underlying price."},
+    {"name": "side_score", "justification": "Deterministic event-time trade-side feature."},
+    {"name": "report_flags", "justification": "Captured event labels are known at event time."},
+    {"name": "tags", "justification": "Captured event labels are known at event time."}
+  ],
+  "reject_by_default": [
+    "captured_at", "retrieved_at", "post_event_market_bar", "outcome", "checkpoint", "return",
+    "current_value", "provider_field_with_later_timestamp", "dte_from_now"
+  ]
+}

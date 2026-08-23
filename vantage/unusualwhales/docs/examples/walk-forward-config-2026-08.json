@@ -1,0 +1,25 @@
+{
+  "methodologyVersion": "unusual-whales-walk-forward-v1-2026-08",
+  "selections": [
+    { "signalId": "call_sweep", "direction": "bullish" },
+    { "signalId": "put_sweep", "direction": "bearish" },
+    { "signalId": "dark_pool_block", "direction": "signed" }
+  ],
+  "horizons": ["+1d", "+3d", "+5d", "+10d", "+20d"],
+  "costsBpsPerSide": [10, 25, 50],
+  "minimumUsableOutcomes": 30,
+  "windows": [
+    {
+      "id": "holdout-2026-08-01",
+      "inSample": { "start": "2026-06-01T00:00:00.000Z", "end": "2026-07-01T00:00:00.000Z" },
+      "outOfSample": { "start": "2026-07-08T00:00:00.000Z", "end": "2026-08-01T00:00:00.000Z" },
+      "asOf": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "holdout-2026-08-19",
+      "inSample": { "start": "2026-07-20T00:00:00.000Z", "end": "2026-08-01T00:00:00.000Z" },
+      "outOfSample": { "start": "2026-08-08T00:00:00.000Z", "end": "2026-08-19T00:00:00.000Z" },
+      "asOf": "2026-08-21T00:00:00.000Z"
+    }
+  ]
+}

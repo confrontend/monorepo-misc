@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
 import {
   computeCopySimulationReport, computeLiquidityImpactReport, DEFAULT_COPIER_DELAY_SECONDS, DEFAULT_FEE_BPS,
   DEFAULT_SLIPPAGE_BPS, MAX_MATCH_GAP_SECONDS, MIN_LIQUIDITY_BAND_SAMPLE, simulateFixedStakePortfolio,
   type CopySimulationReport, type CopySimulationTradeResult,
-} from '../src/copytrade/copySimulation.js';
-import { readAllCopySimulationMatches, rowsToMatches, sqlFor, WIDE_SEARCH_WINDOW_MINUTES } from '../src/copytrade/copySimulationDune.js';
+} from '../src/copytrade/simulation/copySimulation.js';
+import { readAllCopySimulationMatches, rowsToMatches, sqlFor, WIDE_SEARCH_WINDOW_MINUTES } from '../src/copytrade/simulation/copySimulationDune.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');
@@ -155,6 +155,62 @@ test('a round trip with both legs matched well within the gap tolerance is simul
     const expectedReturnPercent = Math.round(((expectedExit - expectedEntry) / expectedEntry) * 100 * 100) / 100;
     assert.equal(wallet.trades[0]?.simulatedReturnPercent, expectedReturnPercent);
     assert.ok((wallet.simulatedMedianReturnPercent ?? wallet.trades[0]!.simulatedReturnPercent!) < 50, 'fees and slippage must reduce the return below the raw price delta');
+  } finally { database.close(); }
+});
+
+/** Marks a trade id as covered by a completed run with no matching row — a real "Dune was
+ *  asked, found nothing" outcome, distinct from never being asked at all. */
+const seedNoMatch = (database: DatabaseSync, tradeId: number): void => {
+  database.prepare(
+    `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, completed_at, raw_result)
+     VALUES (?, 'SELECT 1', 'completed', 'now', 'now', ?)`,
+  ).run(JSON.stringify([tradeId]), JSON.stringify({ result: { rows: [] } }));
+};
+
+test('a round trip with one leg queried-no-match and the other never queried attributes exactly one leg to each bucket', () => {
+  const database = setup();
+  try {
+    const buyId = insertTradeRow(database, { walletAddress: 'W1', eventType: 'buy', tokenAddress: 'TOKA', observedTimestamp: 1000, buyCostUsd: '100', priceUsd: '1' });
+    const sellId = insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'TOKA', observedTimestamp: 2000, costUsd: '150', buyCostUsd: '100', priceUsd: '1.5' });
+    // Only the buy leg has ever been sent to Dune, and it came back with no match. The sell leg
+    // has never been queried at all — it must count as pending, not as a second "no match".
+    seedNoMatch(database, buyId);
+
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'] }).wallets[0]!;
+    assert.equal(wallet.pendingDuneTargets, 1, 'the never-queried sell leg is pending, not a Dune miss');
+    assert.equal(wallet.duneNoMatchTargets, 1, 'the queried buy leg is a genuine Dune miss');
+    assert.equal(wallet.duneMatchedTargets, 0);
+    // The round trip itself is still reported as a single status (this is the coarser view the
+    // decision table shows); the leg-level split above is what a Dune-fetch scope decision needs.
+    assert.equal(wallet.trades[0]?.status, 'missing_entry_match');
+  } finally { database.close(); }
+});
+
+test('per-wallet pending/no-match/matched target counts sum to the report-level totals across multiple wallets', () => {
+  const database = setup();
+  try {
+    // W1: one fully simulated round trip (2 matched legs).
+    seedRoundTrip(database, 'W1', 'TOKA', 1000, 10);
+    // W2: one leg matched, one leg queried-no-match, one leg never queried (a second, untouched trip).
+    const buyId = insertTradeRow(database, { walletAddress: 'W2', eventType: 'buy', tokenAddress: 'TOKB', observedTimestamp: 1000, buyCostUsd: '100', priceUsd: '1' });
+    const sellId = insertTradeRow(database, { walletAddress: 'W2', eventType: 'sell', tokenAddress: 'TOKB', observedTimestamp: 2000, costUsd: '150', buyCostUsd: '100', priceUsd: '1.5' });
+    seedDuneMatch(database, buyId, new Date((1000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1.0);
+    seedNoMatch(database, sellId);
+    insertTradeRow(database, { walletAddress: 'W2', eventType: 'buy', tokenAddress: 'TOKC', observedTimestamp: 3000, buyCostUsd: '100', priceUsd: '1' });
+    insertTradeRow(database, { walletAddress: 'W2', eventType: 'sell', tokenAddress: 'TOKC', observedTimestamp: 4000, costUsd: '150', buyCostUsd: '100', priceUsd: '1.5' });
+
+    const report = computeCopySimulationReport(database, { walletAddresses: ['W1', 'W2'] });
+    const sum = (key: 'pendingDuneTargets' | 'duneNoMatchTargets' | 'duneMatchedTargets') =>
+      report.wallets.reduce((total, wallet) => total + (wallet[key] ?? 0), 0);
+    assert.equal(sum('pendingDuneTargets'), report.pendingDuneTargets, 'per-wallet pending totals must match the report-level total the fetch button reads');
+    assert.equal(sum('duneNoMatchTargets'), report.duneNoMatchTargets);
+    assert.equal(sum('duneMatchedTargets'), report.duneMatchedTargets);
+    // Ground-truth expectation, not just internal consistency: W1 contributes 2 matched legs, 0
+    // pending. W2 contributes 1 matched, 1 no-match, and 2 pending (the untouched second trip).
+    const w1 = report.wallets.find((wallet) => wallet.walletAddress === 'W1')!;
+    const w2 = report.wallets.find((wallet) => wallet.walletAddress === 'W2')!;
+    assert.deepEqual([w1.pendingDuneTargets, w1.duneNoMatchTargets, w1.duneMatchedTargets], [0, 0, 2]);
+    assert.deepEqual([w2.pendingDuneTargets, w2.duneNoMatchTargets, w2.duneMatchedTargets], [2, 1, 1]);
   } finally { database.close(); }
 });
 

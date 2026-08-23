@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
-import { triggerBounds } from '../src/gmgn/polls.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
+import { triggerBounds } from '../src/gmgn/capture/polls.js';
 import fixture from './fixtures/gmgn-signal-response.json' with { type: 'json' };
 
 test('GMGN ingestion preserves the complete raw payload', () => {

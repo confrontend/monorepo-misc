@@ -9,7 +9,7 @@ import {
   patternDiscoveryPythonCandidates,
   resolvePatternDiscoveryPython,
   validatePatternDiscoveryRunInput,
-} from '../src/copytrade/patternDiscoveryRunner.js';
+} from '../src/copytrade/discovery/patternDiscoveryRunner.js';
 
 test('builds an isolated crypto CLI command with chronological holdout settings', () => {
   const command = buildPatternDiscoveryCommand({

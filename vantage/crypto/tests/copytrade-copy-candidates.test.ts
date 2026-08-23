@@ -3,9 +3,9 @@ import test from 'node:test';
 import {
   computeCopyCandidates, computeScreenPassCandidates, MIN_MEDIAN_HOLD_SECONDS, MAX_FAST_ROUND_TRIP_PERCENT,
   MAX_CONCENTRATION_PERCENT, DORMANT_AFTER_DAYS, type CopyCandidatesReport, type CopySimulationSurvivalInput,
-} from '../src/copytrade/copyCandidates.js';
-import type { CopyTradeReport, CopyTradeRow, Verdict } from '../src/copytrade/evaluate.js';
-import type { HistoricalConsistencyReport, HistoricalConsistencyVerdict } from '../src/copytrade/historicalConsistency.js';
+} from '../src/copytrade/scrutiny/copyCandidates.js';
+import type { CopyTradeReport, CopyTradeRow, Verdict } from '../src/copytrade/scrutiny/evaluate.js';
+import type { HistoricalConsistencyReport, HistoricalConsistencyVerdict } from '../src/copytrade/scrutiny/historicalConsistency.js';
 
 const baseRow = (walletAddress: string, over: Partial<CopyTradeRow> = {}): CopyTradeRow => ({
   walletAddress, name: null, trades: 200, winRatePercent: 60, medianReturnPercent: 10,

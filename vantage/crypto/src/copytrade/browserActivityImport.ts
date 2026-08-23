@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
-import { zipStored } from '../dune/archive.js';
-import { storeActivityPage } from './fetch.js';
+import { zipStored } from '../dune/ingest/archive.js';
+import { storeActivityPage } from './screening/fetch.js';
 
 type InvestigationSample = {
   observedAt?: unknown;

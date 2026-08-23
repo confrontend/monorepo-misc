@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { readSnapshotAnalysis } from '../src/db/analysis.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { readSnapshotAnalysis } from '../src/signals/analysis.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
 
 test('snapshot analysis is descriptive and excludes raw payloads', () => {
   const database = openDatabase(':memory:');

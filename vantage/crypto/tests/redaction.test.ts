@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { redactAccountIdentifiers } from '../src/security/redaction.js';
+import { redactAccountIdentifiers } from '../src/platform/security/redaction.js';
 
 test('redactAccountIdentifiers strips known account-identifying fields', () => {
   const raw = JSON.stringify({

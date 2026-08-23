@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bootstrapMedianCI, signTest, holmCorrection } from '../src/stats/inference.js';
+import { bootstrapMedianCI, signTest, holmCorrection } from '../src/platform/stats-utils/inference.js';
 
 test('bootstrapMedianCI: a constant array always resamples to the same median, CI collapses to a point', () => {
   const values = Array(20).fill(5);

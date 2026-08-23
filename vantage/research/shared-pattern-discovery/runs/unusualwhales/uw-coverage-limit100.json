@@ -1,0 +1,362 @@
+{
+  "metadata": {
+    "project": "unusualwhales",
+    "diagnostic_version": "uw-coverage-missingness-v1",
+    "source_database": "C:\\Code\\monorepo-misc\\vantage\\unusualwhales\\.data\\unusual-whales.sqlite",
+    "source_access": "sqlite read-only URI mode=ro; PRAGMA query_only=ON",
+    "source_event_table": "uw_option_trades",
+    "source_outcome_table": "uw_signal_outcomes",
+    "horizon_selection": [
+      "+5m",
+      "+30m",
+      "+1h",
+      "+1d",
+      "+3d"
+    ],
+    "limit": 100,
+    "exported_at": "2026-08-22T06:21:30.856337Z",
+    "selection_boundary": null
+  },
+  "survivorship": {
+    "provable_from_current_database": false,
+    "selection_boundary_supplied": false,
+    "note": "Entity survivorship cannot be proven from the current database unless a selection boundary is supplied and independently verified; this diagnostic does not infer survivorship from observed rows."
+  },
+  "horizons": {
+    "+5m": {
+      "event_sample_size": 100,
+      "outcome_row_count": 100,
+      "missing_outcome_row_count": 0,
+      "mature_count": 26,
+      "usable_count": 26,
+      "mature_coverage": 0.26,
+      "usable_coverage": 0.26,
+      "missingness_comparisons": [
+        {
+          "field": "premium",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1232.3076923076924,
+          "nonusable_mean": 509.85135135135135,
+          "mean_difference_usable_minus_nonusable": 722.456340956341,
+          "standardized_mean_difference": 0.4193012772935653,
+          "material_difference_flag": false
+        },
+        {
+          "field": "size",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 2.923076923076923,
+          "nonusable_mean": 2.5945945945945947,
+          "mean_difference_usable_minus_nonusable": 0.32848232848232817,
+          "standardized_mean_difference": 0.06296324418305445,
+          "material_difference_flag": false
+        },
+        {
+          "field": "open_interest",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 19394.653846153848,
+          "nonusable_mean": 9717.175675675675,
+          "mean_difference_usable_minus_nonusable": 9677.478170478173,
+          "standardized_mean_difference": 0.2532538054112469,
+          "material_difference_flag": false
+        },
+        {
+          "field": "notional",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1528.076923076923,
+          "nonusable_mean": 1726.2027027027027,
+          "mean_difference_usable_minus_nonusable": -198.12577962577961,
+          "standardized_mean_difference": -0.03501230901624045,
+          "material_difference_flag": false
+        }
+      ]
+    },
+    "+30m": {
+      "event_sample_size": 100,
+      "outcome_row_count": 100,
+      "missing_outcome_row_count": 0,
+      "mature_count": 26,
+      "usable_count": 26,
+      "mature_coverage": 0.26,
+      "usable_coverage": 0.26,
+      "missingness_comparisons": [
+        {
+          "field": "premium",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1232.3076923076924,
+          "nonusable_mean": 509.85135135135135,
+          "mean_difference_usable_minus_nonusable": 722.456340956341,
+          "standardized_mean_difference": 0.4193012772935653,
+          "material_difference_flag": false
+        },
+        {
+          "field": "size",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 2.923076923076923,
+          "nonusable_mean": 2.5945945945945947,
+          "mean_difference_usable_minus_nonusable": 0.32848232848232817,
+          "standardized_mean_difference": 0.06296324418305445,
+          "material_difference_flag": false
+        },
+        {
+          "field": "open_interest",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 19394.653846153848,
+          "nonusable_mean": 9717.175675675675,
+          "mean_difference_usable_minus_nonusable": 9677.478170478173,
+          "standardized_mean_difference": 0.2532538054112469,
+          "material_difference_flag": false
+        },
+        {
+          "field": "notional",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1528.076923076923,
+          "nonusable_mean": 1726.2027027027027,
+          "mean_difference_usable_minus_nonusable": -198.12577962577961,
+          "standardized_mean_difference": -0.03501230901624045,
+          "material_difference_flag": false
+        }
+      ]
+    },
+    "+1h": {
+      "event_sample_size": 100,
+      "outcome_row_count": 100,
+      "missing_outcome_row_count": 0,
+      "mature_count": 26,
+      "usable_count": 26,
+      "mature_coverage": 0.26,
+      "usable_coverage": 0.26,
+      "missingness_comparisons": [
+        {
+          "field": "premium",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1232.3076923076924,
+          "nonusable_mean": 509.85135135135135,
+          "mean_difference_usable_minus_nonusable": 722.456340956341,
+          "standardized_mean_difference": 0.4193012772935653,
+          "material_difference_flag": false
+        },
+        {
+          "field": "size",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 2.923076923076923,
+          "nonusable_mean": 2.5945945945945947,
+          "mean_difference_usable_minus_nonusable": 0.32848232848232817,
+          "standardized_mean_difference": 0.06296324418305445,
+          "material_difference_flag": false
+        },
+        {
+          "field": "open_interest",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 19394.653846153848,
+          "nonusable_mean": 9717.175675675675,
+          "mean_difference_usable_minus_nonusable": 9677.478170478173,
+          "standardized_mean_difference": 0.2532538054112469,
+          "material_difference_flag": false
+        },
+        {
+          "field": "notional",
+          "usable_sample_size": 26,
+          "nonusable_sample_size": 74,
+          "usable_observed_n": 26,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 74,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1528.076923076923,
+          "nonusable_mean": 1726.2027027027027,
+          "mean_difference_usable_minus_nonusable": -198.12577962577961,
+          "standardized_mean_difference": -0.03501230901624045,
+          "material_difference_flag": false
+        }
+      ]
+    },
+    "+1d": {
+      "event_sample_size": 100,
+      "outcome_row_count": 100,
+      "missing_outcome_row_count": 0,
+      "mature_count": 43,
+      "usable_count": 43,
+      "mature_coverage": 0.43,
+      "usable_coverage": 0.43,
+      "missingness_comparisons": [
+        {
+          "field": "premium",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 844.8372093023256,
+          "nonusable_mean": 586.6842105263158,
+          "mean_difference_usable_minus_nonusable": 258.1529987760098,
+          "standardized_mean_difference": 0.1498275757129612,
+          "material_difference_flag": false
+        },
+        {
+          "field": "size",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 2.604651162790698,
+          "nonusable_mean": 2.736842105263158,
+          "mean_difference_usable_minus_nonusable": -0.1321909424724601,
+          "standardized_mean_difference": -0.02533825983314467,
+          "material_difference_flag": false
+        },
+        {
+          "field": "open_interest",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 12562.302325581395,
+          "nonusable_mean": 11985.140350877193,
+          "mean_difference_usable_minus_nonusable": 577.1619747042023,
+          "standardized_mean_difference": 0.015103983068482266,
+          "material_difference_flag": false
+        },
+        {
+          "field": "notional",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1228.3720930232557,
+          "nonusable_mean": 2011.3859649122808,
+          "mean_difference_usable_minus_nonusable": -783.013871889025,
+          "standardized_mean_difference": -0.13837231933352237,
+          "material_difference_flag": false
+        }
+      ]
+    },
+    "+3d": {
+      "event_sample_size": 100,
+      "outcome_row_count": 100,
+      "missing_outcome_row_count": 0,
+      "mature_count": 43,
+      "usable_count": 43,
+      "mature_coverage": 0.43,
+      "usable_coverage": 0.43,
+      "missingness_comparisons": [
+        {
+          "field": "premium",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 844.8372093023256,
+          "nonusable_mean": 586.6842105263158,
+          "mean_difference_usable_minus_nonusable": 258.1529987760098,
+          "standardized_mean_difference": 0.1498275757129612,
+          "material_difference_flag": false
+        },
+        {
+          "field": "size",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 2.604651162790698,
+          "nonusable_mean": 2.736842105263158,
+          "mean_difference_usable_minus_nonusable": -0.1321909424724601,
+          "standardized_mean_difference": -0.02533825983314467,
+          "material_difference_flag": false
+        },
+        {
+          "field": "open_interest",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 12562.302325581395,
+          "nonusable_mean": 11985.140350877193,
+          "mean_difference_usable_minus_nonusable": 577.1619747042023,
+          "standardized_mean_difference": 0.015103983068482266,
+          "material_difference_flag": false
+        },
+        {
+          "field": "notional",
+          "usable_sample_size": 43,
+          "nonusable_sample_size": 57,
+          "usable_observed_n": 43,
+          "usable_missing_n": 0,
+          "nonusable_observed_n": 57,
+          "nonusable_missing_n": 0,
+          "usable_mean": 1228.3720930232557,
+          "nonusable_mean": 2011.3859649122808,
+          "mean_difference_usable_minus_nonusable": -783.013871889025,
+          "standardized_mean_difference": -0.13837231933352237,
+          "material_difference_flag": false
+        }
+      ]
+    }
+  }
+}

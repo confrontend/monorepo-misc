@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../src/db/client.js';
-import { applyMigrations } from '../src/db/schema.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { applyMigrations } from '../src/platform/db/schema.js';
 import {
   computeEliminationReport, estimateDuneRefetchDuration, ELIMINATION_MIN_TRADES,
   ELIMINATION_MIN_DUNE_ROUND_TRIPS, ELIMINATION_STATS_MAX_AGE_HOURS,
   STRONGLY_NEGATIVE_PNL_PERCENT, TRUSTED_DUNE_COVERAGE_PERCENT,
-} from '../src/copytrade/eliminationFilter.js';
-import { DEFAULT_COPIER_DELAY_SECONDS, type CopySimulationTradeResult, type CopySimulationWalletReport } from '../src/copytrade/copySimulation.js';
-import { assessCoverageGap } from '../src/copytrade/candidateScrutiny.js';
-import { RULES, type CopyTradeRow, type Verdict } from '../src/copytrade/evaluate.js';
+} from '../src/copytrade/scrutiny/eliminationFilter.js';
+import { DEFAULT_COPIER_DELAY_SECONDS, type CopySimulationTradeResult, type CopySimulationWalletReport } from '../src/copytrade/simulation/copySimulation.js';
+import { assessCoverageGap } from '../src/copytrade/scrutiny/candidateScrutiny.js';
+import { RULES, type CopyTradeRow, type Verdict } from '../src/copytrade/scrutiny/evaluate.js';
 
 const baseRow = (walletAddress: string, over: Partial<CopyTradeRow> = {}): CopyTradeRow => ({
   walletAddress, name: null, trades: ELIMINATION_MIN_TRADES, winRatePercent: 60, medianReturnPercent: 10,

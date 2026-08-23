@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
-import { readSignalScoringReport } from '../src/db/scoring.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
+import { openDatabase } from '../src/platform/db/client.js';
+import { readSignalScoringReport } from '../src/signals/scoring.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
 
 test('scoring transparently credits Dune provenance and supporting fields', () => {
   const database = openDatabase(':memory:');

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { openDatabase } from '../src/db/client.js';
+import { openDatabase } from '../src/platform/db/client.js';
 import { listGmgnTokenAddresses } from '../src/gmgn/tokenAddresses.js';
-import { storeGmgnSignal } from '../src/gmgn/ingest.js';
+import { storeGmgnSignal } from '../src/gmgn/capture/ingest.js';
 
 test('lists unique GMGN-observed token addresses not already in the Dune cohort', () => {
   const database = openDatabase(':memory:');
