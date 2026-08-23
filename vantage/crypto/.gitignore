@@ -11,3 +11,4 @@ gmgn-api-key.txt
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite-journal
+graphify-out/

@@ -150,20 +150,24 @@ test('estimate: fresh vs covered wallet classification matches what the fetcher 
   } finally { database.close(); }
 });
 
-test('estimate: a longer requested period scales the fresh-wallet cost, capped at MAX_REQUESTS_PER_WALLET', () => {
+test('estimate: a longer requested period scales the fresh-wallet cost without a cap', () => {
   const database = setup();
   try {
-    // Measured at 30 days: 50 requests/fresh wallet.
-    seedRun(database, { startedAt: '2026-08-15T00:00:00.000Z', completedAt: '2026-08-15T00:01:00.000Z', requestsMade: 50, periodDays: 30, events: [{ stopReason: 'window_covered', requestsUsed: 50 }] });
+    // Measured at 30 days: 15 requests/fresh wallet. Deliberately small enough that the 3x
+    // Scaling is intentionally allowed to continue for long requested windows.
+    seedRun(database, { startedAt: '2026-08-15T00:00:00.000Z', completedAt: '2026-08-15T00:01:00.000Z', requestsMade: 15, periodDays: 30, events: [{ stopReason: 'window_covered', requestsUsed: 15 }] });
     recordFetchRunEstimate(database, 1);
 
     const at30 = projectFetchDuration(database, { limit: 1, periodDays: 30 });
     const at90 = projectFetchDuration(database, { limit: 1, periodDays: 90 });
-    assert.equal(at30.estimatedRequests, 50);
-    assert.equal(at90.estimatedRequests, 150, '90/30 = 3x the measured rate');
+    assert.equal(at30.estimatedRequests, 15);
+    assert.equal(at90.estimatedRequests, 45, '90/30 = 3x the measured rate');
 
+    // Asserted against the constant, not a hardcoded number, so lowering the cap (as was done
+    // when a 100-wallet run projected ~34 hours) can never leave this test silently checking a
+    // ceiling the fetcher no longer enforces.
     const at9000 = projectFetchDuration(database, { limit: 1, periodDays: 9000 });
-    assert.equal(at9000.estimatedRequests, 200, 'must clamp at MAX_REQUESTS_PER_WALLET, matching what the fetcher itself enforces per wallet');
+    assert.equal(at9000.estimatedRequests, 4500, '15 requests per 30 days scaled across 9000 days');
   } finally { database.close(); }
 });
 

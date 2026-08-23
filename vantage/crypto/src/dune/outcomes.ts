@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { readDuneApiKey } from './credentials.js';
+import { waitForDuneCapacity, withDuneSubmissionLock } from '../copytrade/duneScheduler.js';
 import { MIN_SIGNAL_AGE_MS } from './prescreen.js';
 
 type Signal = { id: number; tokenAddress: string; symbol: string | null; signalType: string | null; observedAt: string; marketCap: number | null };
@@ -119,12 +120,17 @@ export const measureDuneOutcomes = async (database: DatabaseSync, signalIds: num
   if (duplicateIds.length) throw new Error(`Dune request already in flight for ${duplicateIds.join(', ')}. Wait for it to finish; no duplicate request was sent.`);
   const apiKey = readDuneApiKey(); if (!apiKey) throw new Error('Dune API key not found. Add it to .secrets/dune/api-key.txt.');
   const query = sqlFor(signals); const requestedAt = new Date().toISOString();
-  const inserted = database.prepare(`INSERT INTO dune_outcome_runs (signal_ids, query_sql, status, requested_at) VALUES (?, ?, 'submitted', ?)`).run(JSON.stringify(signals.map((s) => s.id)), query, requestedAt); const runId = Number(inserted.lastInsertRowid);
   const headers = { 'X-DUNE-API-KEY': apiKey, 'content-type': 'application/json', accept: 'application/json' };
-  const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', { method: 'POST', headers, body: JSON.stringify({ sql: query, performance: 'medium' }) });
-  const executionRaw = await execute.text(); if (!execute.ok) throw new Error(`Dune execution HTTP ${execute.status}`);
-  const execution = JSON.parse(executionRaw) as { execution_id?: string }; if (!execution.execution_id) throw new Error('Dune did not return an execution id.');
-  database.prepare(`UPDATE dune_outcome_runs SET execution_id = ?, status = 'running' WHERE id = ?`).run(execution.execution_id, runId);
+  const submitted = await withDuneSubmissionLock(async () => {
+    await waitForDuneCapacity(database, { reconcile: async () => undefined });
+    const inserted = database.prepare(`INSERT INTO dune_outcome_runs (signal_ids, query_sql, status, requested_at) VALUES (?, ?, 'submitted', ?)`).run(JSON.stringify(signals.map((s) => s.id)), query, requestedAt); const runId = Number(inserted.lastInsertRowid);
+    const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', { method: 'POST', headers, body: JSON.stringify({ sql: query, performance: 'medium' }) });
+    const executionRaw = await execute.text(); if (!execute.ok) throw new Error(`Dune execution HTTP ${execute.status}`);
+    const execution = JSON.parse(executionRaw) as { execution_id?: string }; if (!execution.execution_id) throw new Error('Dune did not return an execution id.');
+    database.prepare(`UPDATE dune_outcome_runs SET execution_id = ?, status = 'running' WHERE id = ?`).run(execution.execution_id, runId);
+    return { runId, executionRaw, execution };
+  });
+  const { runId, executionRaw, execution } = submitted;
   let state = 'QUERY_STATE_EXECUTING'; let resultRaw = '';
   for (let attempt = 0; attempt < 60 && state !== 'QUERY_STATE_COMPLETED'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));

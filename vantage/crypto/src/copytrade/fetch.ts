@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
-import { DAILY_TRADE_INSERT_CAP, MAX_REQUESTS_PER_WALLET } from './constants.js';
+import { DAILY_TRADE_INSERT_CAP } from './constants.js';
 import { estimateRemainingSeconds, recordFetchRunEstimate } from './estimate.js';
 import { listRosterWallets, syncCopyTradeRoster } from './roster.js';
 import { GMGN_REQUEST_SPACING_MS, waitForGmgnRequest } from '../gmgn/rateLimit.js';
@@ -84,7 +84,7 @@ const CLI_TIMEOUT_MS = 30_000;
 const cancelledRuns = new Set<number>();
 
 export type StopReason =
-  | 'window_covered' | 'up_to_date' | 'request_cap' | 'no_more_data' | 'cursor_stalled' | 'cancelled';
+  | 'window_covered' | 'up_to_date' | 'request_cap' | 'no_more_data' | 'cursor_stalled' | 'cancelled' | 'failed';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -122,7 +122,7 @@ export const detectRateLimit = (message: string): RateLimitInfo | null => {
   return { rateLimited: true, resetAt };
 };
 
-const readApiKey = (): string => {
+export const readApiKey = (): string => {
   const secret = existsSync(keyPath) ? readFileSync(keyPath, 'utf8').trim() : '';
   if (!secret) throw new Error('GMGN API key is missing. Add it to .secrets/gmgn/gmgn-api-key.txt.');
   return secret;
@@ -174,6 +174,9 @@ const asText = (value: unknown): string | null => {
   return null;
 };
 
+const looksLikeInvalidResumeCursor = (message: string): boolean =>
+  /\b(?:400|404)\b|(?:invalid|unknown|expired|not found|bad)\s+(?:resume\s+)?cursor|cursor[^\n]*(?:invalid|unknown|expired|not found)/i.test(message);
+
 /**
  * One call to the official portfolio stats endpoint (GET /v1/user/wallet_stats, weight 3) for
  * the context behind a risk flag: where the wallet was funded from, how old it is, how long it
@@ -213,6 +216,16 @@ export const fetchAndStoreWalletStats = async (
     ? Math.trunc(common.created_at) : null;
   const tokenNum = typeof pnlStat.token_num === 'number' && Number.isFinite(pnlStat.token_num)
     ? Math.trunc(pnlStat.token_num) : null;
+  const fetchedAt = new Date().toISOString();
+
+  // Keep the normalized row below as a latest-value cache, but preserve every successful
+  // source response as an immutable observation. GMGN stats are period snapshots; replacing
+  // yesterday's response would permanently erase a value the endpoint cannot reconstruct.
+  database.prepare(
+    `INSERT INTO copytrade_wallet_stats_events
+       (wallet_address, chain, period, fetched_at, raw_payload)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(options.wallet, options.chain, options.period, fetchedAt, stdout);
 
   database.prepare(
     `INSERT INTO copytrade_wallet_stats
@@ -227,7 +240,7 @@ export const fetchAndStoreWalletStats = async (
        winrate = excluded.winrate, token_num = excluded.token_num,
        raw_payload = excluded.raw_payload`,
   ).run(
-    options.wallet, options.chain, options.period, new Date().toISOString(),
+    options.wallet, options.chain, options.period, fetchedAt,
     Array.isArray(common.tags) ? JSON.stringify(common.tags) : null,
     asText(common.fund_from_address), asText(common.fund_amount), createdAt,
     asText(pnlStat.avg_holding_period), asText(pnlStat.winrate), tokenNum,
@@ -352,15 +365,40 @@ export type FetchRunState = {
   tradesFetched: number;
   tradesDuplicate: number;
   tradesDailyCapped: number;
+  failedWallets: number;
+  /** GMGN network requests started; local SQLite deduplication does not increment this. */
+  requestsMade: number;
   rateLimitedUntil: string | null;
   status: 'idle' | 'running' | 'completed' | 'failed' | 'rate_limited' | 'cancelled';
   message: string;
   estimatedRemainingSeconds: number | null;
+  expectedTradesTotal: number | null;
+  storedTradesTotal: number | null;
+  remainingTradesTotal: number | null;
+  totalTradeProgressPercent: number | null;
+  /** Wallets this run visited that actually yielded new rows, versus those already current.
+   *  A roster re-run always revisits all 100; these two split the cheap no-op checks from the
+   *  wallets that really had new history. */
+  walletsWithNewData: number;
+  walletsAlreadyCurrent: number;
+  /** True once storedTradesTotal has exceeded the pre-fetch expectedTradesTotal estimate — a
+   *  sign the estimate itself is stale/wrong for this run, not that the fetch overshot. When
+   *  true, totalTradeProgressPercent and remainingTradesTotal are null rather than a number
+   *  computed from a denominator already known to be too low. */
+  estimateExceeded: boolean;
+  currentWalletAddress: string | null;
+  currentWalletExpectedTrades: number | null;
+  currentWalletStoredTrades: number | null;
+  currentWalletRemainingTrades: number | null;
+  currentWalletProgressPercent: number | null;
+  currentWalletEstimatedRemainingSeconds: number | null;
+  totalEstimatedRemainingSeconds: number | null;
   /** Which of the three fetch actions started this run — explicit (fetch_scope column), not
    *  inferred. Lets each fetch box in the UI show status only for its own kind of run, instead
    *  of whichever ran most recently regardless of which button started it. Null only when no
    *  run has ever happened. */
   scope: 'roster' | 'winners' | 'single' | null;
+  resumeAvailable: boolean;
 };
 
 /** Watermarks are derived from the stored trades themselves, so they can never drift from
@@ -376,42 +414,40 @@ const readWatermark = (
   return { oldest: row.oldest ?? null, newest: row.newest ?? null };
 };
 
-/** The paging cursor to resume a truncated wallet's backfill from, saved by the previous run
- *  that stopped mid-history. Null for a wallet that has never been truncated, is now fully
- *  covered, or whose saved cursor turned out to be unusable. */
-const readPriorResumeCursor = (
-  database: DatabaseSync, walletAddress: string, chain: string,
-): string | null => {
-  const row = database.prepare(
-    `SELECT resume_cursor AS resumeCursor FROM copytrade_wallet_coverage WHERE wallet_address = ? AND chain = ?`,
-  ).get(walletAddress, chain) as { resumeCursor: string | null } | undefined;
-  return row?.resumeCursor ?? null;
-};
-
 export const recordCoverage = (
   database: DatabaseSync,
   input: {
     walletAddress: string; chain: string; runId: number; requestsUsed: number; truncated: boolean;
-    periodDays: number; stopReason: StopReason; resumeCursor?: string | null;
+    periodDays: number; stopReason: StopReason; resumeCursor?: string | null; coverageComplete?: boolean;
+    malformedRows?: number; duplicateRows?: number; insertedRows?: number; dailyCappedRows?: number; pagesFetched?: number;
   },
 ): void => {
   database.prepare(
     `INSERT INTO copytrade_wallet_coverage
-       (wallet_address, chain, last_run_id, requests_used, truncated, requested_period_days, stop_reason, resume_cursor, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (wallet_address, chain, last_run_id, requests_used, truncated, coverage_complete, requested_period_days, stop_reason, resume_cursor,
+        malformed_rows, duplicate_rows, inserted_rows, daily_capped_rows, pages_fetched, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(wallet_address, chain) DO UPDATE SET
        last_run_id = excluded.last_run_id,
        requests_used = excluded.requests_used,
        -- Truncation is sticky per run, not cumulative: a later run that completes the window
        -- clears it, because the wallet is no longer truncated.
        truncated = excluded.truncated,
+       coverage_complete = excluded.coverage_complete,
        requested_period_days = excluded.requested_period_days,
        stop_reason = excluded.stop_reason,
        resume_cursor = excluded.resume_cursor,
+       malformed_rows = excluded.malformed_rows,
+       duplicate_rows = excluded.duplicate_rows,
+       inserted_rows = excluded.inserted_rows,
+       daily_capped_rows = excluded.daily_capped_rows,
+       pages_fetched = excluded.pages_fetched,
        updated_at = excluded.updated_at`,
    ).run(
      input.walletAddress, input.chain, input.runId, input.requestsUsed,
-     input.truncated ? 1 : 0, input.periodDays, input.stopReason, input.resumeCursor ?? null, new Date().toISOString(),
+     input.truncated ? 1 : 0, input.coverageComplete === true ? 1 : 0, input.periodDays, input.stopReason, input.resumeCursor ?? null,
+     input.malformedRows ?? 0, input.duplicateRows ?? 0, input.insertedRows ?? 0, input.dailyCappedRows ?? 0, input.pagesFetched ?? 0,
+     new Date().toISOString(),
    );
 
   // The latest-state row above is intentionally a cache. Keep the immutable observation beside
@@ -422,11 +458,13 @@ export const recordCoverage = (
     database.prepare(
       `INSERT INTO copytrade_wallet_coverage_events
          (run_id, wallet_address, chain, requested_period_days, requests_used, truncated,
-          stop_reason, oldest_held_ts, newest_held_ts, observed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         stop_reason, oldest_held_ts, newest_held_ts, malformed_rows, duplicate_rows,
+         inserted_rows, daily_capped_rows, pages_fetched, observed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       input.runId, input.walletAddress, input.chain, input.periodDays, input.requestsUsed,
       input.truncated ? 1 : 0, input.stopReason, watermark.oldest, watermark.newest,
+      input.malformedRows ?? 0, input.duplicateRows ?? 0, input.insertedRows ?? 0, input.dailyCappedRows ?? 0, input.pagesFetched ?? 0,
       new Date().toISOString(),
     );
   } catch {
@@ -435,11 +473,10 @@ export const recordCoverage = (
 };
 
 const DEFAULT_COVERAGE_HISTORY_LIMIT = 50;
-const MAX_COVERAGE_HISTORY_LIMIT = 500;
 
 const clampCoverageHistoryLimit = (limit?: number): number => {
   if (!Number.isFinite(limit) || !limit || limit <= 0) return DEFAULT_COVERAGE_HISTORY_LIMIT;
-  return Math.min(Math.floor(limit), MAX_COVERAGE_HISTORY_LIMIT);
+  return Math.floor(limit);
 };
 
 export type WalletCoverageHistoryEvent = {
@@ -500,40 +537,125 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
   const row = database.prepare(
     `SELECT id, status, wallet_done AS walletDone, wallet_total AS walletTotal,
             trades_fetched AS tradesFetched, trades_duplicate AS tradesDuplicate,
-            trades_daily_capped AS tradesDailyCapped, rate_limited_until AS rateLimitedUntil, error,
-            started_at AS startedAt, requested_period_days AS periodDays, fetch_scope AS fetchScope
+            trades_daily_capped AS tradesDailyCapped, requests_made AS requestsMade, rate_limited_until AS rateLimitedUntil, error,
+            started_at AS startedAt, requested_period_days AS periodDays, fetch_scope AS fetchScope,
+            expected_trades_total AS expectedTradesTotal, initial_trades_total AS initialTradesTotal, current_wallet_address AS currentWalletAddress,
+            current_wallet_expected_trades AS currentWalletExpectedTrades,
+            current_wallet_initial_trades AS currentWalletInitialTrades,
+            current_wallet_started_at AS currentWalletStartedAt,
+            resume_disabled AS resumeDisabled
      FROM copytrade_fetch_runs ORDER BY id DESC LIMIT 1`,
   ).get() as {
     id: number; status: string; walletDone: number; walletTotal: number;
-    tradesFetched: number; tradesDuplicate: number; tradesDailyCapped: number;
+    tradesFetched: number; tradesDuplicate: number; tradesDailyCapped: number; requestsMade: number;
     rateLimitedUntil: string | null; error: string | null;
     startedAt: string; periodDays: number | null; fetchScope: string;
+    expectedTradesTotal: number; initialTradesTotal: number; currentWalletAddress: string | null;
+    currentWalletExpectedTrades: number | null; currentWalletInitialTrades: number;
+    currentWalletStartedAt: string | null; resumeDisabled: number;
   } | undefined;
 
   if (!row) {
     return {
       running: false, runId: null, walletDone: 0, walletTotal: 0, tradesFetched: 0, tradesDuplicate: 0,
-      tradesDailyCapped: 0, rateLimitedUntil: null, status: 'idle', message: 'No fetch has been run yet.',
-      estimatedRemainingSeconds: null, scope: null,
+      tradesDailyCapped: 0, failedWallets: 0, requestsMade: 0, rateLimitedUntil: null, status: 'idle', message: 'No fetch has been run yet.',
+      estimatedRemainingSeconds: null, expectedTradesTotal: null, storedTradesTotal: null,
+      remainingTradesTotal: null, totalTradeProgressPercent: null, currentWalletAddress: null,
+      currentWalletExpectedTrades: null, currentWalletStoredTrades: null, currentWalletRemainingTrades: null,
+      currentWalletProgressPercent: null, currentWalletEstimatedRemainingSeconds: null,
+      totalEstimatedRemainingSeconds: null, scope: null, resumeAvailable: false, estimateExceeded: false,
+      walletsWithNewData: 0, walletsAlreadyCurrent: 0,
     };
   }
   const status = (['running', 'completed', 'failed', 'rate_limited', 'cancelled'].includes(row.status) ? row.status : 'idle') as FetchRunState['status'];
+  const failedWallets = Number((database.prepare(
+    `SELECT COUNT(*) AS count FROM copytrade_wallet_coverage_events WHERE run_id = ? AND stop_reason = 'failed'`,
+  ).get(row.id) as { count: number }).count);
+  // Re-running the roster ALWAYS revisits every wallet: there is no way to know a wallet has new
+  // trades without asking GMGN for its newest page. For a wallet already covered, that costs ~1-2
+  // requests and exits early (`up_to_date`/`window_covered`), but the wallet still counts toward
+  // "N/100 wallets", which made a cheap no-op sweep look identical to a full re-download and
+  // prompted "I just fetched, why is it fetching again?". Splitting the wallets by whether they
+  // actually yielded rows makes the difference visible. Measured on a real completed sweep
+  // (run 63): 100 wallets visited, only 29 had anything new.
+  const walletOutcomes = database.prepare(
+    `SELECT SUM(CASE WHEN inserted_rows > 0 THEN 1 ELSE 0 END) AS withNewData,
+            SUM(CASE WHEN inserted_rows = 0 THEN 1 ELSE 0 END) AS alreadyCurrent
+     FROM copytrade_wallet_coverage_events WHERE run_id = ?`,
+  ).get(row.id) as { withNewData: number | null; alreadyCurrent: number | null };
+  const walletsWithNewData = Number(walletOutcomes?.withNewData ?? 0);
+  const walletsAlreadyCurrent = Number(walletOutcomes?.alreadyCurrent ?? 0);
   const running = status === ACTIVE_STATUS;
-  const estimatedRemainingSeconds = running
-    ? estimateRemainingSeconds(database, { startedAt: row.startedAt, walletDone: row.walletDone, walletTotal: row.walletTotal, periodDays: row.periodDays })
+  const resumeAvailable = !running && row.fetchScope === 'roster' && row.resumeDisabled !== 1 && status !== 'completed';
+  const storedTradesTotal = row.initialTradesTotal + row.tradesFetched;
+  // row.expectedTradesTotal is a pre-fetch estimate (sum of each wallet's cached 30-day GMGN
+  // stats buy+sell count, or 0 when no stats row exists yet) — not a hard ceiling. It
+  // undercounts whenever a wallet has stale/missing stats or has traded again since that
+  // snapshot was taken, which is common enough that storedTradesTotal visibly exceeded it in
+  // production ("304,541 / 303,737 stored trades", falsely pinning the progress bar at 100%
+  // while wallets were still being fetched). Flooring the estimate at the actual count would
+  // "fix" the display but is worse: it would make the bar read 100% *permanently* the moment
+  // the estimate is exceeded, no matter how much real work remains for wallets not yet reached.
+  // Instead, once exceeded, the estimate is known to be untrustworthy for THIS run — stop
+  // reporting a percent/remaining/ETA computed from it at all, rather than reporting a wrong
+  // one. `estimatedRemainingSeconds` already has a wallet-count-based fallback for exactly this
+  // case (see below), so nothing is left blank.
+  const expectedTradesTotal = row.expectedTradesTotal;
+  const estimateExceeded = storedTradesTotal > expectedTradesTotal;
+  const remainingTradesTotal = estimateExceeded ? null : Math.max(0, expectedTradesTotal - storedTradesTotal);
+  const totalTradeProgressPercent = estimateExceeded || expectedTradesTotal <= 0 ? null
+    : Math.min(100, storedTradesTotal / expectedTradesTotal * 100);
+  const currentWalletStoredTrades = row.currentWalletAddress && row.currentWalletExpectedTrades !== null
+    ? Number((database.prepare(
+      `SELECT COUNT(*) AS count FROM copytrade_trades WHERE wallet_address = ? AND observed_timestamp >= ?`,
+    ).get(row.currentWalletAddress, Math.floor(Date.now() / 1000) - (row.periodDays ?? 30) * 86_400) as { count: number }).count)
     : null;
+  const currentWalletRemainingTrades = row.currentWalletExpectedTrades !== null && currentWalletStoredTrades !== null
+    ? Math.max(0, row.currentWalletExpectedTrades - currentWalletStoredTrades) : null;
+  const currentWalletWorkTotal = row.currentWalletExpectedTrades !== null
+    ? Math.max(0, row.currentWalletExpectedTrades - row.currentWalletInitialTrades) : null;
+  const currentWalletWorkDone = currentWalletStoredTrades !== null
+    ? Math.max(0, currentWalletStoredTrades - row.currentWalletInitialTrades) : null;
+  const currentWalletProgressPercent = currentWalletWorkTotal !== null && currentWalletWorkTotal > 0 && currentWalletWorkDone !== null
+    ? Math.min(100, currentWalletWorkDone / currentWalletWorkTotal * 100) : null;
+  const elapsedSeconds = Math.max(1, (Date.now() - Date.parse(row.startedAt)) / 1000);
+  const overallRate = row.tradesFetched > 0 ? row.tradesFetched / elapsedSeconds : null;
+  const currentElapsedSeconds = row.currentWalletStartedAt ? Math.max(1, (Date.now() - Date.parse(row.currentWalletStartedAt)) / 1000) : elapsedSeconds;
+  const currentRate = currentWalletWorkDone && currentWalletWorkDone > 0 ? currentWalletWorkDone / currentElapsedSeconds : overallRate;
+  const currentWalletEstimatedRemainingSeconds = currentWalletRemainingTrades !== null && currentRate && currentRate > 0
+    ? Math.ceil(currentWalletRemainingTrades / currentRate) : null;
+  const totalEstimatedRemainingSeconds = remainingTradesTotal !== null && remainingTradesTotal > 0 && overallRate && overallRate > 0
+    ? Math.ceil(remainingTradesTotal / overallRate) : null;
+  const estimatedRemainingSeconds = totalEstimatedRemainingSeconds ?? (running ? estimateRemainingSeconds(database, { startedAt: row.startedAt, walletDone: row.walletDone, walletTotal: row.walletTotal, periodDays: row.periodDays }) : null);
   const message = status === 'running' ? `Fetching wallet ${row.walletDone + 1} of ${row.walletTotal}.`
-    : status === 'completed' ? `Fetched ${row.tradesFetched} new trades across ${row.walletDone} wallets (${row.tradesDuplicate} already-known rows reconfirmed${row.tradesDailyCapped > 0 ? `, ${row.tradesDailyCapped} skipped by the daily sample cap` : ''}).`
+    : status === 'completed' ? `Fetched ${row.tradesFetched} new trades across ${row.walletDone} wallets${failedWallets > 0 ? `; ${failedWallets} wallet${failedWallets === 1 ? '' : 's'} failed and were skipped` : ''}.`
     : status === 'rate_limited' ? 'GMGN rate limit reached. Waiting for the reset time before any retry.'
     : status === 'cancelled' ? `Stopped. ${row.tradesFetched} trades from ${row.walletDone} wallets were kept.`
     : status === 'failed' ? (row.error ?? 'The fetch failed.')
     : 'No fetch has been run yet.';
   return {
     running, runId: row.id, walletDone: row.walletDone, walletTotal: row.walletTotal,
-    tradesFetched: row.tradesFetched, tradesDuplicate: row.tradesDuplicate, tradesDailyCapped: row.tradesDailyCapped,
+    tradesFetched: row.tradesFetched, tradesDuplicate: row.tradesDuplicate, tradesDailyCapped: row.tradesDailyCapped, failedWallets, requestsMade: row.requestsMade,
     rateLimitedUntil: row.rateLimitedUntil, status, message, estimatedRemainingSeconds,
+    expectedTradesTotal, storedTradesTotal, remainingTradesTotal, totalTradeProgressPercent, estimateExceeded,
+    walletsWithNewData, walletsAlreadyCurrent,
+    currentWalletAddress: row.currentWalletAddress, currentWalletExpectedTrades: row.currentWalletExpectedTrades,
+    currentWalletStoredTrades, currentWalletRemainingTrades, currentWalletProgressPercent,
+    currentWalletEstimatedRemainingSeconds, totalEstimatedRemainingSeconds,
     scope: row.fetchScope === 'winners' || row.fetchScope === 'single' ? row.fetchScope : 'roster',
+    resumeAvailable,
   };
+};
+
+/** Forget only the resumable cursor for the latest roster snapshot; fetched trades remain saved. */
+export const resetCopyTradeFetchResume = (database: DatabaseSync): { reset: boolean; runId: number | null } => {
+  const row = database.prepare(
+    `SELECT id FROM copytrade_fetch_runs WHERE fetch_scope = 'roster' ORDER BY id DESC LIMIT 1`,
+  ).get() as { id: number } | undefined;
+  if (!row) return { reset: false, runId: null };
+  database.prepare(`UPDATE copytrade_fetch_runs SET resume_disabled = 1 WHERE id = ?`).run(row.id);
+  database.prepare(`UPDATE copytrade_wallet_coverage SET resume_cursor = NULL WHERE last_run_id = ?`).run(row.id);
+  return { reset: true, runId: row.id };
 };
 
 /**
@@ -594,12 +716,56 @@ export const runCopyTradeFetch = async (
       wallets = listRosterWallets(database, { chain, limit: options.limit });
       rosterSnapshotId = rosterSync.snapshotId;
     }
+    // Fetch low-volume wallets first so the user gets completed coverage quickly while the
+    // expensive high-volume wallets run later. GMGN's saved 30-day stats are the preferred
+    // population count; a locally stored count is only a fallback and unknown wallets remain last.
+    const tradeCounts = new Map<string, number>();
+    if (wallets.length > 0) {
+      const placeholders = wallets.map(() => '?').join(',');
+      const statsRows = database.prepare(
+        `SELECT wallet_address AS walletAddress, raw_payload AS rawPayload
+         FROM copytrade_wallet_stats WHERE chain = ? AND period = '30d' AND wallet_address IN (${placeholders})`,
+      ).all(chain, ...wallets.map((wallet) => wallet.walletAddress)) as unknown as Array<{ walletAddress: string; rawPayload: string }>;
+      for (const statsRow of statsRows) {
+        try {
+          const payload = JSON.parse(statsRow.rawPayload) as { buy?: unknown; sell?: unknown };
+          const buy = Number(payload.buy ?? NaN); const sell = Number(payload.sell ?? NaN);
+          if (Number.isFinite(buy) && Number.isFinite(sell)) tradeCounts.set(statsRow.walletAddress, buy + sell);
+        } catch { /* malformed stats stay unknown and sort last */ }
+      }
+      wallets = wallets.map((wallet, originalIndex) => ({ wallet, originalIndex })).sort((left, right) => {
+        const leftCount = tradeCounts.get(left.wallet.walletAddress) ?? Number.POSITIVE_INFINITY;
+        const rightCount = tradeCounts.get(right.wallet.walletAddress) ?? Number.POSITIVE_INFINITY;
+        return leftCount - rightCount || left.originalIndex - right.originalIndex;
+      }).map(({ wallet }) => wallet);
+    }
     database.prepare(
-      `UPDATE copytrade_fetch_runs SET wallet_total = ?, roster_snapshot_id = ? WHERE id = ?`,
-    ).run(wallets.length, rosterSnapshotId, runId);
+      `UPDATE copytrade_fetch_runs
+       SET wallet_total = ?, roster_snapshot_id = ?, expected_trades_total = ?, initial_trades_total = ?
+       WHERE id = ?`,
+    ).run(
+      wallets.length,
+      rosterSnapshotId,
+      wallets.reduce((total, wallet) => total + (tradeCounts.get(wallet.walletAddress) ?? 0), 0),
+      Number((database.prepare(
+        `SELECT COUNT(*) AS count FROM copytrade_trades WHERE chain = ? AND observed_timestamp >= ?
+         AND wallet_address IN (${wallets.map(() => '?').join(',')})`,
+      ).get(chain, cutoffSeconds, ...wallets.map((wallet) => wallet.walletAddress)) as { count: number }).count),
+      runId,
+    );
 
     for (const wallet of wallets) {
       if (cancelledRuns.has(runId)) break;
+
+      const currentWalletInitialTrades = Number((database.prepare(
+        `SELECT COUNT(*) AS count FROM copytrade_trades WHERE wallet_address = ? AND chain = ? AND observed_timestamp >= ?`,
+      ).get(wallet.walletAddress, chain, cutoffSeconds) as { count: number }).count);
+      database.prepare(
+        `UPDATE copytrade_fetch_runs
+         SET current_wallet_address = ?, current_wallet_expected_trades = ?,
+             current_wallet_initial_trades = ?, current_wallet_started_at = ?
+         WHERE id = ?`,
+      ).run(wallet.walletAddress, tradeCounts.get(wallet.walletAddress) ?? null, currentWalletInitialTrades, new Date().toISOString(), runId);
 
       // What we already hold for this wallet. Paging cannot skip — reaching older data means
       // walking every page in between — so the watermark is not used to avoid requests. Its
@@ -608,35 +774,79 @@ export const runCopyTradeFetch = async (
       // this distinction existed, extending the period from 30 to 60 days tripped the
       // stalled-cursor guard within three pages and silently backfilled nothing.
       const { oldest: oldestHeld, newest: newestHeld } = readWatermark(database, wallet.walletAddress, chain);
-      const windowAlreadyCovered = oldestHeld !== null && oldestHeld <= cutoffSeconds;
+      const previousCoverage = database.prepare(
+        `SELECT coverage_complete AS coverageComplete, requested_period_days AS requestedPeriodDays, truncated,
+                resume_cursor AS resumeCursor
+         FROM copytrade_wallet_coverage WHERE wallet_address = ? AND chain = ?`,
+      ).get(wallet.walletAddress, chain) as { coverageComplete: number; requestedPeriodDays: number | null; truncated: number; resumeCursor: string | null } | undefined;
+      // Old rows may have min/max timestamps but still contain gaps from the historical caps.
+      // Only a completed uncapped pass can authorize the cheap boundary stop.
+      const trustedCoverage = previousCoverage?.coverageComplete === 1
+        && previousCoverage.requestedPeriodDays === options.periodDays && previousCoverage.truncated === 0;
+      const windowAlreadyCovered = trustedCoverage && oldestHeld !== null && oldestHeld <= cutoffSeconds;
       // Where a previous run's backfill was cut off by the request cap, if any. Reused below
       // to skip straight past ground this wallet already covers instead of re-walking it.
-      const priorResumeCursor = readPriorResumeCursor(database, wallet.walletAddress, chain);
       const dailyCap = createDailyCapTracker(DAILY_TRADE_INSERT_CAP);
 
-      // Supporting context for this wallet's risk flag. One extra request per wallet, and a
-      // failure here must never abort the trade fetch — the trades are the point.
+      // Supporting context and aggregate performance for this wallet. One extra request per
+      // wallet; the official 30-day stats response is preserved verbatim and powers the
+      // aggregate performance table. A failure here must never abort the trade fetch — the
+      // trade history remains useful on its own.
       try {
         requestsMade += 1;
-        await fetchAndStoreWalletStats(database, { wallet: wallet.walletAddress, chain, period: '7d', apiKey });
+        await fetchAndStoreWalletStats(database, { wallet: wallet.walletAddress, chain, period: '30d', apiKey });
       } catch { /* context is optional; the trade history is not */ }
 
-      let cursor: string | null = null;
+      // The stats response just stored above carries `last_timestamp` — GMGN's own record of
+      // this wallet's most recent activity, seconds old at this point in the run, not a stale
+      // cache. When it exactly matches the newest trade we already hold, AND a prior pass has
+      // already proven the rest of the window is covered, there is nothing this wallet's
+      // activity walk could find: querying it would only re-confirm what this timestamp already
+      // proves. Measured live on the real cohort: 57 of 100 wallets meet this exactly, each
+      // currently costing ~1 wasted activity request. Only an EXACT match skips — "ahead" or
+      // "behind" still walks normally, so this can only save a request, never miss a trade.
+      let skipActivityWalk = false;
+      if (trustedCoverage && windowAlreadyCovered && newestHeld !== null) {
+        try {
+          const statsRow = database.prepare(
+            `SELECT raw_payload AS rawPayload FROM copytrade_wallet_stats WHERE wallet_address = ? AND chain = ? AND period = '30d'`,
+          ).get(wallet.walletAddress, chain) as { rawPayload: string } | undefined;
+          if (statsRow) {
+            const parsedStats = JSON.parse(statsRow.rawPayload) as { last_timestamp?: unknown };
+            const lastTimestamp = typeof parsedStats.last_timestamp === 'number' ? Math.trunc(parsedStats.last_timestamp) : null;
+            if (lastTimestamp !== null && lastTimestamp === newestHeld) skipActivityWalk = true;
+          }
+        } catch { /* malformed stats payload: fall through and walk normally, never skip on doubt */ }
+      }
+
+      // A cancelled/rate-limited snapshot records the next GMGN cursor per wallet. Resume from
+      // that cursor instead of walking the already-saved newest pages again. A normal completed
+      // wallet has no cursor and still uses the cheap coverage checks below.
+      let cursor: string | null = previousCoverage?.resumeCursor ?? null;
+      let retriedInvalidResumeCursor = false;
       const seenCursors = new Set<string>();
       let barrenPages = 0;
       let requestsThisWallet = 0;
       let truncated = false;
-      let stopReason: StopReason = 'no_more_data';
+      let stopReason: StopReason = skipActivityWalk ? 'up_to_date' : 'no_more_data';
+      let walletInserted = 0;
+      let walletDuplicates = 0;
+      let walletMalformed = 0;
+      let walletDailyCapped = 0;
+      let walletPages = 0;
       // Whether this wallet's walk has already jumped to priorResumeCursor this run — a
       // one-shot attempt, so a stale cursor can only ever cost one wasted request, not a loop.
-      let resumeAttempted = false;
-
       const fetchAndStore = async (cursorToUse: string | null): Promise<{ page: ActivityPage; stored: StoredTrade }> => {
         requestsMade += 1;
         requestsThisWallet += 1;
         updateProgress.run(walletDone, tradesFetched, tradesDuplicate, tradesDailyCapped, requestsMade, runId);
         const page = await fetchActivityPage({ wallet: wallet.walletAddress, chain, cursor: cursorToUse, apiKey });
         const stored = storeActivityPage(database, page.activities, { chain, fetchedAt: new Date().toISOString(), dailyCap });
+        walletPages += 1;
+        walletInserted += stored.inserted;
+        walletDuplicates += stored.duplicates;
+        walletMalformed += stored.malformed;
+        walletDailyCapped += stored.dailyCapped;
         tradesFetched += stored.inserted;
         tradesDuplicate += stored.duplicates;
         tradesDailyCapped += stored.dailyCapped;
@@ -644,13 +854,40 @@ export const runCopyTradeFetch = async (
         return { page, stored };
       };
 
+      if (!skipActivityWalk) {
       for (;;) {
         if (cancelledRuns.has(runId)) { stopReason = 'cancelled'; break; }
-        if (requestsThisWallet >= MAX_REQUESTS_PER_WALLET) { truncated = true; stopReason = 'request_cap'; break; }
-
         // Counted before the request, not after, so a stall is visible as "attempted request
         // N, never finished" rather than looking identical to doing nothing at all.
-        const { page: result, stored } = await fetchAndStore(cursor);
+        let result: ActivityPage;
+        let stored: StoredTrade;
+        try {
+          ({ page: result, stored } = await fetchAndStore(cursor));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (cursor !== null && !retriedInvalidResumeCursor && looksLikeInvalidResumeCursor(message)) {
+            // Provider cursors can expire. Retry once from a fresh page; stored rows remain
+            // idempotent, and only a second failure marks the wallet failed.
+            cursor = null;
+            retriedInvalidResumeCursor = true;
+            continue;
+          }
+          if (detectRateLimit(message)) {
+            // A rate limit is global, not a bad wallet. Persist the current wallet as
+            // incomplete, then stop so the remaining wallets are not hammered during cooldown.
+            stopReason = 'failed';
+            recordCoverage(database, {
+              walletAddress: wallet.walletAddress, chain, runId,
+              requestsUsed: requestsThisWallet, truncated: true, periodDays: options.periodDays, stopReason,
+              resumeCursor: cursor, malformedRows: walletMalformed, duplicateRows: walletDuplicates,
+              insertedRows: walletInserted, dailyCappedRows: walletDailyCapped, pagesFetched: walletPages,
+            });
+            throw error;
+          }
+          // Keep the other wallets moving, but persist this wallet as failed coverage.
+          stopReason = 'failed';
+          break;
+        }
 
         if (result.activities.length === 0 || !result.next) { stopReason = 'no_more_data'; break; }
 
@@ -666,32 +903,7 @@ export const runCopyTradeFetch = async (
         // already hold, and everything older is held too, the only new data was above it.
         if (windowAlreadyCovered && newestHeld !== null && oldestOnPage <= newestHeld) { stopReason = 'up_to_date'; break; }
 
-        // This page has now caught up to everything we already held before this run started
-        // (oldestOnPage <= newestHeld) but the window still isn't fully covered — meaning the
-        // wallet was truncated by the request cap last time. Rather than keep paging one
-        // request at a time through the entire stretch we already have (which is exactly the
-        // re-walk this feature exists to eliminate), jump straight to where the previous run
-        // left off. One-shot: if the saved cursor turns out to be stale or rejected, fall back
-        // to normal pagination from here instead of failing the whole run over it.
-        if (!resumeAttempted && !windowAlreadyCovered && newestHeld !== null && priorResumeCursor
-          && oldestOnPage <= newestHeld && requestsThisWallet < MAX_REQUESTS_PER_WALLET) {
-          resumeAttempted = true;
-          try {
-            const resumed = await fetchAndStore(priorResumeCursor);
-            if (resumed.page.activities.length === 0 || !resumed.page.next) { stopReason = 'no_more_data'; break; }
-            seenCursors.clear();
-            barrenPages = 0;
-            cursor = resumed.page.next;
-            continue;
-          } catch (resumeError) {
-            const message = resumeError instanceof Error ? resumeError.message : String(resumeError);
-            if (detectRateLimit(message)) throw resumeError; // preserve existing rate-limit handling
-            // Stale/expired/rejected cursor — resume this wallet the slow way instead of
-            // treating an old token going bad as a run-ending error.
-          }
-        }
-
-        if (seenCursors.has(result.next)) { stopReason = 'cursor_stalled'; break; }
+        if (seenCursors.has(result.next)) { stopReason = 'failed'; truncated = true; break; }
         seenCursors.add(result.next);
 
         // A barren page only signals a stalled cursor when it lands *outside* known coverage.
@@ -703,20 +915,24 @@ export const runCopyTradeFetch = async (
         if (insideKnownCoverage) barrenPages = 0;
         else {
           barrenPages = (stored.inserted + stored.dailyCapped) === 0 ? barrenPages + 1 : 0;
-          if (barrenPages >= 3) { stopReason = 'cursor_stalled'; break; }
+          if (barrenPages >= 3) { stopReason = 'failed'; truncated = true; break; }
         }
 
         cursor = result.next;
+      }
       }
 
       // Save a resume point only when there is real unfinished ground to resume — a truncated
       // wallet, or one the user stopped mid-walk. Every other stop reason means either the
       // window is fully covered or the cursor is known bad, so nothing should be resumed from.
-      const resumeCursorToSave = (stopReason === 'request_cap' || stopReason === 'cancelled') ? cursor : null;
+      const resumeCursorToSave = stopReason === 'cancelled' ? cursor : null;
       recordCoverage(database, {
         walletAddress: wallet.walletAddress, chain, runId,
         requestsUsed: requestsThisWallet, truncated, periodDays: options.periodDays, stopReason,
+        coverageComplete: !truncated && (stopReason === 'window_covered' || stopReason === 'no_more_data' || stopReason === 'up_to_date'),
         resumeCursor: resumeCursorToSave,
+        malformedRows: walletMalformed, duplicateRows: walletDuplicates, insertedRows: walletInserted,
+        dailyCappedRows: walletDailyCapped, pagesFetched: walletPages,
       });
       if (stopReason === 'cancelled') break;
       walletDone += 1;

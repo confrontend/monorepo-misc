@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "GMGN Signal Capture (Research)",
-  "version": "0.8.4",
+  "version": "0.9.1",
   "description": "Captures GMGN token-signal (REST and live WebSocket push), price-candle, trade, holder-stat, smart-money-wallet, radar, wallet-leaderboard, and Twitter/KOL-message API responses locally while you browse gmgn.ai, for personal research export. Captures nothing unless explicitly started.",
-  "permissions": ["storage", "alarms", "unlimitedStorage", "tabs"],
+  "permissions": ["storage", "session", "alarms", "unlimitedStorage", "tabs", "webRequest"],
   "host_permissions": ["https://gmgn.ai/*"],
   "background": {
     "service_worker": "background.js"

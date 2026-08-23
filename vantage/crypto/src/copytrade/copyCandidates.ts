@@ -15,6 +15,22 @@ import type { HistoricalConsistencyReport, HistoricalConsistencyRow } from './hi
 export const MIN_MEDIAN_HOLD_SECONDS = 60;
 export const MAX_FAST_ROUND_TRIP_PERCENT = 50;
 export const MAX_CONCENTRATION_PERCENT = 40;
+/** Tail candidates need enough copied trades to make a positive mean interpretable. */
+export const MIN_HIGH_UPSIDE_COVERAGE_PERCENT = 70;
+export const MIN_HIGH_UPSIDE_BIG_WINS = 1;
+/** Shared 30-day copy-evidence gates used by final candidates and triage. */
+export const MIN_COPY_EVIDENCE_COVERAGE_PERCENT = 90;
+export const MIN_COPY_EVIDENCE_ROUND_TRIPS = 30;
+
+/** Shared evidence-quality gate.  Candidate ranking and Dune-budget triage may answer
+ * different questions, but they must agree on what counts as a sufficiently measured
+ * 30-day copy simulation. */
+export const hasReliableCopyEvidence = (simulation: CopySimulationSurvivalInput | null | undefined): boolean => Boolean(
+  simulation
+  && simulation.gasCostComplete === true
+  && (simulation.coverageRatePercent ?? 0) >= MIN_COPY_EVIDENCE_COVERAGE_PERCENT
+  && (simulation.roundTripsConsidered ?? 0) >= MIN_COPY_EVIDENCE_ROUND_TRIPS,
+);
 /** The historical-consistency bar for a "winner": both the early and recent slice of the
  *  wallet's own stored history must be positive — not just a recent burst (recent_only) and
  *  not a wallet whose earlier edge has faded (declining). */
@@ -36,6 +52,10 @@ export type CopyCandidate = {
   medianReturnPercent: number | null;
   winRatePercent: number | null;
   trades: number;
+  endingCapitalUsd: number | null;
+  endingCapitalUsdCompounded: number | null;
+  coveredDays: number | null;
+  analysisPeriodDays: number;
   medianHoldSeconds: number | null;
   fastRoundTripPercent: number | null;
   concentrationPercent: number | null;
@@ -46,7 +66,20 @@ export type CopyCandidate = {
    *  executes a trade or copy action itself; this link is where the human does that, on GMGN's
    *  own product. */
   gmgnProfileUrl: string;
+  /** How long since this wallet last traded. A strong historical record says nothing about
+   *  whether the wallet is still active — see CopyTradeRow.lastTradeAt for the real case that
+   *  motivated surfacing this. Null when the wallet has no completed trades. */
+  daysSinceLastTrade: number | null;
+  /** True past DORMANT_AFTER_DAYS. Deliberately does NOT remove the wallet from the list or
+   *  change its returns — those numbers are still real history. It only stops a dormant wallet
+   *  from being presented as a live, actionable candidate. */
+  dormant: boolean;
 };
+
+/** A wallet with no trades for this long is reported as dormant. Set at two weeks: long enough
+ *  that a normal quiet stretch or a fetch gap won't trip it, short enough to catch a wallet that
+ *  has genuinely stopped. */
+export const DORMANT_AFTER_DAYS = 14;
 
 /** A CopyCandidate plus the copy-simulation verdict that gates final Winner status. Kept as a
  *  separate type (rather than folding these fields into CopyCandidate) because
@@ -56,8 +89,16 @@ export type CopyCandidate = {
 export type CopyCandidateWithSurvival = CopyCandidate & {
   copySurvivalStatus: CopySurvivalStatus;
   simulatedMedianReturnPercent: number | null;
+  simulatedMeanReturnPercent: number | null;
+  tradesAbove100Percent: number;
+  tailShareOfMeanPercent: number | null;
   copySimulationCoverageRatePercent: number | null;
 };
+
+/** A separate tail-oriented classification. These are not mixed into the median winners: their
+ * typical trade may be flat/negative, while a small number of large wins produces a positive
+ * mean. The UI must present them as high-upside candidates, not as equally reliable winners. */
+export type HighUpsideCandidate = CopyCandidateWithSurvival;
 
 export type ScreenPassCandidatesReport = {
   computedAt: string;
@@ -85,6 +126,9 @@ export type CopyCandidatesReport = {
   /** Passed every other gate, was actually simulated, and did not survive (non-positive
    *  simulated median) — a verified negative, not an absence of data. */
   failedCopySurvivalCount: number;
+  /** Tail-oriented candidates kept separate from the consistent median winners. */
+  highUpsideCandidates: HighUpsideCandidate[];
+  highUpsidePendingSimulationCount: number;
 };
 
 const gmgnProfileUrl = (walletAddress: string): string => `https://gmgn.ai/sol/address/${walletAddress}`;
@@ -123,11 +167,17 @@ export const computeScreenPassCandidates = (
       winRatePercent: row.winRatePercent,
       trades: row.trades,
       medianHoldSeconds: evidence.medianHoldSeconds,
+      endingCapitalUsd: row.endingCapitalUsd,
+      endingCapitalUsdCompounded: row.endingCapitalUsdCompounded,
+      coveredDays: row.coveredDays,
+      analysisPeriodDays: report.periodDays,
       fastRoundTripPercent: evidence.fastRoundTripPercent,
       concentrationPercent: concentration,
       bestTokenSymbol: row.profitConcentration.bestToken?.tokenSymbol ?? null,
       historicalConsistencyVerdict: hcRow.verdict,
       gmgnProfileUrl: gmgnProfileUrl(row.walletAddress),
+      daysSinceLastTrade: row.daysSinceLastTrade,
+      dormant: row.daysSinceLastTrade !== null && row.daysSinceLastTrade > DORMANT_AFTER_DAYS,
     });
   }
 
@@ -145,7 +195,55 @@ export const computeScreenPassCandidates = (
   };
 };
 
-export type CopySimulationSurvivalInput = { simulatedMedianReturnPercent: number | null; coverageRatePercent: number | null };
+/** Candidate rows eligible for a tail/upside simulation. This deliberately does not require a
+ * positive historical median: that is the exact population the second classification exists to
+ * expose. It still requires enough history, complete collection, consistency, and the same
+ * copyability gates as the median path. */
+export const computeHighUpsideEligibleCandidates = (
+  report: CopyTradeReport,
+  historicalConsistency: HistoricalConsistencyReport,
+): CopyCandidate[] => {
+  const hcByWallet = new Map(historicalConsistency.rows.map((row) => [row.walletAddress, row]));
+  const candidates: CopyCandidate[] = [];
+  for (const row of report.rows) {
+    if (row.verdict === 'flagged' || row.truncated || row.trades < report.rules.minTrades || (row.coveredDays ?? 0) < report.rules.minDays) continue;
+    if (row.averageReturnPercent === null || row.averageReturnPercent <= 0) continue;
+    // Keep the groups mutually exclusive: a positive-median row belongs in Consistent winners.
+    if (row.medianReturnPercent !== null && row.medianReturnPercent > 0) continue;
+    const hcRow = hcByWallet.get(row.walletAddress);
+    if (hcRow?.verdict !== REQUIRED_HISTORICAL_CONSISTENCY_VERDICT) continue;
+    const evidence = row.riskEvidence;
+    if (evidence.medianHoldSeconds === null || evidence.medianHoldSeconds < MIN_MEDIAN_HOLD_SECONDS) continue;
+    if (evidence.fastRoundTripPercent !== null && evidence.fastRoundTripPercent > MAX_FAST_ROUND_TRIP_PERCENT) continue;
+    const concentration = row.profitConcentration.bestTokenSharePositiveProfitPercent;
+    if (concentration !== null && concentration > MAX_CONCENTRATION_PERCENT) continue;
+    candidates.push({
+      walletAddress: row.walletAddress, name: row.name, rankPosition: row.rankHistory.currentRank,
+      medianReturnPercent: row.medianReturnPercent, winRatePercent: row.winRatePercent,
+      trades: row.trades, endingCapitalUsd: row.endingCapitalUsd,
+      endingCapitalUsdCompounded: row.endingCapitalUsdCompounded, coveredDays: row.coveredDays,
+      analysisPeriodDays: report.periodDays,
+      medianHoldSeconds: evidence.medianHoldSeconds,
+      fastRoundTripPercent: evidence.fastRoundTripPercent, concentrationPercent: concentration,
+      bestTokenSymbol: row.profitConcentration.bestToken?.tokenSymbol ?? null,
+      historicalConsistencyVerdict: hcRow.verdict, gmgnProfileUrl: gmgnProfileUrl(row.walletAddress),
+      daysSinceLastTrade: row.daysSinceLastTrade,
+      dormant: row.daysSinceLastTrade !== null && row.daysSinceLastTrade > DORMANT_AFTER_DAYS,
+    });
+  }
+  return candidates;
+};
+
+export type CopySimulationSurvivalInput = {
+  simulatedMedianReturnPercent: number | null;
+  simulatedMeanReturnPercent?: number | null;
+  tradesAbove100Percent?: number;
+  tailShareOfMeanPercent?: number | null;
+  coverageRatePercent: number | null;
+  portfolioRealizedPnlUsd?: number | null;
+  gasCostComplete?: boolean;
+  roundTripsConsidered?: number;
+};
 
 /**
  * Pure combination over three already-computed inputs — no database access here. The caller
@@ -165,27 +263,69 @@ export const computeCopyCandidates = (
   now = new Date(),
 ): CopyCandidatesReport => {
   const screenPass = computeScreenPassCandidates(report, historicalConsistency, now);
+  const highUpsideEligible = computeHighUpsideEligibleCandidates(report, historicalConsistency);
 
   const withSurvival: CopyCandidateWithSurvival[] = screenPass.candidates.map((candidate) => {
     const sim = copySimulationByWallet.get(candidate.walletAddress);
-    const copySurvivalStatus: CopySurvivalStatus = !sim || sim.simulatedMedianReturnPercent === null
+    const usesFullDecisionModel = sim?.portfolioRealizedPnlUsd !== undefined || sim?.gasCostComplete !== undefined;
+    const survives = usesFullDecisionModel
+      ? sim?.portfolioRealizedPnlUsd != null && sim.portfolioRealizedPnlUsd > 0 && hasReliableCopyEvidence(sim)
+      : sim?.simulatedMedianReturnPercent != null && sim.simulatedMedianReturnPercent > 0;
+    const copySurvivalStatus: CopySurvivalStatus = !sim || (!usesFullDecisionModel && sim.simulatedMedianReturnPercent === null) || (usesFullDecisionModel && sim.portfolioRealizedPnlUsd === null)
       ? 'not_yet_simulated'
-      : sim.simulatedMedianReturnPercent > 0 ? 'survives' : 'fails_copy_survival';
+      : survives ? 'survives' : 'fails_copy_survival';
     return {
       ...candidate,
       copySurvivalStatus,
       simulatedMedianReturnPercent: sim?.simulatedMedianReturnPercent ?? null,
+      simulatedMeanReturnPercent: sim?.simulatedMeanReturnPercent ?? null,
+      tradesAbove100Percent: sim?.tradesAbove100Percent ?? 0,
+      tailShareOfMeanPercent: sim?.tailShareOfMeanPercent ?? null,
       copySimulationCoverageRatePercent: sim?.coverageRatePercent ?? null,
     };
   });
 
   const candidates = withSurvival.filter((candidate) => candidate.copySurvivalStatus === 'survives');
 
-  // Ranked by median return among wallets that already cleared every copy-viability gate,
+  const highUpsideWithSurvival = highUpsideEligible.map((candidate) => {
+    const sim = copySimulationByWallet.get(candidate.walletAddress);
+    const usesFullDecisionModel = sim?.portfolioRealizedPnlUsd !== undefined || sim?.gasCostComplete !== undefined;
+    const survives = usesFullDecisionModel
+      ? sim?.portfolioRealizedPnlUsd != null && sim.portfolioRealizedPnlUsd > 0 && hasReliableCopyEvidence(sim)
+      : sim?.simulatedMeanReturnPercent != null && sim.simulatedMeanReturnPercent > 0;
+    return {
+      ...candidate,
+      copySurvivalStatus: !sim || (!usesFullDecisionModel && sim.simulatedMedianReturnPercent === null) || (usesFullDecisionModel && sim.portfolioRealizedPnlUsd === null)
+        ? 'not_yet_simulated' as const
+        : survives ? 'survives' as const : 'fails_copy_survival' as const,
+      simulatedMedianReturnPercent: sim?.simulatedMedianReturnPercent ?? null,
+      simulatedMeanReturnPercent: sim?.simulatedMeanReturnPercent ?? null,
+      tradesAbove100Percent: sim?.tradesAbove100Percent ?? 0,
+      tailShareOfMeanPercent: sim?.tailShareOfMeanPercent ?? null,
+      copySimulationCoverageRatePercent: sim?.coverageRatePercent ?? null,
+    };
+  });
+  const highUpsideCandidates = highUpsideWithSurvival.filter((candidate) =>
+    candidate.copySurvivalStatus === 'survives'
+    && (candidate.simulatedMeanReturnPercent ?? 0) > 0
+    && (candidate.copySimulationCoverageRatePercent ?? 0) >= MIN_HIGH_UPSIDE_COVERAGE_PERCENT
+    && candidate.tradesAbove100Percent >= MIN_HIGH_UPSIDE_BIG_WINS,
+  ).sort((left, right) => (right.simulatedMeanReturnPercent ?? -Infinity) - (left.simulatedMeanReturnPercent ?? -Infinity));
+
+  // Ranked by portfolio net P&L when the full simulation is available; legacy callers fall back
+  // to the historical median until they provide the new fields.
   // copy-survival included — return only decides ordering once speed/concentration/consistency/
   // survival have already qualified the wallet, never before, so the fastest-looking number can
   // never outrank a real gate.
-  candidates.sort((left, right) => (right.medianReturnPercent ?? -Infinity) - (left.medianReturnPercent ?? -Infinity));
+  candidates.sort((left, right) => {
+    const leftSim = copySimulationByWallet.get(left.walletAddress);
+    const rightSim = copySimulationByWallet.get(right.walletAddress);
+    const leftUsesFullModel = leftSim?.portfolioRealizedPnlUsd !== undefined || leftSim?.gasCostComplete !== undefined;
+    const rightUsesFullModel = rightSim?.portfolioRealizedPnlUsd !== undefined || rightSim?.gasCostComplete !== undefined;
+    const leftValue = leftUsesFullModel ? leftSim?.portfolioRealizedPnlUsd ?? -Infinity : left.medianReturnPercent ?? -Infinity;
+    const rightValue = rightUsesFullModel ? rightSim?.portfolioRealizedPnlUsd ?? -Infinity : right.medianReturnPercent ?? -Infinity;
+    return rightValue - leftValue;
+  });
 
   return {
     computedAt: now.toISOString(),
@@ -195,5 +335,7 @@ export const computeCopyCandidates = (
     excludedCount: report.rows.filter((row) => row.verdict === 'screen_pass').length - candidates.length,
     pendingCopySimulationCount: withSurvival.filter((c) => c.copySurvivalStatus === 'not_yet_simulated').length,
     failedCopySurvivalCount: withSurvival.filter((c) => c.copySurvivalStatus === 'fails_copy_survival').length,
+    highUpsideCandidates,
+    highUpsidePendingSimulationCount: highUpsideWithSurvival.filter((c) => c.copySurvivalStatus === 'not_yet_simulated').length,
   };
 };

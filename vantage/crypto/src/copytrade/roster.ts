@@ -4,10 +4,10 @@ import type { DatabaseSync } from 'node:sqlite';
 /**
  * The CopyTrade roster: which wallets we are willing to evaluate.
  *
- * The roster is derived from an already-captured GMGN wallet-leaderboard snapshot
- * (`gmgn_wallet_rank_snapshots`), because GMGN's official API has no wallet-leaderboard
- * endpoint — only the browser capture provides it. Trade history for these wallets then comes
- * from the official API (see fetch.ts), so the roster is the only browser-dependent input.
+ * The roster is derived from a timestamped GMGN wallet-leaderboard snapshot
+ * (`gmgn_wallet_rank_snapshots`). Snapshots may come from the controlled rank refresh endpoint
+ * or from a browser capture; either way, the raw response is retained and the roster is a
+ * point-in-time input. Trade history and summaries then come from the official API.
  */
 
 /**
@@ -26,6 +26,7 @@ export type RosterWallet = {
   walletAddress: string;
   chain: string;
   name: string | null;
+  iconUrl: string | null;
   rankPosition: number | null;
   reportedPnl30d: string | null;
   reportedWinrate30d: string | null;
@@ -38,6 +39,17 @@ export type RosterResult = {
   added: number;
   alreadyPresent: number;
   total: number;
+};
+
+export type RosterComparison = {
+  currentSnapshotId: number | null;
+  currentCapturedAt: string | null;
+  previousSnapshotId: number | null;
+  previousCapturedAt: string | null;
+  baselineAvailable: boolean;
+  current: RosterWallet[];
+  joined: RosterWallet[];
+  left: RosterWallet[];
 };
 
 export type LeaderboardProvenance = {
@@ -73,10 +85,19 @@ const asSourceText = (value: unknown): string | null => {
 const asOptionalName = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 
+const asOptionalIcon = (item: RankItem): string | null => {
+  for (const key of ['avatar_url', 'avatar', 'icon_url', 'icon', 'logo', 'image_url', 'profile_pic', 'twitter_avatar']) {
+    const value = item[key];
+    if (typeof value === 'string' && /^https?:\/\//i.test(value.trim())) return value.trim();
+  }
+  return null;
+};
+
 const extractRiskFlags = (tags: unknown): string[] => {
   if (!Array.isArray(tags)) return [];
   return tags.filter((tag): tag is string => typeof tag === 'string' && RISK_TAGS.has(tag));
 };
+
 
 type RankItem = Record<string, unknown>;
 
@@ -101,7 +122,13 @@ export const readLatestRankSnapshot = (
 
   let parsed: unknown;
   try { parsed = JSON.parse(row.rawPayload); } catch { return { snapshotId: row.id, capturedAt: row.capturedAt, rank: [] }; }
-  const rank = (parsed as { data?: { rank?: unknown } } | null)?.data?.rank;
+  const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as { data?: unknown; rank?: unknown; list?: unknown } : {};
+  const data = root.data;
+  const rank = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && !Array.isArray(data)
+      ? ((data as { rank?: unknown; list?: unknown }).rank ?? (data as { rank?: unknown; list?: unknown }).list)
+      : (root.rank ?? root.list);
   if (!Array.isArray(rank)) return { snapshotId: row.id, capturedAt: row.capturedAt, rank: [] };
   return {
     snapshotId: row.id,
@@ -122,7 +149,13 @@ export const readRankSnapshot = (
   ).get(snapshotId) as { id: number; capturedAt: string; rawPayload: string } | undefined;
   if (!row) return { snapshotId: null, capturedAt: null, rank: [] };
   try {
-    const rank = (JSON.parse(row.rawPayload) as { data?: { rank?: unknown } } | null)?.data?.rank;
+    const parsed = JSON.parse(row.rawPayload) as { data?: unknown; rank?: unknown; list?: unknown } | null;
+    const data = parsed?.data;
+    const rank = Array.isArray(data)
+      ? data
+      : data && typeof data === 'object' && !Array.isArray(data)
+        ? ((data as { rank?: unknown; list?: unknown }).rank ?? (data as { rank?: unknown; list?: unknown }).list)
+        : (parsed?.rank ?? parsed?.list);
     return {
       snapshotId: row.id,
       capturedAt: row.capturedAt,
@@ -334,10 +367,39 @@ export const rankItemToWallet = (item: RankItem, index: number, chain: string): 
     chain,
     // GMGN populates `name` for only ~40% of wallets; twitter_name is the usual fallback.
     name: asOptionalName(item.name) ?? asOptionalName(item.twitter_name),
+    iconUrl: asOptionalIcon(item),
     rankPosition: index + 1,
     reportedPnl30d: asSourceText(item.pnl_30d),
     reportedWinrate30d: asSourceText(item.winrate_30d),
     riskFlags: extractRiskFlags(item.tags),
+  };
+};
+
+export const compareLatestRosterSnapshots = (
+  database: DatabaseSync,
+  options: { chain?: string; limit?: number } = {},
+): RosterComparison => {
+  const chain = options.chain ?? 'sol';
+  const limit = Math.max(1, Math.min(100, Math.trunc(options.limit ?? 100)));
+  const snapshots = database.prepare(
+    `SELECT id FROM gmgn_wallet_rank_snapshots ORDER BY captured_at DESC, id DESC LIMIT 2`,
+  ).all() as unknown as Array<{ id: number }>;
+  const currentSnapshot = snapshots[0] ? readRankSnapshot(database, snapshots[0].id) : { snapshotId: null, capturedAt: null, rank: [] };
+  const previousSnapshot = snapshots[1] ? readRankSnapshot(database, snapshots[1].id) : { snapshotId: null, capturedAt: null, rank: [] };
+  const toWallets = (snapshot: typeof currentSnapshot): RosterWallet[] => snapshot.rank.slice(0, limit).map((item, index) => rankItemToWallet(item, index, chain)).filter((wallet): wallet is RosterWallet => wallet !== null);
+  const current = toWallets(currentSnapshot);
+  const previous = toWallets(previousSnapshot);
+  const previousSet = new Set(previous.map((wallet) => wallet.walletAddress));
+  const currentSet = new Set(current.map((wallet) => wallet.walletAddress));
+  return {
+    currentSnapshotId: currentSnapshot.snapshotId,
+    currentCapturedAt: currentSnapshot.capturedAt,
+    previousSnapshotId: previousSnapshot.snapshotId,
+    previousCapturedAt: previousSnapshot.capturedAt,
+    baselineAvailable: previousSnapshot.snapshotId !== null,
+    current,
+    joined: current.filter((wallet) => !previousSet.has(wallet.walletAddress)),
+    left: previous.filter((wallet) => !currentSet.has(wallet.walletAddress)),
   };
 };
 
@@ -362,9 +424,9 @@ export const syncCopyTradeRoster = (
   const limited = typeof options.limit === 'number' && options.limit > 0 ? rank.slice(0, options.limit) : rank;
   const insert = database.prepare(
     `INSERT OR IGNORE INTO copytrade_wallets
-       (wallet_address, chain, name, source_snapshot_id, rank_position,
+       (wallet_address, chain, name, icon_url, source_snapshot_id, rank_position,
         reported_pnl_30d, reported_winrate_30d, risk_flags, added_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   let added = 0;
@@ -373,7 +435,7 @@ export const syncCopyTradeRoster = (
     const wallet = rankItemToWallet(item, index, chain);
     if (!wallet) continue;
     const result = insert.run(
-      wallet.walletAddress, wallet.chain, wallet.name, snapshotId, wallet.rankPosition,
+      wallet.walletAddress, wallet.chain, wallet.name, wallet.iconUrl, snapshotId, wallet.rankPosition,
       wallet.reportedPnl30d, wallet.reportedWinrate30d, JSON.stringify(wallet.riskFlags), addedAt,
     );
     if (result.changes > 0) added += 1; else alreadyPresent += 1;
@@ -404,7 +466,7 @@ export const listRosterWallets = (
     ? `id IN (SELECT MAX(id) FROM copytrade_wallets WHERE chain = ? GROUP BY wallet_address)`
     : `source_snapshot_id = ?`;
   const rows = database.prepare(
-    `SELECT wallet_address AS walletAddress, chain, name, rank_position AS rankPosition,
+    `SELECT wallet_address AS walletAddress, chain, name, icon_url AS iconUrl, rank_position AS rankPosition,
             reported_pnl_30d AS reportedPnl30d, reported_winrate_30d AS reportedWinrate30d,
             risk_flags AS riskFlags
      FROM copytrade_wallets

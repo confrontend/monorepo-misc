@@ -469,7 +469,13 @@ const migrations: Migration[] = [
           trades_fetched INTEGER NOT NULL DEFAULT 0,
           requests_made INTEGER NOT NULL DEFAULT 0,
           rate_limited_until TEXT,
-          error TEXT
+          error TEXT,
+          expected_trades_total INTEGER NOT NULL DEFAULT 0,
+          initial_trades_total INTEGER NOT NULL DEFAULT 0,
+          current_wallet_address TEXT,
+          current_wallet_expected_trades INTEGER,
+          current_wallet_initial_trades INTEGER NOT NULL DEFAULT 0,
+          current_wallet_started_at TEXT
         );
         CREATE INDEX idx_copytrade_fetch_runs_status
           ON copytrade_fetch_runs(status, started_at);
@@ -501,12 +507,20 @@ const migrations: Migration[] = [
           last_run_id INTEGER REFERENCES copytrade_fetch_runs(id),
           requests_used INTEGER NOT NULL DEFAULT 0,
           truncated INTEGER NOT NULL DEFAULT 0,
+          coverage_complete INTEGER NOT NULL DEFAULT 0,
           requested_period_days INTEGER,
           stop_reason TEXT,
           updated_at TEXT NOT NULL,
           PRIMARY KEY (wallet_address, chain)
         );
       `);
+    },
+  },
+  {
+    description: 'CopyTrade verified complete-history coverage marker',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallet_coverage)').all().map((row) => (row as { name: string }).name));
+      if (!columns.has('coverage_complete')) database.exec('ALTER TABLE copytrade_wallet_coverage ADD COLUMN coverage_complete INTEGER NOT NULL DEFAULT 0');
     },
   },
   {
@@ -560,6 +574,23 @@ const migrations: Migration[] = [
           ON copytrade_wallet_coverage_events(wallet_address, chain, observed_at);
         CREATE INDEX idx_copytrade_coverage_events_run
           ON copytrade_wallet_coverage_events(run_id);
+      `);
+    },
+  },
+  {
+    description: 'CopyTrade append-only GMGN wallet statistics snapshots',
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE copytrade_wallet_stats_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          wallet_address TEXT NOT NULL,
+          chain TEXT NOT NULL,
+          period TEXT NOT NULL,
+          fetched_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL
+        );
+        CREATE INDEX idx_copytrade_wallet_stats_events_lookup
+          ON copytrade_wallet_stats_events(wallet_address, chain, period, fetched_at);
       `);
     },
   },
@@ -723,6 +754,23 @@ const migrations: Migration[] = [
     },
   },
   {
+    description: 'CopyTrade trade-count progress and wallet ETA fields',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
+      const additions: Array<[string, string]> = [
+        ['expected_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
+        ['initial_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
+        ['current_wallet_address', 'TEXT'],
+        ['current_wallet_expected_trades', 'INTEGER'],
+        ['current_wallet_initial_trades', 'INTEGER NOT NULL DEFAULT 0'],
+        ['current_wallet_started_at', 'TEXT'],
+      ];
+      for (const [name, definition] of additions) {
+        if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
+      }
+    },
+  },
+  {
     // Scaffolding only — the GMGN Top Caller endpoints (/api/v1/notification/callout/rank,
     // call_out/get_record, the follow/callout feed) have never been captured in this project.
     // gmgn-cli's own commands don't cover them, and no existing archive has a real payload, so
@@ -825,12 +873,230 @@ const migrations: Migration[] = [
   {
     description: 'Top Callers bounded retry state and frozen wallet snapshot',
     up: (database) => {
+      // SQLite may retain an ALTER TABLE change if a later statement in the same
+      // multi-statement migration failed. Read the actual schema and add only the
+      // missing columns so a restart can safely finish the migration.
+      const columns = new Set(
+        database.prepare('PRAGMA table_info(top_caller_collection_runs)').all()
+          .map((row) => (row as { name: string }).name),
+      );
+      const additions: Array<[string, string]> = [
+        ['retry_count', 'INTEGER NOT NULL DEFAULT 0'],
+        ['next_retry_at', 'TEXT'],
+        ['wallet_snapshot_json', 'TEXT'],
+      ];
+      for (const [name, definition] of additions) {
+        if (!columns.has(name)) {
+          database.exec(`ALTER TABLE top_caller_collection_runs ADD COLUMN ${name} ${definition}`);
+        }
+      }
+    },
+  },
+  {
+    description: 'Ensure append-only CopyTrade wallet statistics snapshots exist on upgraded databases',
+    up: (database) => {
+      // The events table was added to the source definition after some databases had
+      // already passed the original migration that created wallet stats. Keep this as a
+      // new idempotent migration so those databases receive the table too.
       database.exec(`
-        ALTER TABLE top_caller_collection_runs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE top_caller_collection_runs ADD COLUMN next_retry_at TEXT;
-        ALTER TABLE top_caller_collection_runs ADD COLUMN wallet_snapshot_json TEXT;
+        CREATE TABLE IF NOT EXISTS copytrade_wallet_stats_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          wallet_address TEXT NOT NULL,
+          chain TEXT NOT NULL,
+          period TEXT NOT NULL,
+          fetched_at TEXT NOT NULL,
+          raw_payload TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_copytrade_wallet_stats_events_lookup
+          ON copytrade_wallet_stats_events(wallet_address, chain, period, fetched_at);
       `);
     },
+  },
+  {
+    description: 'Persist Dune execution status payloads and reported concurrency limits for scheduler recovery',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_copy_simulation_runs)').all().map((row) => (row as { name: string }).name));
+      const additions: Array<[string, string]> = [
+        ['dune_execution_payload', 'TEXT'],
+        ['dune_status_payload', 'TEXT'],
+        ['dune_max_inflight_interactive_executions', 'INTEGER'],
+        ['dune_last_state', 'TEXT'],
+        ['dune_last_status_at', 'TEXT'],
+      ];
+      for (const [name, definition] of additions) if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`);
+      const outcomeColumns = new Set(database.prepare('PRAGMA table_info(dune_outcome_runs)').all().map((row) => (row as { name: string }).name));
+      const outcomeAdditions: Array<[string, string]> = [
+        ['dune_max_inflight_interactive_executions', 'INTEGER'],
+      ];
+      for (const [name, definition] of outcomeAdditions) if (!outcomeColumns.has(name)) database.exec(`ALTER TABLE dune_outcome_runs ADD COLUMN ${name} ${definition}`);
+    },
+  },
+  {
+    description: 'Backfill Dune scheduler payload columns for databases migrated before scheduler fields were added',
+    up: (database) => {
+      const copyColumns = new Set(database.prepare('PRAGMA table_info(copytrade_copy_simulation_runs)').all().map((row) => (row as { name: string }).name));
+      for (const [name, definition] of [
+        ['dune_execution_payload', 'TEXT'],
+        ['dune_status_payload', 'TEXT'],
+        ['dune_max_inflight_interactive_executions', 'INTEGER'],
+        ['dune_last_state', 'TEXT'],
+        ['dune_last_status_at', 'TEXT'],
+      ] as const) if (!copyColumns.has(name)) database.exec(`ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`);
+      const outcomeColumns = new Set(database.prepare('PRAGMA table_info(dune_outcome_runs)').all().map((row) => (row as { name: string }).name));
+      if (!outcomeColumns.has('dune_max_inflight_interactive_executions')) database.exec('ALTER TABLE dune_outcome_runs ADD COLUMN dune_max_inflight_interactive_executions INTEGER');
+    },
+  },
+  {
+    description: 'Persist copy-simulation match-window provenance for controlled wide-window retries',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_copy_simulation_runs)').all().map((row) => (row as { name: string }).name));
+      for (const [name, definition] of [
+        ['search_window_minutes', 'INTEGER NOT NULL DEFAULT 30'],
+        ["match_source", "TEXT NOT NULL DEFAULT 'precise'"],
+      ] as const) if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`);
+    },
+  },
+  {
+    // Appended migration: this must stay at the end because existing databases identify their
+    // position by PRAGMA user_version, so inserting a migration in the middle would skip it.
+    description: 'Ensure CopyTrade trade-count progress and wallet ETA fields exist',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
+      const additions: Array<[string, string]> = [
+        ['expected_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
+        ['initial_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
+        ['current_wallet_address', 'TEXT'],
+        ['current_wallet_expected_trades', 'INTEGER'],
+        ['current_wallet_initial_trades', 'INTEGER NOT NULL DEFAULT 0'],
+        ['current_wallet_started_at', 'TEXT'],
+      ];
+      for (const [name, definition] of additions) {
+        if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
+      }
+    },
+  },
+  {
+    // Compatibility for databases that already passed the original coverage migration before
+    // coverage_complete was added to the existing migration sequence.
+    description: 'Ensure CopyTrade coverage completeness marker exists',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallet_coverage)').all().map((row) => (row as { name: string }).name));
+      if (!columns.has('coverage_complete')) database.exec('ALTER TABLE copytrade_wallet_coverage ADD COLUMN coverage_complete INTEGER NOT NULL DEFAULT 0');
+    },
+  },
+  {
+    description: 'Persist whether the latest GMGN snapshot may be resumed',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
+      if (!columns.has('resume_disabled')) database.exec('ALTER TABLE copytrade_fetch_runs ADD COLUMN resume_disabled INTEGER NOT NULL DEFAULT 0');
+    },
+  },
+  {
+    description: 'Persist computed CopyTrade report cache across page loads',
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS copytrade_report_cache (
+          cache_key TEXT PRIMARY KEY,
+          data_fingerprint TEXT NOT NULL,
+          report_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
+  {
+    description: 'Persist per-wallet GMGN fetch diagnostics',
+    up: (database) => {
+      const addIfMissing = (table: string, name: string, definition: string): void => {
+        const columns = new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((row) => (row as { name: string }).name));
+        if (!columns.has(name)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+      };
+      for (const [name, definition] of [
+        ['malformed_rows', 'INTEGER NOT NULL DEFAULT 0'],
+        ['duplicate_rows', 'INTEGER NOT NULL DEFAULT 0'],
+        ['inserted_rows', 'INTEGER NOT NULL DEFAULT 0'],
+        ['daily_capped_rows', 'INTEGER NOT NULL DEFAULT 0'],
+        ['pages_fetched', 'INTEGER NOT NULL DEFAULT 0'],
+      ] as const) {
+        addIfMissing('copytrade_wallet_coverage', name, definition);
+        addIfMissing('copytrade_wallet_coverage_events', name, definition);
+      }
+    },
+  },
+  {
+    // Repair databases whose user_version already included the earlier appended
+    // migrations before resume_disabled was introduced.
+    description: 'Repair resumable CopyTrade fetch state column',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
+      if (!columns.has('resume_disabled')) database.exec('ALTER TABLE copytrade_fetch_runs ADD COLUMN resume_disabled INTEGER NOT NULL DEFAULT 0');
+    },
+  },
+  {
+    description: 'Persist GMGN wallet icon URLs',
+    up: (database) => {
+      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallets)').all().map((row) => (row as { name: string }).name));
+      if (!columns.has('icon_url')) database.exec('ALTER TABLE copytrade_wallets ADD COLUMN icon_url TEXT');
+      const update = database.prepare('UPDATE copytrade_wallets SET icon_url = ? WHERE source_snapshot_id = ? AND wallet_address = ?');
+      const snapshots = database.prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots').all() as unknown as Array<{ id: number; rawPayload: string }>;
+      for (const snapshot of snapshots) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(snapshot.rawPayload); } catch { continue; }
+        const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        const data = root.data;
+        const rank = Array.isArray(data) ? data : data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list : root.rank ?? root.list;
+        if (!Array.isArray(rank)) continue;
+        for (const item of rank) {
+          if (!item || typeof item !== 'object') continue;
+          const record = item as Record<string, unknown>;
+          const wallet = typeof record.wallet_address === 'string' ? record.wallet_address : typeof record.address === 'string' ? record.address : null;
+          const icon = ['avatar_url', 'avatar', 'icon_url', 'icon', 'logo', 'image_url', 'profile_pic', 'twitter_avatar'].map((key) => record[key]).find((value) => typeof value === 'string' && /^https?:\/\//i.test(value.trim()));
+          if (wallet && typeof icon === 'string') update.run(icon.trim(), snapshot.id, wallet);
+        }
+      }
+    },
+  },
+  {
+    // Migration 43 was briefly applied during development to an existing local database.
+    // Keep its version number recognized even though the temporary schema change was removed.
+    description: 'Acknowledge development migration 43',
+    up: () => {},
+  },
+  {
+    description: 'Persist Scrutiny GMGN 30d risk results',
+    up: (database) => database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_gmgn_risk_stats (
+        wallet_address TEXT NOT NULL,
+        period TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        available INTEGER NOT NULL,
+        metrics_json TEXT,
+        error TEXT,
+        PRIMARY KEY (wallet_address, period)
+      );
+    `),
+  },
+  {
+    description: 'Persist before-and-after Dune fetch audits',
+    up: (database) => database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_dune_fetch_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        requested_at TEXT NOT NULL,
+        completed_at TEXT,
+        mode TEXT NOT NULL,
+        wallet_count INTEGER NOT NULL,
+        wallet_addresses TEXT NOT NULL,
+        planned_targets INTEGER NOT NULL DEFAULT 0,
+        submitted_targets INTEGER NOT NULL DEFAULT 0,
+        stored_targets INTEGER NOT NULL DEFAULT 0,
+        failed_targets INTEGER NOT NULL DEFAULT 0,
+        remaining_targets INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        message TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_dune_fetch_audits_requested
+        ON copytrade_dune_fetch_audits(requested_at);
+    `),
   },
 ];
 

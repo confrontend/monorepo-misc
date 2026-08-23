@@ -184,10 +184,9 @@ export const recordFetchRunEstimate = (database: DatabaseSync, runId: number, no
  * Projects how long a fetch of `limit` traders over `periodDays` will take.
  *
  * Fresh-wallet cost is scaled linearly by the ratio of the requested window to the window the
- * rate was measured at, then clamped to MAX_REQUESTS_PER_WALLET — the fetcher stops a wallet
- * there regardless of how much history remains, so no projection may exceed it. Linear scaling
- * is an approximation (trade volume is not uniform across a wallet's history); the returned
- * `confidence` exists so the UI can say so rather than implying a precise figure.
+ * rate was measured at. Linear scaling is an approximation (trade volume is not uniform across
+ * a wallet's history); the returned `confidence` exists so the UI can say so rather than
+ * implying a precise figure.
  */
 export const projectFetchDuration = (
   database: DatabaseSync,

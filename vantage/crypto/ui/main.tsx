@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
+import { STRONGLY_NEGATIVE_PNL_PERCENT } from '../src/copytrade/constants.js';
 
 type Stats = {
   tokenCount: number;
@@ -57,7 +58,7 @@ type PrescreenSummary = { ruleVersion: string; auditSeed: string; maxSignalIds: 
 type MeasurementPlan = { version: string; generatedAt: string; retryDelaysMinutes: number[]; maxAttempts: number; capturedCount: number; parsedCount: number; latestCapturedAt: string | null; latestObservedAt: string | null; latestDuneCompletedAt: string | null; measuredCount: number; unmeasuredCount: number; tooFreshCount: number; inFlightCount: number; neverMaturelyAttemptedCount: number; eligibleSignalIds: number[]; eligibleNewSignalIds: number[]; eligibleRetrySignalIds: number[]; retryQueueSignalIds: number[]; byState: Record<string, number>; bySignalType: Array<{ signalType: string; captured: number; measured: number; unmeasured: number; eligible: number; pending: number; complete: number; retryEligible: number; inFlight: number; tooFresh: number; neverMaturelyAttempted: number; waitingOnRetryBuffer: number }>; prescreen: PrescreenSummary };
 type DuneReconcileSummary = { checked: number; completed: number; failed: number; stillRunning: number; noApiKey: number; runIds: { completed: number[]; failed: number[]; stillRunning: number[] } };
 type CopyTradeSummary = { traders: number | null; trades: number | null; historyDays: number | null; verifiedPercent: number | null; lastRunAt: string | null };
-type CopyTradeFetchStatus = { running: boolean; runId: number | null; walletDone: number | null; walletTotal: number | null; tradesFetched: number | null; tradesDuplicate: number | null; tradesDailyCapped: number | null; rateLimitedUntil: string | null; status: 'idle' | 'running' | 'completed' | 'failed' | 'rate_limited' | 'cancelled'; message: string; estimatedRemainingSeconds: number | null; scope: 'roster' | 'winners' | 'single' | null };
+type CopyTradeFetchStatus = { running: boolean; runId: number | null; walletDone: number | null; walletTotal: number | null; tradesFetched: number | null; tradesDuplicate: number | null; tradesDailyCapped: number | null; failedWallets: number | null; requestsMade: number | null; rateLimitedUntil: string | null; status: 'idle' | 'running' | 'completed' | 'failed' | 'rate_limited' | 'cancelled'; message: string; estimatedRemainingSeconds: number | null; expectedTradesTotal?: number | null; storedTradesTotal?: number | null; remainingTradesTotal?: number | null; totalTradeProgressPercent?: number | null; currentWalletAddress?: string | null; currentWalletExpectedTrades?: number | null; currentWalletStoredTrades?: number | null; currentWalletRemainingTrades?: number | null; currentWalletProgressPercent?: number | null; currentWalletEstimatedRemainingSeconds?: number | null; totalEstimatedRemainingSeconds?: number | null; scope: 'roster' | 'winners' | 'single' | null; resumeAvailable?: boolean; estimateExceeded?: boolean; walletsWithNewData?: number; walletsAlreadyCurrent?: number };
 type CopyTradeFetchEstimateBasis = { source: 'measured' | 'default'; runsCounted: number; updatedAt: string | null };
 type CopyTradeFetchEstimate = { walletCount: number; freshWallets: number; coveredWallets: number; periodDays: number; estimatedRequests: number; estimatedSeconds: number; basis: CopyTradeFetchEstimateBasis; confidence: 'seeded' | 'low' | 'medium' | 'high' };
 type BrowserActivityImportResult = { imported: number; duplicates: number; malformed: number; activityEndpoints: number; samples: number; archivePath: string | null; archiveSha256: string | null };
@@ -65,10 +66,99 @@ type CopyTradePeriod = { period: string; trades: number; winRatePercent: number 
 type CopyTradeTokenProfit = { tokenAddress: string; tokenSymbol: string | null; trades: number; profitUsd: number };
 type CopyTradeConcentration = { bestToken: CopyTradeTokenProfit | null; bestThreeTokens: CopyTradeTokenProfit[]; bestTokenSharePositiveProfitPercent: number | null; bestThreeSharePositiveProfitPercent: number | null; bestTradeProfitUsd: number | null; excludingBestTrade: { trades: number; medianReturnPercent: number | null; endingCapitalUsd: number | null }; excludingBestToken: { trades: number; medianReturnPercent: number | null; endingCapitalUsd: number | null } };
 type CopyTradeRankHistory = { leaderboardCaptures: number; appearances: number; topFiveAppearances: number; topFiveMembershipPercent: number | null; currentRank: number | null; bestRank: number | null; worstRank: number | null; firstObservedAt: string | null; lastObservedAt: string | null };
-type CopyTradeRow = { walletAddress: string; name: string | null; trades: number | null; winRatePercent: number | null; medianReturnPercent: number | null; averageReturnPercent: number | null; endingCapitalUsd: number | null; verdict: 'screen_pass' | 'no' | 'thin' | 'flagged' | 'descriptive_only'; comparable: boolean; riskFlags: string[]; failedRules: string[]; profitConcentration: CopyTradeConcentration; weeklyPerformance: CopyTradePeriod[]; monthlyPerformance: CopyTradePeriod[]; rankHistory: CopyTradeRankHistory };
-type CopyTradeResults = { computedAt: string; startingCapitalUsd: 100; periodDays: number | null; rows: CopyTradeRow[]; overall: CopyTradeOverallRow; overallByWallet: CopyTradeOverallRow; rules: { minTrades: number | null; minDays: number | null; requiresPositiveMedian: boolean }; scope?: { rosterSnapshotId: number | null; rosterProvenance: { capturedAt: string; window: string | null; orderby: string | null; requestPath: string | null; requestQuery: Record<string, unknown> } | null }; walletPerformance?: { status: 'available'; description: string }; copySimulation?: { status: 'not_available'; description: string; requiredInputs: string[] } };
+/** GMGN's own outcome-distribution buckets. These are the closest thing the aggregate endpoint
+ *  gives to a return histogram, and they answer the tail question directly: how many positions
+ *  were total losses versus multi-baggers. Counts, never percentages, so a small sample cannot
+ *  hide behind a ratio. */
+type GmgnPnlBuckets = { lossOver50: number | null; loss50to0: number | null; gain0to2x: number | null; gain2to5x: number | null; gainOver5x: number | null };
+type GmgnAggregateStats = { period: string; fetchedAt: string; realizedProfit: number | null; realizedProfitPnlPercent: number | null; nativeBalance: number | null; buyCount: number | null; sellCount: number | null; boughtCost: number | null; soldIncome: number | null; boughtFee: number | null; soldFee: number | null; totalCost: number | null; lastTimestamp: number | null; tokenCount: number | null; winRatePercent: number | null; averageHoldingPeriodSeconds: number | null; buckets: GmgnPnlBuckets; tags: string[]; walletCreatedAt: number | null; twitterName: string | null; createdTokenCount: number | null };
+type GmgnStatsFetchStatus = { running: boolean; status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled'; walletDone: number; walletTotal: number; periods: string[]; requestsMade: number; skippedFresh: number; error: string | null; startedAt: string | null; completedAt: string | null };
+type GmgnStatsRecord = { walletAddress: string; period: string; fetchedAt: string; rawPayload: string };
+type CopyTradeHistoryRow = { id: number; walletAddress: string; chain: string; txHash: string; eventType: string; tokenAddress: string; tokenSymbol: string | null; observedTimestamp: number; tokenAmount: string | null; costUsd: string | null; buyCostUsd: string | null; priceUsd: string | null; gasUsd: string | null; dexUsd: string | null; launchpadPlatform: string | null; fetchedAt: string };
+type CopyTradeHistoryResponse = { walletAddress: string; chain: string; total: number; rows: CopyTradeHistoryRow[]; coverage: { requestsUsed: number; periodDays: number | null; truncated: number; stopReason: string | null; updatedAt: string; resumeCursor: string | null } | null };
+type PatternDiscoveryExport = { metadata: { project: 'crypto'; outcome: 'net_return_after_costs'; outcome_horizon: string; period_days: number; coverage_scope: 'outcome_exact_100_percent'; coverage_semantics: string; selection_rule: string; selected_wallet_count: number; exported_rows: number; excluded_wallets_not_exactly_100_percent: number; export_generated_at: string }; rows: Array<{ event_id: string; event_time: string; entity_id: string; signal_type: string; wallet_address: string; token_address: string; net_return_after_costs: number; coverage_rate_percent: 100 }> };
+type PatternDiscoveryReport = { project: 'crypto'; patterns: Array<{ source?: string; kind?: string; feature?: string; conditions?: unknown; effect?: number | null; discovery_sample_size?: number; validationStatus?: string; validation?: { sample_size?: number; effect_vs_all?: number | null; reason?: string }; reason?: string }>; status_counts: Record<string, number>; input_contract?: { feature_allowlist_version?: string; rejected_fields?: string[] }; split: { method?: string; discovery_rows?: number; validation_rows?: number; untouched_holdout_rows?: number; holdout_policy?: string; holdout_used_for_discovery?: boolean; holdout_used_for_validation?: boolean; [key: string]: unknown }; language?: string };
+type PatternDiscoveryExecution = { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string };
+type PatternDiscoveryRunResponse = { report: PatternDiscoveryReport; execution?: PatternDiscoveryExecution };
+
+const patternDiscoveryReportStorageKey = (periodDays: number): string => `vantage.crypto.pattern-discovery-report.${periodDays}d`;
+
+const readStoredPatternDiscoveryReport = (periodDays: number): PatternDiscoveryReport | null => {
+  try {
+    const stored = window.localStorage.getItem(patternDiscoveryReportStorageKey(periodDays));
+    return stored ? JSON.parse(stored) as PatternDiscoveryReport : null;
+  } catch { return null; }
+};
+
+const patternFeatureLabel = (feature: string | undefined): string => ({
+  prior_wallet_trade_count: 'Previous wallet trades',
+  prior_token_trade_count: 'Previous trades for this token',
+  prior_wallet_buy_volume_usd: 'Previous wallet buy volume',
+}[feature ?? ''] ?? feature?.replaceAll('_', ' ') ?? 'Unknown feature');
+
+const formatPatternNumber = (value: number): string => {
+  if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  if (Math.abs(value) >= 100) return value.toFixed(0);
+  if (Math.abs(value) >= 10) return value.toFixed(1);
+  return value.toFixed(2);
+};
+
+const patternConditionText = (feature: string | undefined, conditions: unknown): string => {
+  if (!Array.isArray(conditions) || conditions.length === 0) return 'No simple rule was reported.';
+  const parts = conditions.map((condition) => {
+    if (!condition || typeof condition !== 'object') return null;
+    const item = condition as { lower?: number; upper?: number; operator?: string; value?: number | string };
+    if (typeof item.lower === 'number' && typeof item.upper === 'number') return `${formatPatternNumber(item.lower)} – ${formatPatternNumber(item.upper)}`;
+    if (item.operator === '>=') return `${formatPatternNumber(Number(item.value))}+`;
+    if (item.operator === '<=') return `≤ ${formatPatternNumber(Number(item.value))}`;
+    if (item.operator === 'correlation' && item.value === 'negative') return 'Higher values → lower outcomes';
+    if (item.operator === 'correlation' && item.value === 'positive') return 'Higher values → higher outcomes';
+    if (item.operator && item.value !== undefined) return `${item.operator} ${item.value}`;
+    return null;
+  }).filter((part): part is string => Boolean(part));
+  return parts.join(' and ') || 'No simple rule was reported.';
+};
+type ResearchUpdateSummary = {
+  completedAt: string; rosterSnapshotId: number | null; rosterWalletCount: number; rosterAdded: number; rosterAlreadyPresent: number;
+  statsStatus: string; statsWalletDone: number; statsWalletTotal: number; statsRequests: number; statsReused: number;
+  duneSubmitted: number; duneBatches: number; duneExhausted: boolean;
+  beforeRows: number; beforeStatsRows: number; beforeMatched: number; beforeVerdicts: Record<string, number>; beforeVerdictByWallet: Record<string, string>;
+  leaderboardOrderby: string; leaderboardMinWinrate30d: number;
+};
+type RosterChange = { joinedWallets: string[]; leftWallets: string[]; live: boolean; capturedAt: string | null };
+type RosterWalletComparison = { walletAddress: string; chain: string; name: string | null; iconUrl?: string | null; rankPosition: number | null; reportedPnl30d: string | null; reportedWinrate30d: string | null; riskFlags: string[] };
+type RosterComparison = { currentSnapshotId: number | null; currentCapturedAt: string | null; previousSnapshotId: number | null; previousCapturedAt: string | null; baselineAvailable: boolean; current: RosterWalletComparison[]; joined: RosterWalletComparison[]; left: RosterWalletComparison[] };
+type WalletScreenSummary = {
+  completedAt: string; snapshotId: number | null; walletCount: number; statsWalletCount: number;
+  fastWallets: number; notFastWallets: number; missingStatsWallets: number;
+  totalTrades: number; maxTrades: number; maxTradesWallet: string | null;
+  activityLeaders: Array<{ wallet: string; name: string | null; trades: number; rank: number | null; netProfit: number | null; averageHoldSeconds: number | null }>;
+  periodDays: number; averageHoldThresholdSeconds: number; lastFetchedAt: string | null;
+};
+type GmgnLeaderboardMetric = { pnl1d: unknown; pnl7d: unknown; pnl30d: unknown; dailyProfit7d: unknown };
+type CopyTradeRow = { walletAddress: string; name: string | null; iconUrl?: string | null; trades: number | null; winRatePercent: number | null; medianReturnPercent: number | null; averageReturnPercent: number | null; endingCapitalUsd: number | null; endingCapitalUsdCompounded: number | null; coveredDays: number | null; capitalPath?: Array<{ day: string; capitalUsd: number }>; verdict: 'screen_pass' | 'no' | 'thin' | 'flagged' | 'descriptive_only'; comparable: boolean; riskFlags: string[]; failedRules: string[]; truncated?: boolean; historyFailed?: boolean; riskEvidence?: { medianHoldSeconds: number | null; walletAgeDays: number | null }; profitConcentration: CopyTradeConcentration; weeklyPerformance: CopyTradePeriod[]; monthlyPerformance: CopyTradePeriod[]; rankHistory: CopyTradeRankHistory; representativeSampled?: boolean; representativePopulationTrades?: number; representativeSampleTrades?: number; gmgnAggregate?: GmgnAggregateStats };
+type CopyTradeResults = { computedAt: string; startingCapitalUsd: 100; periodDays: number | null; rows: CopyTradeRow[]; overall: CopyTradeOverallRow; overallByWallet: CopyTradeOverallRow; rules: { minTrades: number | null; minDays: number | null; requiresPositiveMedian: boolean }; representativeSampling?: { method: string; maxSellsPerWallet: number | null; sampledWallets: number; populationTrades: number; selectedTrades: number }; scope?: { rosterSnapshotId: number | null; rosterProvenance: { capturedAt: string; window: string | null; orderby: string | null; requestPath: string | null; requestQuery: Record<string, unknown> } | null }; walletPerformance?: { status: 'available'; description: string }; copySimulation?: { status: 'not_available'; description: string; requiredInputs: string[] } };
+
+const walletStatsResultsStorageKey = 'vantage.crypto.wallet-stats-results.v1';
+
+const readStoredWalletStatsResults = (): CopyTradeResults | null => {
+  try {
+    const raw = window.localStorage.getItem(walletStatsResultsStorageKey);
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as { periodDays?: unknown; results?: unknown };
+    return stored.periodDays === 30 && stored.results && typeof stored.results === 'object'
+      ? stored.results as CopyTradeResults
+      : null;
+  } catch { return null; }
+};
 type CopyTradeOverallRow = { trades: number | null; winRatePercent: number | null; medianReturnPercent: number | null; averageReturnPercent: number | null; endingCapitalUsd: number | null; weighting: 'trade-weighted' | 'wallet-weighted'; wallets: number | null };
 type CopyTradeSortKey = 'name' | 'trades' | 'winRatePercent' | 'medianReturnPercent' | 'averageReturnPercent' | 'endingCapitalUsd' | 'verdict';
+type DecisionSortKey = 'default' | 'rank' | 'name' | 'verdict' | 'gmgnPnl' | 'copyResult' | 'copyCapital' | 'coverage' | 'activity';
+type GmgnStatsSortKey = 'name' | 'pnl1d' | 'pnl7d' | 'pnl30d' | 'dailyProfit7d' | 'win7d' | 'win30d' | 'activity' | 'equivalent' | 'updated';
+type CopyDelaySortKey = 'trader' | 'totalTrades7d' | 'totalTrades30d' | 'medianHold' | 'delayShare' | 'edge' | 'reading';
+type CopySimulationBatchOutcome = { batch: number; targets: number; status: 'running' | 'stored' | 'failed'; seconds: number | null; error: string | null };
+type CopySimulationRunStatus = { mode?: 'precise' | 'wide_retry'; running: boolean; cancelRequested: boolean; targetsTotal: number; targetsProcessed: number; batchesRun: number; currentBatch: number; batchesTotal: number; message: string; batches: CopySimulationBatchOutcome[]; startedAt: string | null; finishedAt: string | null; storedTargets: number; failedTargets: number; remainingTargets: number; retryableTargetsBefore?: number | null; retryableTargetsRemaining?: number | null; coverageBeforePercent?: number | null; coverageAfterPercent?: number | null; outcome: 'idle' | 'running' | 'complete' | 'partial' | 'stopped' | 'error'; duneExecutionId: string | null; duneState: string | null; dunePollCount: number; duneElapsedSeconds: number; duneIsExecutionFinished: boolean; duneExecutionCostCredits: number | null; duneLastStatusAt: string | null; duneRequestPhase?: 'status_requesting' | 'status_received' | 'results_requesting' | 'results_received' | 'idle'; duneLastHttpStatus?: number | null; duneLastRequestMs?: number | null; duneLastPayload?: string | null; persistedRun?: { id: number; status: string; requestedAt: string; completedAt: string | null; storedTargets: number; searchWindowMinutes: number; matchSource: string } | null; audit?: { id: number; requestedAt: string; completedAt: string | null; mode: string; walletCount: number; plannedTargets: number; submittedTargets: number; storedTargets: number; failedTargets: number; remainingTargets: number; status: string; message: string | null } | null };
+type CopySimulationDuneResponse = { id: number; executionId: string | null; status: string; requestedAt: string; completedAt: string | null; tradeCount: number; archivePath: string | null; archiveSha256: string | null; rawResult: string | null };
 
 type HistoricalConsistencyVerdict = 'consistent' | 'declining' | 'recent_only' | 'consistently_negative' | 'insufficient';
 type HistoricalConsistencySplit = 'fixed_60_30' | 'relative_half' | 'insufficient_depth';
@@ -104,17 +194,17 @@ type TopCallerLeaderboardRow = { callerKey: string; rankPosition: number; callCo
 type TopCallerLeaderboard = { snapshot: { capturedAt: string; period: string | null } | null; rows: TopCallerLeaderboardRow[] };
 type TopCallerCollectionKind = 'leaderboard' | 'callouts' | 'checkpoints';
 type TopCallerCollectionStatus = { running: boolean; runId: number | null; status: 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'rate_limited' | 'cancelled'; requestsMade: number; walletTotal: number | null; walletDone: number | null; rateLimitedUntil: string | null; retryCount: number; nextRetryAt: string | null; message: string };
-type TopCallerEvaluationRow = { callerKey: string; callCount: number; measuredCallCount: number; waitingCallCount: number; unavailableCallCount: number; coverageRatePercent: number | null; coverageSufficient: boolean; winRatePercent: number | null; medianReturnPercent: number | null; reliable: boolean };
+type TopCallerEvaluationRow = { callerKey: string; callCount: number; measuredCallCount: number; waitingCallCount: number; unavailableCallCount: number; coverageRatePercent: number | null; coverageSufficient: boolean; winRatePercent: number | null; medianReturnPercent: number | null; sellCallCount: number; topTokenSharePercent: number | null; topTokenSymbol: string | null; medianReturnPercentByToken: number | null; reliable: boolean };
 type TopCallerEvaluation = { checkpoint: string; rows: TopCallerEvaluationRow[] };
 type TopCallerAllEvaluation = Record<TopCallerEvaluationCheckpoint, TopCallerEvaluation>;
 const TOP_CALLER_CHECKPOINTS: TopCallerEvaluationCheckpoint[] = ['5m', '10m', '15m', '30m', '45m', '1h', '6h', '24h'];
 type TopCallerEvaluationCheckpoint = '5m' | '10m' | '15m' | '30m' | '45m' | '1h' | '6h' | '24h';
-type TopCallerTableSortKey = 'callerKey' | 'checkpoint' | 'medianReturnPercent' | 'winRatePercent' | 'measuredCallCount' | 'coverageRatePercent' | 'reliable';
+type TopCallerTableSortKey = 'callerKey' | 'checkpoint' | 'medianReturnPercent' | 'winRatePercent' | 'measuredCallCount' | 'coverageRatePercent' | 'estimatedValue' | 'reliable';
 type TopCallerOutcome = { checkpoint: string; status: string; measuredReturnPct: number | null; gapSeconds: number | null };
 type TopCallerCallout = { id: number; tokenAddress: string; tokenSymbol: string | null; callTimestamp: string; callPriceUsd: string | null; message: string | null; reportedMultiplier: string | null; outcomes: TopCallerOutcome[] };
 type TopCallerDetail = { callerKey: string; callouts: TopCallerCallout[] };
-type TopCallerReliabilityReason = 'awaiting_dune_fetch' | 'insufficient_coverage' | 'awaiting_more_capture_dates' | 'no_callouts';
-type TopCallerCheckpointBreakdownRow = { checkpoint: string; callCount: number; measuredCallCount: number; waitingCallCount: number; unavailableCallCount: number; coverageRatePercent: number | null; coverageSufficient: boolean; winRatePercent: number | null; medianReturnPercent: number | null; reliable: boolean; reasons: TopCallerReliabilityReason[] };
+type TopCallerReliabilityReason = 'awaiting_dune_fetch' | 'insufficient_coverage' | 'awaiting_more_capture_dates' | 'single_token_concentration' | 'no_callouts';
+type TopCallerCheckpointBreakdownRow = { checkpoint: string; callCount: number; measuredCallCount: number; waitingCallCount: number; unavailableCallCount: number; coverageRatePercent: number | null; coverageSufficient: boolean; winRatePercent: number | null; medianReturnPercent: number | null; sellCallCount: number; topTokenSharePercent: number | null; topTokenSymbol: string | null; medianReturnPercentByToken: number | null; reliable: boolean; reasons: TopCallerReliabilityReason[] };
 type TopCallerCheckpointBreakdown = { callerKey: string; rows: TopCallerCheckpointBreakdownRow[] };
 type ExperimentSummary = {
   experimentId: number; selectedAtUtc: string; filterHash: string; filterMatchesLatestCapture: boolean;
@@ -136,11 +226,17 @@ type ExperimentReport = {
 type CopyCandidate = {
   walletAddress: string; name: string | null; rankPosition: number | null;
   medianReturnPercent: number | null; winRatePercent: number | null; trades: number;
+  endingCapitalUsd: number | null; endingCapitalUsdCompounded: number | null; coveredDays: number | null; analysisPeriodDays: number;
   medianHoldSeconds: number | null; fastRoundTripPercent: number | null; concentrationPercent: number | null;
   bestTokenSymbol: string | null; historicalConsistencyVerdict: HistoricalConsistencyVerdict | null;
   gmgnProfileUrl: string;
+  daysSinceLastTrade: number | null;
+  dormant: boolean;
   copySurvivalStatus: 'survives' | 'fails_copy_survival' | 'not_yet_simulated';
   simulatedMedianReturnPercent: number | null;
+  simulatedMeanReturnPercent: number | null;
+  tradesAbove100Percent: number;
+  tailShareOfMeanPercent: number | null;
   copySimulationCoverageRatePercent: number | null;
 };
 type CopyCandidatesReport = {
@@ -148,10 +244,161 @@ type CopyCandidatesReport = {
   thresholds: { minMedianHoldSeconds: number; maxFastRoundTripPercent: number; maxConcentrationPercent: number; requiredHistoricalConsistencyVerdict: string };
   screenedCount: number; candidates: CopyCandidate[]; excludedCount: number;
   pendingCopySimulationCount: number; failedCopySurvivalCount: number;
+  highUpsideCandidates: CopyCandidate[]; highUpsidePendingSimulationCount: number;
 };
-type CopySimulationTradeResult = { tokenAddress: string; tokenSymbol: string | null; walletReturnPercent: number | null; simulatedReturnPercent: number | null; status: 'simulated' | 'missing_entry_match' | 'missing_exit_match' | 'not_yet_queried'; entryGapSeconds: number | null; exitGapSeconds: number | null; gasFeeSol: number | null; entryTradeAmountUsd: number | null; exitTradeAmountUsd: number | null };
-type CopySimulationWalletReport = { walletAddress: string; roundTripsConsidered: number; copiedTrades: number; missedTrades: number; coverageRatePercent: number | null; walletMedianReturnPercent: number | null; simulatedMedianReturnPercent: number | null; delayCostPercentagePoints: number | null; worstSimulatedReturnPercent: number | null; totalGasFeeSol: number | null; trades: CopySimulationTradeResult[] };
-type CopySimulationReport = { computedAt: string; assumptions: { copierDelaySeconds: number; feeBps: number; slippageBps: number; gasPriorityFeeSolPerTx: number; maxMatchGapSeconds: number; maxRoundTripsPerWallet: number }; wallets: CopySimulationWalletReport[] };
+type ScrutinyVerdict = 'pass' | 'fail' | 'insufficient';
+type ScrutinyCheck<M> = { key: string; label: string; verdict: ScrutinyVerdict; n: number; detail: string; metrics: M };
+type CandidateScrutinyReport = {
+  walletAddress: string; name: string | null; computedAt: string;
+  selectionContext: { candidateCount: number; screenedCount: number; note: string };
+  checks: {
+    dormancy: ScrutinyCheck<{ daysSinceLastTrade: number | null; dormantAfterDays: number }>;
+    coverage: ScrutinyCheck<{ inWindowMatched: number; inWindowTotal: number; inWindowPercent: number | null; fullHistoryMatched: number; fullHistoryTotal: number; fullHistoryPercent: number | null }>;
+    coverageBias: ScrutinyCheck<{ matchedBigWinPercent: number | null; matchedN: number; unmatchedBigWinPercent: number | null; unmatchedN: number; gapPercentagePoints: number | null; direction: 'conservative' | 'optimistic' | 'unclear' | 'no_gap' }>;
+    concentration: ScrutinyCheck<{ bestTokenSymbol: string | null; bestTokenSharePercent: number | null; medianWithToken: number | null; medianWithoutToken: number | null; tradesWithoutToken: number }>;
+    repeatEntry: ScrutinyCheck<{ repeatEntryMedianReturnPercent: number | null; repeatEntryN: number; singleEntryMedianReturnPercent: number | null; singleEntryN: number }>;
+    buySellComposition: ScrutinyCheck<{ buyCount: number; sellCount: number; buySharePercent: number | null }>;
+    medianMeanDivergence: ScrutinyCheck<{ medianReturnPercent: number | null; averageReturnPercent: number | null; diverges: boolean }>;
+    tailFragility: ScrutinyCheck<{ top3SharePercent: number | null; tradesAboveThreshold: number; thresholdPercent: number; simulatedTrades: number }>;
+    copyability: ScrutinyCheck<{ medianHoldSeconds: number | null; copierDelaySeconds: number; delayMultiple: number | null; minRequiredMultiple: number }>;
+    outOfSampleStability: ScrutinyCheck<{ splitDate: string | null; earlyMedianReturnPercent: number | null; earlyN: number; lateMedianReturnPercent: number | null; lateN: number }>;
+  };
+};
+type ScrutinyResponse = { reports: CandidateScrutinyReport[]; cappedAt: number; requested: number; missingWallets: string[] };
+type GmgnRiskMetrics = {
+  realizedProfit: number | null; realizedPnlPercent: number | null; winRate: number | null; buys: number | null; sells: number | null;
+  fees: number | null; averageHoldingSeconds: number | null; nativeBalance: number | null; tokenCount: number | null;
+  risk: { noBuyHold: number | null; noBuyHoldRatio: number | null; sellPassBuy: number | null; sellPassBuyRatio: number | null; fastTx: number | null; fastTxRatio: number | null };
+  pnlDistribution: Record<string, number | string>;
+};
+type GmgnRiskResult = { walletAddress: string; period: '30d'; available: boolean; metrics?: GmgnRiskMetrics; error?: string };
+type GmgnRiskResponse = { results: GmgnRiskResult[]; requestedWallets: number; requestedPeriods: string[] };
+
+const normalizeImportedGmgnRisk = (payload: unknown): GmgnRiskMetrics | null => {
+  const outer = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  const source = (outer.data ?? outer.result ?? payload) && typeof (outer.data ?? outer.result ?? payload) === 'object' && !Array.isArray(outer.data ?? outer.result ?? payload) ? (outer.data ?? outer.result ?? payload) as Record<string, unknown> : {};
+  const risk = source.risk && typeof source.risk === 'object' && !Array.isArray(source.risk) ? source.risk as Record<string, unknown> : {};
+  const numberValue = (record: Record<string, unknown>, keys: string[]) => { const value = keys.map((key) => record[key]).find((item) => item !== undefined && item !== null); const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN; return Number.isFinite(parsed) ? parsed : null; };
+  return {
+    realizedProfit: numberValue(source, ['realized_profit', 'realizedProfit', 'profit']), realizedPnlPercent: numberValue(source, ['realized_profit_pnl', 'realized_profit_pnl_percent', 'pnl', 'pnl_percent']), winRate: numberValue(source, ['winrate', 'win_rate', 'winRate']), buys: numberValue(source, ['buy', 'buy_count', 'buys']), sells: numberValue(source, ['sell', 'sell_count', 'sells']), fees: numberValue(source, ['fee', 'fees', 'total_fee', 'total_fees']), averageHoldingSeconds: numberValue(source, ['avg_holding_period', 'avg_holding_period_seconds', 'avg_hold_time']), nativeBalance: numberValue(source, ['native_balance', 'nativeBalance', 'sol_balance']), tokenCount: numberValue(source, ['token_num', 'token_count', 'tokens']),
+    risk: { noBuyHold: numberValue(risk, ['no_buy_hold']), noBuyHoldRatio: numberValue(risk, ['no_buy_hold_ratio']), sellPassBuy: numberValue(risk, ['sell_pass_buy']), sellPassBuyRatio: numberValue(risk, ['sell_pass_buy_ratio']), fastTx: numberValue(risk, ['fast_tx']), fastTxRatio: numberValue(risk, ['fast_tx_ratio']) },
+    pnlDistribution: Object.fromEntries(Object.entries(source).filter(([key, value]) => /pnl|profit/i.test(key) && (typeof value === 'number' || typeof value === 'string'))),
+  };
+};
+
+type EliminationReason = 'strongly_negative_30d_pnl' | 'negative_delayed_copy_result' | 'hold_time_shorter_than_copy_delay';
+type CoverageGapDirection = 'conservative' | 'optimistic' | 'unclear' | 'no_gap';
+type HiddenLossRisk = 'high' | 'moderate' | 'negligible' | 'unknown';
+type CoverageGapAssessment = {
+  matchedBigWinPercent: number | null; matchedN: number;
+  unmatchedBigWinPercent: number | null; unmatchedN: number;
+  gapPercentagePoints: number | null; upsideBiasWeightedPercentagePoints: number | null; direction: CoverageGapDirection;
+  shownLossRatePercent: number | null; trueLossRatePercent: number | null;
+  lossRateUnderstatedPercentagePoints: number | null; hiddenLossRisk: HiddenLossRisk; hiddenUpsideBias: HiddenLossRisk;
+};
+type WalletEliminationEntry = {
+  walletAddress: string; name: string | null; trades: number; truncated: boolean;
+  duneCoveragePercent: number | null; duneMissedTrades: number | null; gmgnPnl30dPercent: number | null;
+  simulatedMedianReturnPercent: number | null; medianHoldSeconds: number | null;
+  coverageGap: CoverageGapAssessment | null;
+  trustworthy: boolean; eliminated: boolean; reasons: EliminationReason[];
+};
+/** Plain-language reading of whether a wallet's missing Dune data actually changes the picture.
+ *  "Hides big wins" is the cohort-wide pattern (unmatched trades ~2x more likely to be big
+ *  winners) showing up in this specific wallet — its real edge is probably understated. */
+/** Answers the only question that matters for "don't lose money": is this wallet's real losing-
+ *  trade rate worse than the measured sample shows? Coverage-weighted, so a wallet with 99%
+ *  coverage is never flagged for a difference that moves its true rate by a fraction of a point. */
+const HIDDEN_LOSS_LABELS: Record<HiddenLossRisk, { label: string; tone: string }> = {
+  high: { label: 'Hides real losses', tone: 'negative' },
+  moderate: { label: 'Hides some losses', tone: 'copytrade-warning-text' },
+  negligible: { label: 'Safe to trust', tone: 'positive' },
+  unknown: { label: 'Cannot tell', tone: '' },
+};
+/**
+ * The four states the canonical decision table reduces to. The underlying verdict logic keeps
+ * its six finer-grained values (they carry the *reason*, shown on hover); this is purely the
+ * reader-facing collapse, so there is one vocabulary on screen instead of six.
+ *
+ * Wording is deliberately descriptive rather than instructional. Every threshold behind these
+ * states — 50 trades, 90% coverage, the 10pp hidden-loss bar, the assumed 15s copy delay — is
+ * reasoned but none has been calibrated against a realised trading outcome, and this project
+ * produces descriptive research only. "Passed all tests" is a claim this codebase can actually
+ * support; "copy now" is not.
+ */
+type DecisionState = 'passed' | 'watch' | 'rejected' | 'needs_data';
+const DECISION_STATES: Record<DecisionState, { label: string; tone: string; blurb: string }> = {
+  passed: { label: 'Consistently profitable (30d)', tone: 'pass', blurb: 'Positive typical copied trade, positive in every measured week, and no decline between its earlier and recent history — over 30 days of measured evidence' },
+  watch: { label: 'Watch', tone: 'watch', blurb: 'Historically positive overall, but not consistently: it fails the copy test, or its profit is not spread across the period' },
+  rejected: { label: 'Rejected', tone: 'fail', blurb: 'Failed a check on evidence good enough to trust' },
+  needs_data: { label: 'Needs more evidence', tone: 'pending', blurb: 'The decision evidence is incomplete; this may or may not be fixable with another fetch' },
+};
+const DECISION_ORDER: DecisionState[] = ['passed', 'watch', 'rejected', 'needs_data'];
+const decisionStateFor = (verdict: string): DecisionState =>
+  verdict === 'Tested candidate' ? 'passed'
+    : verdict === 'Watch' ? 'watch'
+    : verdict === 'Needs data' || verdict === 'Historical / stale' ? 'needs_data'
+    : 'rejected';
+
+/** Age of the newest GMGN stats response behind a row, as a short human string. Surfaced as its
+ *  own column because a verdict computed from a week-old snapshot is a different claim from the
+ *  same verdict computed an hour ago, and nothing else on the row reveals that. */
+const freshnessLabel = (fetchedAt: string | null | undefined): { text: string; stale: boolean } => {
+  if (!fetchedAt) return { text: 'never', stale: true };
+  const ms = Date.now() - Date.parse(fetchedAt);
+  if (!Number.isFinite(ms)) return { text: 'unknown', stale: true };
+  const hours = ms / 3_600_000;
+  if (hours < 1) return { text: `${Math.max(1, Math.round(ms / 60_000))}m ago`, stale: false };
+  if (hours < 24) return { text: `${Math.round(hours)}h ago`, stale: false };
+  return { text: `${Math.round(hours / 24)}d ago`, stale: true };
+};
+
+const ELIMINATION_REPORT_STORAGE_KEY = 'vantage.crypto.elimination-report';
+const COPY_EVIDENCE_MIN_COVERAGE_PERCENT = 90;
+const COPY_EVIDENCE_MIN_ROUND_TRIPS = 30;
+/** Weeks of the wallet's own history that must be measured, and all positive, before the verdict
+ *  will call it consistent. 3 rather than 4 because a 30-day window yields 4 calendar weeks only
+ *  when it aligns, and a wallet should not fail purely on where the month boundary fell. Like
+ *  every other threshold in this tab, a reasoned choice, not one calibrated against a realised
+ *  trading outcome. */
+const MIN_CONSISTENT_WEEKS = 3;
+
+/** A restored report is a snapshot of whatever the database held when it was computed, not a
+ *  live read — so `generatedAt` is always rendered beside it. The shape check is deliberate:
+ *  a report saved before a field was added would otherwise crash the table on restore. */
+const readStoredEliminationReport = (): EliminationReport | null => {
+  try {
+    const stored = window.localStorage.getItem(ELIMINATION_REPORT_STORAGE_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as EliminationReport;
+    return Array.isArray(parsed?.surviving) && Array.isArray(parsed?.eliminated) && parsed?.duneEstimate ? parsed : null;
+  } catch { return null; }
+};
+type DuneRefetchEstimate = { targetsNeeded: number; secondsPerTarget: number; estimatedSeconds: number; basis: 'measured' | 'seeded'; runsCounted: number };
+type EliminationReport = {
+  generatedAt: string; totalWallets: number; eliminated: WalletEliminationEntry[]; surviving: WalletEliminationEntry[];
+  survivorsNeedingDune: WalletEliminationEntry[]; survivorsNeverSimulatedCount: number; measuredDuneTargetsRemaining: number;
+  duneEstimate: DuneRefetchEstimate; periodDays?: number;
+};
+const ELIMINATION_REASON_LABELS: Record<EliminationReason, string> = {
+  strongly_negative_30d_pnl: 'Strongly negative 30d P&L',
+  negative_delayed_copy_result: 'Negative delayed-copy result',
+  hold_time_shorter_than_copy_delay: 'Hold time shorter than copy delay',
+};
+const formatSeconds = (seconds: number): string => {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${(seconds / 3600).toFixed(1)}h`;
+};
+// Must match MAX_SCRUTINY_WALLETS in src/copytrade/candidateScrutiny.ts — duplicated here per
+// this file's existing convention (see CHECKPOINT_COLUMNS above) rather than sharing a module
+// between the server and browser bundles.
+const MAX_SCRUTINY_WALLETS_UI = 100;
+const SCRUTINY_VERDICT_LABELS: Record<ScrutinyVerdict, string> = { pass: 'Pass', fail: 'Fail', insufficient: 'Insufficient data' };
+type CopySimulationTradeResult = { tokenAddress: string; tokenSymbol: string | null; buyAt?: string; sellAt?: string; holdSeconds?: number; walletReturnPercent: number | null; simulatedReturnPercent: number | null; edgeKeptPercent?: number | null; status: 'simulated' | 'missing_entry_match' | 'missing_exit_match' | 'not_yet_queried'; entryMatchedAt?: string | null; exitMatchedAt?: string | null; entryGapSeconds: number | null; exitGapSeconds: number | null; gasFeeSol: number | null; gasFeeUsd?: number | null; entryTradeAmountUsd: number | null; exitTradeAmountUsd: number | null };
+type FixedStakePortfolioReport = { startingCapitalUsd: number; stakePerTradeUsd: number; maxOpenPositions: number; endingCapitalUsd: number; realizedPnlUsd: number; markToMarketPnlUsd?: number; openPositionsMarked?: number; openPositionsUnpriced?: number; eligibleTrades: number; copiedTrades: number; skippedInsufficientCash: number; skippedMaxOpenPositions: number; maxConcurrentPositions: number; gasFeeSol: number; gasFeeUsd?: number; gasCostComplete?: boolean; capitalPath: Array<{ day: string; capitalUsd: number }>; tradeCapitalPath?: Array<{ trade: number; tradeId?: number; day: string; capitalUsd: number }> };
+type CopySimulationWalletReport = { walletAddress: string; roundTripsConsidered: number; copiedTrades: number; missedTrades: number; coverageRatePercent: number | null; coverageStatus: 'fully_covered' | 'partially_covered' | 'missing_local_history' | 'no_dune_match' | 'small_sample'; coverageStatusReason: string; localHistoryTruncated: boolean; localHistoryStopReason: string | null; walletMedianReturnPercent: number | null; simulatedMedianReturnPercent: number | null; walletMeanReturnPercent: number | null; simulatedMeanReturnPercent: number | null; tradesAbove100Percent: number; tradesAbove300Percent: number; bestSimulatedReturnPercent: number | null; tailShareOfMeanPercent: number | null; delayCostPercentagePoints: number | null; worstSimulatedReturnPercent: number | null; totalGasFeeSol: number | null; totalGasFeeUsd?: number | null; gasCostComplete?: boolean; portfolio?: FixedStakePortfolioReport; trades: CopySimulationTradeResult[] };
+type CopySimulationReport = { computedAt: string; pendingDuneTargets?: number; duneNoMatchTargets?: number; duneMatchedTargets?: number; assumptions: { copierDelaySeconds: number; feeBps: number; slippageBps: number; gasPriorityFeeSolPerTx: number; maxMatchGapSeconds: number; maxRoundTripsPerWallet: number | null; startingCapitalUsd: number; stakePerTradeUsd: number; maxOpenPositions: number }; wallets: CopySimulationWalletReport[] };
 type LiquidityBandStats = { band: 'low' | 'medium' | 'high'; minEntryTradeAmountUsd: number; maxEntryTradeAmountUsd: number; tradeCount: number; simulatedCount: number; missedCount: number; winRatePercent: number | null; medianSimulatedReturnPercent: number | null; medianWalletReturnPercent: number | null; medianDelayCostPercentagePoints: number | null; missedTradeRatePercent: number | null; reliable: boolean };
 type WalletLiquidityConcentration = { walletAddress: string; bands: LiquidityBandStats[] };
 type LiquidityImpactReport = { computedAt: string; dataSource: 'dune_matched_trade_amount_usd'; measuredVsProxied: 'proxied'; bandedOnField: 'entryTradeAmountUsd'; minReliableSample: number; totalTradesConsidered: number; unbandableCount: number; bands: LiquidityBandStats[]; byWallet: WalletLiquidityConcentration[] };
@@ -311,18 +558,194 @@ const emptyQuality: DataQuality = {
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  const body = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+  const text = await response.text();
+  let body: (T & { error?: string }) | null = null;
+  try { body = JSON.parse(text) as T & { error?: string }; } catch { /* proxy/network errors may return plain text */ }
+  if (!response.ok) throw new Error(body?.error ?? (text.slice(0, 240) || `Request failed (${response.status})`));
+  if (!body) throw new Error('The server returned an empty or invalid response.');
   return body;
 }
 
-const formatTime = (value: string | null): string => value ? new Date(value).toLocaleString() : '—';
+const formatTime = (value: string | null): string => {
+  if (!value) return '—';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('day')} ${get('month').toUpperCase()} ${get('year')}, ${get('hour')}:${get('minute')} ${get('dayPeriod')}`;
+};
+const formatFetchTime = (value: string | null): string => {
+  if (!value) return '—';
+  const date = new Date(value);
+  const now = new Date();
+  const startOfDay = (input: Date) => new Date(input.getFullYear(), input.getMonth(), input.getDate()).getTime();
+  const daysAgo = Math.floor((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  if (daysAgo === 0) return 'Today';
+  if (daysAgo === 1) return 'Yesterday';
+  if (daysAgo >= 2 && daysAgo <= 4) return `${daysAgo} days ago`;
+  return formatTime(value);
+};
 const formatPercentChange = (base: number | null, value: number | null): string => base === null || value === null || base === 0 ? '—' : `${((value - base) / base * 100).toFixed(2)}%`;
 const formatPct = (value: number | null): string => value === null ? '—' : `${value.toFixed(1)}%`;
-const formatUsd = (value: number | null): string => value === null ? '—' : `$${value.toFixed(2)}`;
-const formatCount = (value: number | null): string => value === null ? '—' : value.toLocaleString();
-const formatDuration = (seconds: number | null): string => {
-  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return '—';
+const meterWidth = (value: number | null): string => `${Math.min(100, Math.max(0, Math.abs(value ?? 0)))}%`;
+const formatSignedPct = (value: number | null): string => value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+const tradeReturnPercent = (eventType: string, costUsd: string | null, buyCostUsd: string | null): number | null => {
+  if (!eventType.toLowerCase().startsWith('sell')) return null;
+  const proceeds = costUsd === null ? NaN : Number(costUsd);
+  const costBasis = buyCostUsd === null ? NaN : Number(buyCostUsd);
+  if (!Number.isFinite(proceeds) || !Number.isFinite(costBasis) || costBasis <= 0) return null;
+  return (proceeds - costBasis) / costBasis * 100;
+};
+const formatCompactNumber = (value: string | null): string => {
+  const parsed = value === null ? NaN : Number(value);
+  return Number.isFinite(parsed) ? parsed.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—';
+};
+const holdingSecondsBySellId = (rows: CopyTradeHistoryRow[]): Map<number, number | null> => {
+  const openBuys = new Map<string, number[]>();
+  const holds = new Map<number, number | null>();
+  [...rows].sort((a, b) => a.observedTimestamp - b.observedTimestamp || a.id - b.id).forEach((trade) => {
+    const side = trade.eventType.toLowerCase();
+    if (side.startsWith('buy')) {
+      const queue = openBuys.get(trade.tokenAddress) ?? [];
+      queue.push(trade.observedTimestamp);
+      openBuys.set(trade.tokenAddress, queue);
+    } else if (side.startsWith('sell')) {
+      const queue = openBuys.get(trade.tokenAddress);
+      const openedAt = queue?.shift();
+      holds.set(trade.id, openedAt === undefined ? null : Math.max(0, trade.observedTimestamp - openedAt));
+      if (queue && queue.length === 0) openBuys.delete(trade.tokenAddress);
+    }
+  });
+  return holds;
+};
+const formatHugeUsd = (value: number): string => {
+  const exponent = Math.floor(Math.log10(Math.abs(value)));
+  const mantissa = value / (10 ** exponent);
+  return `$${mantissa.toFixed(2)} × 10^${exponent}`;
+};
+
+const formatUsd = (value: number | null): string => {
+  if (value === null || !Number.isFinite(value)) return '—';
+  const sign = value < 0 ? '-' : '';
+  const absolute = Math.abs(value);
+  if (absolute >= 1e21) return formatHugeUsd(value);
+  if (absolute >= 1_000_000_000) return `${sign}$${(absolute / 1_000_000_000).toFixed(2)}B`;
+  if (absolute >= 1_000_000) return `${sign}$${(absolute / 1_000_000).toFixed(2)}M`;
+  if (absolute >= 1_000) return `${sign}$${(absolute / 1_000).toFixed(2)}K`;
+  return `${sign}$${absolute.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const formatCopyCapital = (value: number | null): string => {
+  if (value === null || !Number.isFinite(value)) return '—';
+  const sign = value < 0 ? '-' : '';
+  const absolute = Math.abs(value);
+  if (absolute < 1) return `${sign}$${absolute.toFixed(2)}`;
+  if (absolute >= 1e21) return `${sign}$${Math.round(absolute / 10 ** Math.floor(Math.log10(absolute)))} × 10^${Math.floor(Math.log10(absolute))}`;
+  if (absolute >= 1e9) return `${sign}$${Math.round(absolute / 1e9)}B`;
+  if (absolute >= 1e6) return `${sign}$${Math.round(absolute / 1e6)}M`;
+  if (absolute >= 1e3) return `${sign}$${Math.round(absolute / 1e3)}K`;
+  return `${sign}$${Math.round(absolute).toLocaleString('en-US')}`;
+};
+
+const formatChartUsd = (value: number): string => {
+  const sign = value < 0 ? '-' : '';
+  const absolute = Math.abs(value);
+  if (absolute >= 1e21) return `${sign}${formatHugeUsd(absolute)}`;
+  if (absolute >= 1_000_000) return `${sign}$${(absolute / 1_000_000).toFixed(2)}m`;
+  if (absolute >= 1_000) return `${sign}$${(absolute / 1_000).toFixed(2)}k`;
+  return `${sign}$${absolute.toFixed(2)}`;
+};
+
+const formatChartDate = (value: string): string => {
+  const day = value.replace(' start', '');
+  if (day === 'start') return 'Starting balance';
+  if (/^\d{4}-\d{2}-\d{2}T/.test(day)) {
+    const parsed = new Date(day);
+    return Number.isNaN(parsed.getTime()) ? day : parsed.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short' });
+  }
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : `2000-${day}`;
+  const parsed = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? day : parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: /^\d{4}-/.test(day) ? 'numeric' : undefined, timeZone: 'UTC' });
+};
+
+const CapitalPathChart = ({ points, activeTradeId, onTradeHover, zoomable = false }: { points: Array<{ day: string; capitalUsd: number; label?: string; tradeId?: number }>; activeTradeId?: number | null; onTradeHover?: (tradeId: number | null) => void; zoomable?: boolean }) => {
+  const [hovered, setHovered] = useState<{ point: { day: string; capitalUsd: number; label?: string }; x: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const chartRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const element = chartRef.current;
+    if (!zoomable || !element) return undefined;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setZoom((current) => Math.max(1, Math.min(4, current + (event.deltaY < 0 ? 0.25 : -0.25))));
+    };
+    element.addEventListener('wheel', handleWheel, { passive: false });
+    return () => element.removeEventListener('wheel', handleWheel);
+  }, [zoomable]);
+  if (points.length === 0) return <span className="capital-path-unavailable" title="No complete multi-day capital path is available for this trader">No path</span>;
+  const width = 460 * (zoomable ? zoom : 1);
+  const height = 170;
+  const left = 42;
+  const right = 8;
+  const top = 8;
+  const bottom = 24;
+  const values = points.map((point) => point.capitalUsd);
+  const dataMin = Math.min(...values, 0);
+  const dataMax = Math.max(...values, 100);
+  const padding = Math.max(1, (dataMax - dataMin) * 0.1, Math.abs(dataMax) * 0.02);
+  const min = dataMin < 0 ? dataMin - padding : 0;
+  const max = dataMax + padding;
+  const range = Math.max(1, max - min);
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const zeroY = height - bottom - ((0 - min) / range) * plotHeight;
+  const barGap = points.length > 40 ? 1 : 3;
+  const barWidth = Math.max(2, Math.min(14, plotWidth / points.length - barGap));
+  const barData = points.map((point, index) => {
+    const x = left + (index / Math.max(1, points.length)) * plotWidth + (plotWidth / points.length - barWidth) / 2;
+    const y = height - bottom - ((point.capitalUsd - min) / range) * plotHeight;
+    return { point, x, y, height: Math.abs(zeroY - y) };
+  });
+  const finalPoint = points[points.length - 1];
+  const firstLabel = points[0].label ?? points[0].day.replace(' start', '').slice(5);
+  const lastLabel = finalPoint.label ?? finalPoint.day.slice(5);
+  const hoveredLeft = hovered ? `${Math.max(8, Math.min(92, hovered.x / width * 100))}%` : '50%';
+  return <span ref={chartRef} className="capital-path-chart" style={zoomable ? { width: `${zoom * 100}%` } : undefined} title={`$100 path: ${points[0].day} → ${finalPoint.day}; final ${formatUsd(finalPoint.capitalUsd)}`}>
+    {zoomable && <button type="button" className="capital-path-reset" onClick={() => setZoom(1)} disabled={zoom === 1}>Reset 100%</button>}
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`$100 path ending at ${formatUsd(finalPoint.capitalUsd)}`} preserveAspectRatio="none" onMouseLeave={() => setHovered(null)}>
+      <line x1={left} x2={left} y1={top} y2={height - bottom} className="capital-path-axis" />
+      <line x1={left} x2={width - right} y1={height - bottom} y2={height - bottom} className="capital-path-axis" />
+      <line x1={left} x2={width - right} y1={zeroY} y2={zeroY} className="capital-path-baseline" />
+      <defs><linearGradient id="capital-path-gradient" x1="0" x2="1" y1="0" y2="0"><stop offset="0%" stopColor="#72d8af" /><stop offset="50%" stopColor="#f0c875" /><stop offset="100%" stopColor="#72a7ff" /></linearGradient></defs>
+      <text x={left - 5} y={top + 4} textAnchor="end" className="capital-path-label">{formatChartUsd(max)}</text>
+      <text x={left - 5} y={height - bottom + 4} textAnchor="end" className="capital-path-label">{formatChartUsd(min)}</text>
+      <text x={left} y={height - 6} textAnchor="start" className="capital-path-label">{firstLabel}</text>
+      <text x={width - right} y={height - 6} textAnchor="end" className="capital-path-label">{lastLabel}</text>
+      {barData.map(({ point, x, y, height: barHeight }, index) => <rect key={`${point.day}-${index}`} x={x} y={Math.min(zeroY, y)} width={barWidth} height={Math.max(1, barHeight)} className={`${point.capitalUsd >= 100 ? 'capital-path-bar positive' : 'capital-path-bar negative'}${point.tradeId !== undefined && point.tradeId === activeTradeId ? ' active' : ''}`} onMouseEnter={() => { setHovered({ point, x: x + barWidth / 2 }); onTradeHover?.(point.tradeId ?? null); }} />)}
+    </svg>
+    {hovered && <span className="capital-path-tooltip" style={{ left: hoveredLeft }} role="status"><small>{hovered.point.label ?? 'Portfolio point'}</small><strong>{formatUsd(hovered.point.capitalUsd)}</strong><span>{formatChartDate(hovered.point.day)}</span></span>}
+  </span>;
+};
+const formatCount = (value: number | null | undefined): string => value === null || value === undefined ? '—' : value.toLocaleString();
+const formatGmgnRiskRatio = (value: number | null): string => value === null ? '—' : `${(Math.abs(value) <= 1 ? value * 100 : value).toFixed(1)}%`;
+const formatGmgnRiskValue = (value: number | null): string => value === null ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+type DuneCoverageSummary = { matched: number; eligible: number; percent: number | null } | null;
+const duneCoverageClass = (coverage: DuneCoverageSummary): string => {
+  if (!coverage || coverage.percent === null) return 'unknown';
+  if (coverage.percent >= 99.999) return 'full';
+  if (coverage.percent >= 90) return 'partial';
+  return 'low';
+};
+const duneCoverageLabel = (coverage: DuneCoverageSummary | undefined, period: string): string => {
+  if (!coverage || typeof coverage !== 'object') return `Dune ${period} coverage has not been measured yet.`;
+  const percent = typeof coverage.percent === 'number' && Number.isFinite(coverage.percent) ? `${coverage.percent.toFixed(1)}%` : '—';
+  const matched = typeof coverage.matched === 'number' && Number.isFinite(coverage.matched) ? coverage.matched.toLocaleString() : '—';
+  const eligible = typeof coverage.eligible === 'number' && Number.isFinite(coverage.eligible) ? coverage.eligible.toLocaleString() : '—';
+  return `Dune ${period}: ${matched} of ${eligible} locally eligible round trips have usable prices (${percent}). GMGN's activity count includes events, so it is not the denominator.`;
+};
+const formatDuration = (seconds: number | null | undefined): string => {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return '—';
   if (seconds < 60) return `${Math.round(seconds)}s`;
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
@@ -429,21 +852,128 @@ const bestGroupHorizon = (report: SignalPatternReport, key: string): { horizon: 
 };
 const percentChangeValue = (base: number | null, value: number | null): number | null => base === null || value === null || base === 0 ? null : (value - base) / base * 100;
 const shortAddress = (address: string): string => `${address.slice(0, 3)}...`;
+const shortWalletAddress = (address: string): string => `${address.slice(0, 6)}...`;
+const formatDuneResponse = (raw: string | null): string => {
+  if (!raw) return 'No response body stored yet.';
+  try { return JSON.stringify(JSON.parse(raw), null, 2); }
+  catch { return raw; }
+};
 const normalizeRoute = (route: string): string => route === 'birdeye-batch' ? 'dune-capture' : route === 'copy-trades' ? 'copytrade' : route;
-type CopyTradeSubTab = 'research' | 'winners' | 'historical-consistency' | 'forward-validation' | 'top-callers';
+type CopyTradeSubTab = 'research' | 'wallet-stats' | 'pattern-discovery' | 'forward-validation' | 'top-callers' | 'scrutiny';
+// Lightweight deployment mode: keep the other workflows and routes in source, but expose only
+// the aggregate GMGN wallet-stats reader until the broader research workspace is needed again.
+const WALLET_STATS_ONLY = true;
+// Lightweight mode still exposes Scrutiny alongside the wallet-stats reader — it's a read-only
+// interrogation view a reader may want without opening the full (heavier) research workspace.
+const WALLET_STATS_ONLY_VISIBLE_SUBTABS: CopyTradeSubTab[] = ['wallet-stats', 'pattern-discovery', 'scrutiny'];
 const parseCopyTradeRoute = (route: string): { menu: string; subTab: CopyTradeSubTab } => {
   const [rawMenu, rawSubTab] = route.split('/');
-  const subTab: CopyTradeSubTab = rawSubTab === 'winners' || rawSubTab === 'historical-consistency' || rawSubTab === 'forward-validation' || rawSubTab === 'top-callers' ? rawSubTab : 'research';
+  const subTab: CopyTradeSubTab = rawSubTab === 'fully-covered' ? 'wallet-stats' : rawSubTab === 'wallet-stats' || rawSubTab === 'pattern-discovery' || rawSubTab === 'forward-validation' || rawSubTab === 'top-callers' || rawSubTab === 'scrutiny' ? rawSubTab : 'research';
   return { menu: normalizeRoute(rawMenu || 'dune-capture'), subTab };
 };
 const copyAddress = async (address: string) => { try { await navigator.clipboard.writeText(address); } catch { /* clipboard access is optional */ } };
+const CopyAddressButton = ({ address, label = 'wallet address' }: { address: string; label?: string }) => (
+  <button type="button" className="icon-copy" title={`Copy ${label}`} aria-label={`Copy ${label}`} onClick={(event) => { event.stopPropagation(); void copyAddress(address); }}>⧉</button>
+);
+const WalletIcon = ({ url, name }: { url?: string | null; name: string }) => url ? <img className="copytrade-wallet-icon" src={url} alt="" title={`${name} icon`} onError={(event) => { event.currentTarget.style.display = 'none'; }} /> : null;
+const saveJson = (value: unknown, filename: string) => {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+const csvCell = (value: unknown): string => {
+  const text = value === null || value === undefined ? '' : typeof value === 'string' ? value : String(value);
+  return `"${text.replaceAll('"', '""')}"`;
+};
+const saveCsv = (rows: Array<Record<string, unknown>>, filename: string) => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [headers, ...rows.map((row) => headers.map((header) => row[header] ?? ''))]
+    .map((row) => row.map(csvCell).join(','))
+    .join('\r\n');
+  const blob = new Blob([`\uFEFF${csv}\r\n`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+const SaveRowButton = ({ row, filename }: { row: unknown; filename: string }) => (
+  <button type="button" className="icon-copy row-save-button" title="Save this row as JSON" aria-label="Save this row as JSON" onClick={(event) => { event.stopPropagation(); saveJson(row, filename); }}>⇩</button>
+);
 const tokenDisplay = (symbol: string | null, address: string): string => symbol?.trim() || shortAddress(address);
 const InfoTip = ({ label = 'More information', text }: { label?: string; text: string }) => (
-  <details className="info-tip">
-    <summary aria-label={label} title={label}><span aria-hidden="true">i</span></summary>
-    <span>{text}</span>
-  </details>
+  <span className="info-tip" role="note" aria-label={label} title={text}><span aria-hidden="true">i</span></span>
 );
+const parseAggregateRecord = (record: GmgnStatsRecord): GmgnAggregateStats | null => {
+  try {
+    const root = JSON.parse(record.rawPayload) as Record<string, unknown>;
+    const unwrapped = root.data ?? root;
+    const data = (Array.isArray(unwrapped) ? unwrapped[0] : unwrapped) as Record<string, unknown>;
+    if (!data || typeof data !== 'object') return null;
+    const pnl = (data.pnl_stat ?? {}) as Record<string, unknown>;
+    // GMGN returns large monetary fields and pnl ratios as decimal strings in many responses,
+    // while some responses use JSON numbers. Treat both representations identically; rejecting
+    // strings made the stored 30d realized-PnL column appear empty even though SQLite had it.
+    const num = (key: string): number | null => {
+      const value = data[key];
+      const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const pnlPercent = num('realized_profit_pnl');
+    const pnlNumber = (key: string): number | null => {
+      const value = pnl[key];
+      const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const winRate = pnlNumber('winrate');
+    const common = (data.common ?? {}) as Record<string, unknown>;
+    const commonNumber = (key: string): number | null => {
+      const value = common[key];
+      const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    return { period: record.period, fetchedAt: record.fetchedAt, realizedProfit: num('realized_profit'), realizedProfitPnlPercent: pnlPercent === null ? null : pnlPercent * 100, nativeBalance: num('native_balance'), buyCount: num('buy'), sellCount: num('sell'), boughtCost: num('bought_cost'), soldIncome: num('sold_income'), boughtFee: num('bought_fee'), soldFee: num('sold_fee'), totalCost: num('total_cost'), lastTimestamp: num('last_timestamp'), tokenCount: pnlNumber('token_num'), winRatePercent: winRate === null ? null : winRate * 100, averageHoldingPeriodSeconds: pnlNumber('avg_holding_period'),
+      buckets: { lossOver50: pnlNumber('pnl_lt_nd5_num'), loss50to0: pnlNumber('pnl_nd5_0x_num'), gain0to2x: pnlNumber('pnl_0x_2x_num'), gain2to5x: pnlNumber('pnl_2x_5x_num'), gainOver5x: pnlNumber('pnl_gt_5x_num') },
+      tags: Array.isArray(common.tags) ? (common.tags as unknown[]).filter((tag): tag is string => typeof tag === 'string') : [],
+      walletCreatedAt: commonNumber('created_at'),
+      twitterName: typeof common.twitter_name === 'string' && common.twitter_name.trim() !== '' ? common.twitter_name : null,
+      createdTokenCount: commonNumber('created_token_count') };
+  } catch { return null; }
+};
+const formatLeaderboardMetric = (value: unknown): string => {
+  if (value === null || value === undefined || value === '') return '—';
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  if (Number.isFinite(numeric)) return `${(numeric * 100).toFixed(1)}%`;
+  return '—';
+};
+const leaderboardMetricTone = (value: unknown): string => {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  return Number.isFinite(numeric) ? (numeric >= 0 ? 'positive' : 'negative') : '';
+};
+const formatDailyProfit7d = (value: unknown): { label: string; total: number | null; points: number[] } => {
+  if (!Array.isArray(value)) return { label: '—', total: null, points: [] };
+  const points = value.map((item) => {
+    const raw = item && typeof item === 'object' ? (item as Record<string, unknown>).profit : item;
+    const number = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+    return Number.isFinite(number) ? number : null;
+  }).filter((number): number is number => number !== null);
+  if (points.length === 0) return { label: '—', total: null, points: [] };
+  const total = points.reduce((sum, number) => sum + number, 0);
+  const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(total);
+  return { label: `${total >= 0 ? '+' : ''}$${compact}`, total, points };
+};
+const formatHoldingTime = (seconds: number | null | undefined): string => {
+  if (seconds == null || !Number.isFinite(seconds)) return '—';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3_600) return `${(seconds / 60).toFixed(1)}m`;
+  return `${(seconds / 3_600).toFixed(1)}h`;
+};
 
 // Column names in the SELECT (token_address, symbol, first_trade_time, first_dex, first_tx) are
 // deliberate — they match the aliases src/dune/importer.ts already recognizes, so a CSV/JSON
@@ -501,7 +1031,12 @@ ORDER BY first_trade_time;
 };
 
 function App() {
-  const initialRoute = parseCopyTradeRoute(window.location.hash.slice(1) || 'dune-capture');
+  const initialRoute = WALLET_STATS_ONLY
+    ? (() => {
+      const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
+      return { menu: 'copytrade', subTab: WALLET_STATS_ONLY_VISIBLE_SUBTABS.includes(parsed.subTab) ? parsed.subTab : 'wallet-stats' as CopyTradeSubTab };
+    })()
+    : parseCopyTradeRoute(window.location.hash.slice(1) || 'dune-capture');
   const [activeMenu, setActiveMenu] = useState(initialRoute.menu);
   const [focusedView, setFocusedView] = useState(true);
   const [stats, setStats] = useState<Stats>(emptyStats);
@@ -539,21 +1074,87 @@ function App() {
   const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [copyTradeSummary, setCopyTradeSummary] = useState<CopyTradeSummary | null>(null);
   const [copyTradeStatus, setCopyTradeStatus] = useState<CopyTradeFetchStatus | null>(null);
-  const [copyTradeResults, setCopyTradeResults] = useState<CopyTradeResults | null>(null);
+  const [copyTradeResults, setCopyTradeResults] = useState<CopyTradeResults | null>(() => readStoredWalletStatsResults());
   const [copyTradeRosters, setCopyTradeRosters] = useState<CopyTradeRosterCatalog | null>(null);
   const [selectedRosterSnapshotId, setSelectedRosterSnapshotId] = useState<number | null>(null);
-  const [copyTradeLimit, setCopyTradeLimit] = useState(25);
-  const [copyTradePeriodDays, setCopyTradePeriodDays] = useState(90);
+  const [copyTradeLimit, setCopyTradeLimit] = useState(100);
+  const [copyTradePeriodDays, setCopyTradePeriodDays] = useState(30);
   const [copyTradeBusy, setCopyTradeBusy] = useState(false);
   const [winnersFetchBusy, setWinnersFetchBusy] = useState(false);
   const [singleTraderQuery, setSingleTraderQuery] = useState('');
   const [singleTraderBusy, setSingleTraderBusy] = useState(false);
   const [singleTraderError, setSingleTraderError] = useState<string | null>(null);
   const [copyTradeStopBusy, setCopyTradeStopBusy] = useState(false);
+  const [copyTradeResumeBusy, setCopyTradeResumeBusy] = useState(false);
+  const [copyTradeResetBusy, setCopyTradeResetBusy] = useState(false);
   const [copyTradeLoading, setCopyTradeLoading] = useState(false);
+  const [gmgnStatsStatus, setGmgnStatsStatus] = useState<GmgnStatsFetchStatus | null>(null);
+  const [gmgnStatsRecords, setGmgnStatsRecords] = useState<GmgnStatsRecord[]>([]);
+  const [gmgnLeaderboardMetrics, setGmgnLeaderboardMetrics] = useState<Record<string, GmgnLeaderboardMetric>>({});
+  const [gmgnStatsBusy, setGmgnStatsBusy] = useState(false);
+  const [gmgnStatsLoading, setGmgnStatsLoading] = useState(false);
+  const [walletStatsReady, setWalletStatsReady] = useState(() => readStoredWalletStatsResults() !== null);
+  const [rosterSyncBusy, setRosterSyncBusy] = useState(false);
+  const [rosterRefreshMessage, setRosterRefreshMessage] = useState<string | null>(null);
+  const [rosterRefreshError, setRosterRefreshError] = useState<string | null>(null);
+  const [rosterChange, setRosterChange] = useState<RosterChange | null>(null);
+  const [rosterComparison, setRosterComparison] = useState<RosterComparison | null>(null);
+  const [rosterComparisonLoading, setRosterComparisonLoading] = useState(false);
+  const [rosterComparisonOpen, setRosterComparisonOpen] = useState(false);
   const [copyTradeError, setCopyTradeError] = useState<string | null>(null);
+  const [patternDiscoveryExport, setPatternDiscoveryExport] = useState<PatternDiscoveryExport | null>(null);
+  const [patternDiscoveryLoading, setPatternDiscoveryLoading] = useState(false);
+  const [patternDiscoveryError, setPatternDiscoveryError] = useState<string | null>(null);
+  const [patternDiscoveryReport, setPatternDiscoveryReport] = useState<PatternDiscoveryReport | null>(() => readStoredPatternDiscoveryReport(30));
+  const [patternDiscoveryExecution, setPatternDiscoveryExecution] = useState<PatternDiscoveryExecution | null>(null);
+  const [patternDiscoveryRunLoading, setPatternDiscoveryRunLoading] = useState(false);
+  const [patternDiscoveryRunError, setPatternDiscoveryRunError] = useState<string | null>(null);
+  const [patternDiscoverySourceOpen, setPatternDiscoverySourceOpen] = useState(false);
   const [copyTradeEstimate, setCopyTradeEstimate] = useState<CopyTradeFetchEstimate | null>(null);
   const [copyTradeEstimateLoading, setCopyTradeEstimateLoading] = useState(false);
+  const [researchUpdateBusy, setResearchUpdateBusy] = useState(false);
+  const [researchUpdateStage, setResearchUpdateStage] = useState<string | null>(null);
+  const [researchUpdateFailedStage, setResearchUpdateFailedStage] = useState<number | null>(null);
+  const [researchUpdateSummary, setResearchUpdateSummary] = useState<ResearchUpdateSummary | null>(null);
+  const [walletScreenSummary, setWalletScreenSummary] = useState<WalletScreenSummary | null>(null);
+  const [excludedScreeningWallets, setExcludedScreeningWallets] = useState<string[]>(() => {
+    try {
+      const stored = window.localStorage.getItem('vantage.crypto.excluded-screening-wallets');
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed.filter((wallet): wallet is string => typeof wallet === 'string') : [];
+    } catch { return []; }
+  });
+  const [includedScreeningWallets, setIncludedScreeningWallets] = useState<string[]>(() => {
+    try {
+      const stored = window.localStorage.getItem('vantage.crypto.included-screening-wallets');
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed.filter((wallet): wallet is string => typeof wallet === 'string') : [];
+    } catch { return []; }
+  });
+  // Advanced diagnostics is read-only research tooling (elimination triage, Scrutiny, Pattern
+  // Discovery) — it must never gain an actionable control. Fetch controls (GMGN/Dune buttons,
+  // the pre-fetch scope filters, live progress) live in their own always-visible section above
+  // it instead, so this no longer needs to auto-open for fetch activity at all.
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  // Defaults OFF and is never persisted, unlike the manual exclusion lists above: triage
+  // thresholds (50 trades, 90% coverage, the hidden-loss bars) are reasoned judgment calls, not
+  // outcome-calibrated, so skipping a wallet's Dune fetch on their say-so should be a decision
+  // made fresh each session, not something that silently keeps happening after the tab reopens.
+  // A current triage result is an exclusion by default. The user can explicitly uncheck it or
+  // re-check an individual wallet; without a current triage report this has no effect.
+  const [skipEliminatedInDune, setSkipEliminatedInDune] = useState(true);
+  // Single toggle covering two different kinds of pre-Dune scope reduction, merged into one
+  // control per user request (was two separate checkboxes): (1) hold time < copier delay — not a
+  // judgment call, a wallet this fast can never pass the copy-viability verdict regardless of
+  // what Dune returns, so spending credits on it is provably wasted; measured live: 7 of 98
+  // wallets, ~48,757 of the outstanding Dune targets, about a third of the backlog. (2) the seven
+  // GMGN-flagged high-risk checks (wash_trader tag, strongly negative 30d PnL, extreme/thin
+  // volume, mass token creation, weak win rate, one-sided buy/sell) — these ARE judgment calls, a
+  // legitimate trader could still trip one. Defaults ON; the per-wallet checkbox in the activity
+  // table below always overrides this for any individual wallet regardless of which check it hit.
+  const [skipScopeFiltersInDune, setSkipScopeFiltersInDune] = useState(true);
+  const legacyHighActivityMigrationDone = useRef(false);
+  const scrutinyAutoPinnedRef = useRef(false);
   const [copyTradeSubTab, setCopyTradeSubTab] = useState<CopyTradeSubTab>(initialRoute.subTab);
   const [historicalConsistency, setHistoricalConsistency] = useState<HistoricalConsistencyReport | null>(null);
   const [historicalConsistencyLoading, setHistoricalConsistencyLoading] = useState(false);
@@ -566,12 +1167,50 @@ function App() {
   const [copyWinners, setCopyWinners] = useState<CopyCandidatesReport | null>(null);
   const [copyWinnersLoading, setCopyWinnersLoading] = useState(false);
   const [copySimulation, setCopySimulation] = useState<CopySimulationReport | null>(null);
+  const [copySimulation30d, setCopySimulation30d] = useState<CopySimulationReport | null>(null);
   const [copySimulationLoading, setCopySimulationLoading] = useState(false);
   const [copySimulationRunBusy, setCopySimulationRunBusy] = useState(false);
+  const [copySimulationRunStatus, setCopySimulationRunStatus] = useState<CopySimulationRunStatus | null>(null);
+  const [copySimulationRunReportOpen, setCopySimulationRunReportOpen] = useState(false);
+  const copySimulationStatusPollInFlight = useRef(false);
   const [liquidityImpact, setLiquidityImpact] = useState<LiquidityImpactReport | null>(null);
   const [liquidityImpactLoading, setLiquidityImpactLoading] = useState(false);
+  const [scrutinyPinned, setScrutinyPinned] = useState<string[]>(() => {
+    try {
+      const stored = window.localStorage.getItem('vantage.crypto.scrutiny-pinned-wallets');
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed.filter((wallet): wallet is string => typeof wallet === 'string') : [];
+    } catch { return []; }
+  });
+  const [eliminationReport, setEliminationReport] = useState<EliminationReport | null>(readStoredEliminationReport);
+  const [eliminationLoading, setEliminationLoading] = useState(false);
+  const [eliminationError, setEliminationError] = useState<string | null>(null);
+  const [scrutinyResponse, setScrutinyResponse] = useState<ScrutinyResponse | null>(null);
+  const [scrutinyLoading, setScrutinyLoading] = useState(false);
+  const [scrutinyError, setScrutinyError] = useState<string | null>(null);
+  const [scrutinyRefreshBusy, setScrutinyRefreshBusy] = useState(false);
+  const [scrutinyFillBusy, setScrutinyFillBusy] = useState(false);
+  const [scrutinyOutcome, setScrutinyOutcome] = useState<string | null>(null);
+  const [scrutinyAddInput, setScrutinyAddInput] = useState('');
+  const [selectedScrutinyWallet, setSelectedScrutinyWallet] = useState<string | null>(null);
+  const [gmgnRiskResults, setGmgnRiskResults] = useState<Record<string, GmgnRiskResult>>({});
+  const [gmgnRiskBusy, setGmgnRiskBusy] = useState(false);
+  const scrutinyLoadAbortRef = useRef<AbortController | null>(null);
   const [browserActivityImportBusy, setBrowserActivityImportBusy] = useState(false);
   const [copyTradeSort, setCopyTradeSort] = useState<{ key: CopyTradeSortKey; direction: 'asc' | 'desc' }>({ key: 'endingCapitalUsd', direction: 'desc' });
+  const [decisionSort, setDecisionSort] = useState<{ key: DecisionSortKey; direction: 'asc' | 'desc' }>({ key: 'default', direction: 'asc' });
+  const [gmgnStatsSort, setGmgnStatsSort] = useState<{ key: GmgnStatsSortKey; direction: 'asc' | 'desc' }>({ key: 'pnl30d', direction: 'desc' });
+  const [copyDelaySort, setCopyDelaySort] = useState<{ key: CopyDelaySortKey; direction: 'asc' | 'desc' }>({ key: 'edge', direction: 'desc' });
+  const [showDelaySurvivorsOnly, setShowDelaySurvivorsOnly] = useState(true);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [selectedCopyDelayWallet, setSelectedCopyDelayWallet] = useState<string | null>(null);
+  const [statsDetailWallet, setStatsDetailWallet] = useState<string | null>(null);
+  const [statsDetailTradeId, setStatsDetailTradeId] = useState<number | null>(null);
+  const [statsDetailTrades, setStatsDetailTrades] = useState<CopyTradeHistoryResponse | null>(null);
+  const [statsDetailTradesLoading, setStatsDetailTradesLoading] = useState(false);
+  const [showOnlyCurrentHistory, setShowOnlyCurrentHistory] = useState(true);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   const [topCallerLeaderboard, setTopCallerLeaderboard] = useState<TopCallerLeaderboard | null>(null);
   const [topCallerEvaluation, setTopCallerEvaluation] = useState<TopCallerEvaluation | null>(null);
   const [topCallerAllEvaluation, setTopCallerAllEvaluation] = useState<TopCallerAllEvaluation | null>(null);
@@ -676,6 +1315,42 @@ function App() {
       setCopyTradeError(error instanceof Error ? error.message : String(error));
       return null;
     }
+  };
+
+  const loadPatternDiscoveryExport = async (periodDays = copyTradePeriodDays, preserveStoredReport = false) => {
+    setPatternDiscoveryLoading(true);
+    setPatternDiscoveryError(null);
+    setPatternDiscoveryRunError(null);
+    setPatternDiscoveryExecution(null);
+    if (preserveStoredReport) {
+      setPatternDiscoveryReport(readStoredPatternDiscoveryReport(periodDays));
+    } else {
+      try { window.localStorage.removeItem(patternDiscoveryReportStorageKey(periodDays)); } catch { /* Persistence is best effort. */ }
+      setPatternDiscoveryReport(null);
+    }
+    try {
+      setPatternDiscoveryExport(await api<PatternDiscoveryExport>(`/api/copytrade/pattern-discovery/export?periodDays=${periodDays}`));
+    } catch (error: unknown) {
+      setPatternDiscoveryError(error instanceof Error ? error.message : String(error));
+    } finally { setPatternDiscoveryLoading(false); }
+  };
+
+  const runPatternDiscovery = async () => {
+    if (patternDiscoveryRunLoading || patternDiscoveryLoading || !patternDiscoveryExport?.metadata.exported_rows) return;
+    setPatternDiscoveryRunLoading(true);
+    setPatternDiscoveryRunError(null);
+    try {
+      const result = await api<PatternDiscoveryRunResponse>(
+        '/api/copytrade/pattern-discovery/run/report',
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ periodDays: copyTradePeriodDays, minN: 10 }) },
+      );
+      setPatternDiscoveryReport(result.report);
+      setPatternDiscoveryExecution(result.execution ?? null);
+      try { window.localStorage.setItem(patternDiscoveryReportStorageKey(copyTradePeriodDays), JSON.stringify(result.report)); }
+      catch { /* Persistence is best effort. */ }
+    } catch (error: unknown) {
+      setPatternDiscoveryRunError(error instanceof Error ? error.message : String(error));
+    } finally { setPatternDiscoveryRunLoading(false); }
   };
 
   const loadTopCallerData = async (checkpoint = topCallerEvaluationCheckpoint) => {
@@ -907,6 +1582,21 @@ function App() {
     catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
   };
 
+  const loadElimination = async (rosterSnapshotId = selectedRosterSnapshotId): Promise<EliminationReport | null> => {
+    setEliminationLoading(true);
+    setEliminationError(null);
+    try {
+      const params = new URLSearchParams({ limit: '100' });
+      if (rosterSnapshotId) params.set('snapshotId', String(rosterSnapshotId));
+      const report = await api<EliminationReport>(`/api/copytrade/elimination?${params.toString()}`);
+      setEliminationReport(report);
+      try { window.localStorage.setItem(ELIMINATION_REPORT_STORAGE_KEY, JSON.stringify(report)); }
+      catch { /* Persistence is best effort; the in-memory report stays usable either way. */ }
+      return report;
+    } catch (error: unknown) { setEliminationError(error instanceof Error ? error.message : String(error)); return null; }
+    finally { setEliminationLoading(false); }
+  };
+
   const freezeCurrentRoster = async () => {
     const snapshotId = captureHealth?.latestProvenancedSnapshotId;
     if (!snapshotId) return;
@@ -931,34 +1621,255 @@ function App() {
     finally { setCopyWinnersLoading(false); }
   };
 
-  const loadCopySimulation = async (rosterSnapshotId = selectedRosterSnapshotId) => {
+  const loadScrutiny = async (wallets = scrutinyPinned, rosterSnapshotId = selectedRosterSnapshotId) => {
+    if (!wallets.length) { setScrutinyResponse(null); return; }
+    scrutinyLoadAbortRef.current?.abort();
+    const controller = new AbortController();
+    scrutinyLoadAbortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 45_000);
+    const cacheKey = wallets.join('|');
+    let cached = false;
+    try {
+      const raw = window.localStorage.getItem('vantage.crypto.scrutiny-cache.v1');
+      if (raw) {
+        const saved = JSON.parse(raw) as { walletKey?: string; response?: ScrutinyResponse; risk?: GmgnRiskResponse };
+        if (saved.walletKey === cacheKey && saved.response) {
+          setScrutinyResponse(saved.response);
+          if (saved.risk) setGmgnRiskResults(Object.fromEntries(saved.risk.results.map((result) => [`${result.walletAddress}|${result.period}`, result])));
+          cached = true;
+        }
+      }
+    } catch { /* A corrupt cache is ignored; SQLite remains the source of truth. */ }
+    setScrutinyLoading(!cached);
+    setScrutinyError(null);
+    try {
+      const params = new URLSearchParams({ wallets: wallets.join(',') });
+      if (rosterSnapshotId) params.set('snapshotId', String(rosterSnapshotId));
+      const response = await api<ScrutinyResponse>(`/api/copytrade/scrutiny?${params.toString()}`, { signal: controller.signal });
+      const savedRisk = await api<GmgnRiskResponse>(`/api/copytrade/scrutiny/gmgn-risk?wallets=${encodeURIComponent(wallets.join(','))}`, { signal: controller.signal });
+      setScrutinyResponse(response);
+      setGmgnRiskResults(Object.fromEntries(savedRisk.results.map((result) => [`${result.walletAddress}|${result.period}`, result])));
+      try { window.localStorage.setItem('vantage.crypto.scrutiny-cache.v1', JSON.stringify({ walletKey: cacheKey, response, risk: savedRisk, savedAt: new Date().toISOString() })); } catch { /* Cache is best effort. */ }
+    } catch (error: unknown) {
+      if (scrutinyLoadAbortRef.current === controller) {
+        setScrutinyError(error instanceof DOMException && error.name === 'AbortError' ? 'Reading saved Scrutiny evidence timed out. No provider request was made.' : error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (scrutinyLoadAbortRef.current === controller) { scrutinyLoadAbortRef.current = null; setScrutinyLoading(false); }
+    }
+  };
+
+  const fetchGmgnRiskDetails = async (walletAddresses = scrutinyPinned) => {
+    if (gmgnRiskBusy || !walletAddresses.length) return;
+    setGmgnRiskBusy(true); setScrutinyError(null); setScrutinyOutcome(null);
+    try {
+      const response = await api<GmgnRiskResponse>('/api/copytrade/scrutiny/gmgn-risk', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ walletAddresses, periods: ['30d'] }),
+      });
+      setGmgnRiskResults((current) => Object.fromEntries([...Object.entries(current), ...response.results.map((result) => [`${result.walletAddress}|${result.period}`, result])]));
+      const unavailable = response.results.filter((result) => !result.available).length;
+      setScrutinyOutcome(unavailable ? `GMGN risk details loaded with ${unavailable} unavailable period${unavailable === 1 ? '' : 's'}.` : 'GMGN risk details loaded for the selected wallets.');
+    } catch (error: unknown) { setScrutinyError(error instanceof Error ? error.message : String(error)); }
+    finally { setGmgnRiskBusy(false); }
+  };
+
+  const importGmgnRiskFile = async (file: File, walletAddress: string) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+      const captures = root && Array.isArray(root.captures)
+        ? (parsed as { captures: unknown[] }).captures : Array.isArray(parsed) ? parsed : [];
+      const capture = captures.find((value) => {
+        if (!value || typeof value !== 'object') return false;
+        const item = value as { walletAddress?: unknown; period?: unknown };
+        return item.walletAddress === walletAddress && item.period === '30d';
+      }) as { walletAddress?: string; period?: string; status?: number; responseBody?: unknown } | undefined;
+      let status = capture?.status;
+      let responseBody = capture?.responseBody;
+      // The investigation export produced by the extension uses `endpoints[].samples[]`,
+      // rather than the newer `captures[]` format. Accept both formats so dropping the
+      // downloaded investigation file into this wallet works as promised.
+      if (!capture && root && Array.isArray(root.endpoints)) {
+        for (const endpoint of root.endpoints) {
+          if (!endpoint || typeof endpoint !== 'object') continue;
+          const item = endpoint as { url?: unknown; samples?: unknown };
+          if (typeof item.url !== 'string' || !/\/wallet\/sol\/[^/]+\/profit_stat\/30d(?:\?|$)/.test(item.url) || !Array.isArray(item.samples)) continue;
+          const walletInUrl = item.url.match(/\/wallet\/sol\/([^/]+)\/profit_stat\/30d(?:\?|$)/)?.[1];
+          if (walletInUrl !== walletAddress) continue;
+          const sample = item.samples.find((value) => value && typeof value === 'object' && typeof (value as { responsePayload?: unknown }).responsePayload === 'string') as { status?: number; responsePayload?: string } | undefined;
+          if (!sample?.responsePayload) continue;
+          status = sample.status;
+          responseBody = JSON.parse(sample.responsePayload);
+          break;
+        }
+      }
+      const metrics = responseBody === undefined ? null : normalizeImportedGmgnRisk(responseBody);
+      if (!metrics) throw new Error(`This file has no usable 30d risk response for ${shortAddress(walletAddress)}.`);
+      const imported: GmgnRiskResult = { walletAddress, period: '30d', available: status === undefined || status === 200, metrics, error: status && status !== 200 ? `GMGN returned HTTP ${status}` : undefined };
+      if (!imported.available) throw new Error(imported.error ?? 'The imported GMGN response was unavailable.');
+      await api('/api/copytrade/scrutiny/gmgn-risk/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ results: [imported] }) });
+      setGmgnRiskResults((current) => ({ ...current, [`${walletAddress}|30d`]: imported }));
+      setScrutinyOutcome('Imported GMGN 30-day risk details.');
+    } catch (error: unknown) { setScrutinyError(error instanceof Error ? error.message : 'Could not read the GMGN risk JSON.'); }
+  };
+
+  const toggleScrutinyPin = (walletAddress: string) => {
+    setScrutinyPinned((current) => {
+      if (current.includes(walletAddress)) return current.filter((wallet) => wallet !== walletAddress);
+      if (current.length >= MAX_SCRUTINY_WALLETS_UI) {
+        setMessage(`At most ${MAX_SCRUTINY_WALLETS_UI} wallets can be pinned for scrutiny at once — unpin one first.`);
+        return current;
+      }
+      return [...current, walletAddress];
+    });
+  };
+
+  /** Scoped re-fetch for the pinned wallets only, reusing the same fire-and-forget fetch-run
+   *  machinery (and single-run guard) as every other CopyTrade fetch. Polls locally to completion
+   *  so the outcome message can report a per-wallet trade-count delta rather than just "started". */
+  const refreshScrutinyTrades = async () => {
+    if (scrutinyRefreshBusy || copyTradeStatus?.running || !scrutinyPinned.length) return;
+    setScrutinyRefreshBusy(true);
+    setScrutinyError(null);
+    setScrutinyOutcome(null);
+    const before = new Map((scrutinyResponse?.reports ?? []).map((r) => [r.walletAddress, r.checks.buySellComposition.metrics.buyCount + r.checks.buySellComposition.metrics.sellCount]));
+    try {
+      const response = await fetch('/api/copytrade/scrutiny/refresh-trades', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ walletAddresses: scrutinyPinned }),
+      });
+      const body = await response.json() as { runId?: number; status?: 'running'; error?: string };
+      if (response.status === 409) { setMessage('A CopyTrade fetch is already running. Waiting for it to finish.'); }
+      else if (!response.ok) { throw new Error(body.error ?? `Request failed (${response.status})`); }
+      // Poll to completion (bounded) rather than firing and leaving the reader to guess when the
+      // pinned wallets' figures are current again.
+      let status = await loadCopyTradeStatus();
+      for (let iterations = 0; status?.running && iterations < 150; iterations += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        status = await loadCopyTradeStatus();
+      }
+      await loadScrutiny();
+      setScrutinyResponse((current) => {
+        if (!current) return current;
+        const outcomes = current.reports.map((report) => {
+          const beforeCount = before.get(report.walletAddress) ?? 0;
+          const afterCount = report.checks.buySellComposition.metrics.buyCount + report.checks.buySellComposition.metrics.sellCount;
+          const delta = afterCount - beforeCount;
+          const label = report.name?.trim() || `${report.walletAddress.slice(0, 6)}…`;
+          return delta > 0 ? `${label}: +${delta} new trade${delta === 1 ? '' : 's'}` : `${label}: no new trades (already up to date)`;
+        });
+        setScrutinyOutcome(outcomes.length ? outcomes.join(' · ') : 'No pinned wallet returned a scrutiny report.');
+        return current;
+      });
+    } catch (error: unknown) { setScrutinyError(error instanceof Error ? error.message : String(error)); }
+    finally { setScrutinyRefreshBusy(false); }
+  };
+
+  /** Reuses POST /api/copytrade/copy-simulation/run as-is (its walletAddresses body override was
+   *  already built for exactly this) — no new Dune wiring. That route runs to completion before
+   *  responding, so no polling is needed here, unlike the fire-and-forget fetch above. */
+  const fillScrutinyCoverage = async () => {
+    if (scrutinyFillBusy || !scrutinyPinned.length) return;
+    setScrutinyFillBusy(true);
+    setScrutinyError(null);
+    setScrutinyOutcome(null);
+    const before = new Map((scrutinyResponse?.reports ?? []).map((r) => [r.walletAddress, r.checks.coverage.metrics.fullHistoryMatched]));
+    try {
+      const response = await fetch('/api/copytrade/copy-simulation/run', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ walletAddresses: scrutinyPinned }),
+      });
+      const body = await response.json() as { targetsSubmitted?: number; targetsTotal?: number; error?: string };
+      if (response.status === 409) { setMessage('A copy simulation is already running.'); }
+      else if (!response.ok) { throw new Error(body.error ?? `Request failed (${response.status})`); }
+      else { setMessage(`Dune coverage run finished for ${scrutinyPinned.length} pinned wallet(s) (${body.targetsSubmitted ?? 0}/${body.targetsTotal ?? 0} targets submitted).`); }
+      await loadScrutiny();
+      setScrutinyResponse((current) => {
+        if (!current) return current;
+        const outcomes = current.reports.map((report) => {
+          const beforeCount = before.get(report.walletAddress) ?? 0;
+          const afterCount = report.checks.coverage.metrics.fullHistoryMatched;
+          const delta = afterCount - beforeCount;
+          const label = report.name?.trim() || `${report.walletAddress.slice(0, 6)}…`;
+          return delta > 0 ? `${label}: +${delta} newly Dune-matched` : `${label}: no new matches (already up to date, or Dune returned nothing)`;
+        });
+        setScrutinyOutcome(outcomes.length ? outcomes.join(' · ') : 'No pinned wallet returned a scrutiny report.');
+        return current;
+      });
+    } catch (error: unknown) { setScrutinyError(error instanceof Error ? error.message : String(error)); }
+    finally { setScrutinyFillBusy(false); }
+  };
+
+  const loadCopySimulation = async (rosterSnapshotId = selectedRosterSnapshotId, walletAddresses?: string[], periodDays?: number) => {
     setCopySimulationLoading(true);
-    try { setCopySimulation(await api<CopySimulationReport>(`/api/copytrade/copy-simulation${rosterSnapshotId ? `?snapshotId=${rosterSnapshotId}` : ''}`)); }
+    const params = new URLSearchParams();
+    if (rosterSnapshotId) params.set('snapshotId', String(rosterSnapshotId));
+    if (walletAddresses?.length) params.set('walletAddresses', walletAddresses.join(','));
+    if (periodDays) params.set('periodDays', String(periodDays));
+    try {
+      const report = await api<CopySimulationReport>(`/api/copytrade/copy-simulation${params.toString() ? `?${params.toString()}` : ''}`);
+      setCopySimulation(report);
+      return report;
+    }
     catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
     finally { setCopySimulationLoading(false); }
   };
 
   const loadLiquidityImpact = async (rosterSnapshotId = selectedRosterSnapshotId) => {
     setLiquidityImpactLoading(true);
-    try { setLiquidityImpact(await api<LiquidityImpactReport>(`/api/copytrade/liquidity-impact${rosterSnapshotId ? `?snapshotId=${rosterSnapshotId}` : ''}`)); }
+    try { setLiquidityImpact(await api<LiquidityImpactReport>(`/api/copytrade/liquidity-impact?periodDays=30${rosterSnapshotId ? `&snapshotId=${rosterSnapshotId}` : ''}`)); }
     catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
     finally { setLiquidityImpactLoading(false); }
   };
 
-  const runCopySimulationBatch = async () => {
+  const runCopySimulationBatch = async (walletAddresses?: string[], periodDays?: number, wideRetry = false, rosterSnapshotId = selectedRosterSnapshotId): Promise<{ targetsSubmitted: number; batchesRun: number; exhausted: boolean } | null> => {
     setCopySimulationRunBusy(true);
+    setCopySimulationRunStatus({
+      running: true,
+      cancelRequested: false,
+      targetsTotal: 0,
+      targetsProcessed: 0,
+      batchesRun: 0,
+      currentBatch: 0,
+      batchesTotal: 0,
+      message: 'Planning…',
+      batches: [],
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      storedTargets: 0,
+      failedTargets: 0,
+      remainingTargets: 0,
+      outcome: 'running',
+      duneExecutionId: null,
+      duneState: 'SUBMITTING',
+      dunePollCount: 0,
+      duneElapsedSeconds: 0,
+      duneIsExecutionFinished: false,
+      duneExecutionCostCredits: null,
+      duneLastStatusAt: new Date().toISOString(),
+      duneRequestPhase: 'idle',
+      duneLastHttpStatus: null,
+      duneLastRequestMs: null,
+      duneLastPayload: null,
+    });
     try {
-      const result = await api<{ runIds: number[]; targetsSubmitted: number; batchesRun: number; exhausted: boolean }>(`/api/copytrade/copy-simulation/run${selectedRosterSnapshotId ? `?snapshotId=${selectedRosterSnapshotId}` : ''}`, { method: 'POST' });
+      const result = await api<{ runIds: number[]; targetsSubmitted: number; batchesRun: number; exhausted: boolean; cancelled: boolean; targetsTotal: number }>(`/api/copytrade/copy-simulation/${wideRetry ? 'wide-retry' : 'run'}${rosterSnapshotId ? `?snapshotId=${rosterSnapshotId}` : ''}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(walletAddresses?.length ? { walletAddresses, periodDays } : { periodDays }) });
       setMessage(result.targetsSubmitted > 0
         ? `Queried Dune for ${result.targetsSubmitted} entry/exit price${result.targetsSubmitted === 1 ? '' : 's'} across ${result.batchesRun} batch${result.batchesRun === 1 ? '' : 'es'}.${result.exhausted ? ' More remain — run again to continue.' : ''}`
         : 'Every eligible trade for the current top traders has already been queried.');
-      await loadCopySimulation(selectedRosterSnapshotId ?? undefined);
+      await loadCopySimulation(selectedRosterSnapshotId ?? undefined, walletAddresses, periodDays);
       await loadLiquidityImpact(selectedRosterSnapshotId ?? undefined);
-    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
-    finally { setCopySimulationRunBusy(false); }
+      return result;
+    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); return null; }
+    finally { setCopySimulationRunBusy(false); void api<CopySimulationRunStatus>('/api/copytrade/copy-simulation/status').then(setCopySimulationRunStatus).catch(() => undefined); }
   };
 
-  const loadCopyTradePage = async () => {
+  const stopCopySimulation = async () => {
+    try { setCopySimulationRunStatus(await api<CopySimulationRunStatus>('/api/copytrade/copy-simulation/stop', { method: 'POST' })); }
+    catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
+  };
+
+  const loadCopyTradePage = async (loadWalletEvidence = true) => {
     setCopyTradeLoading(true);
     setCopyTradeError(null);
     try {
@@ -967,16 +1878,34 @@ function App() {
       const rosterSnapshotId = selectedRosterSnapshotId ?? rosterCatalog.selectedByDefault;
       if (selectedRosterSnapshotId === null && rosterSnapshotId !== null) setSelectedRosterSnapshotId(rosterSnapshotId);
       const snapshotQuery = rosterSnapshotId ? `&snapshotId=${rosterSnapshotId}` : '';
-      const [summary, results, status] = await Promise.all([
+      const [summary, results, status, duneStatus] = await Promise.all([
         api<CopyTradeSummary>('/api/copytrade/summary'),
         // The selected period and trader count must scope the report too, not just the next
         // fetch — otherwise the table answers a different question than the controls describe.
         api<CopyTradeResults>(`/api/copytrade/results?periodDays=${copyTradePeriodDays}&limit=${copyTradeLimit}${snapshotQuery}`),
         api<CopyTradeFetchStatus>('/api/copytrade/fetch/status'),
+        api<CopySimulationRunStatus>('/api/copytrade/copy-simulation/status'),
       ]);
       setCopyTradeSummary(summary);
       setCopyTradeResults(results);
+      try {
+        window.localStorage.setItem(walletStatsResultsStorageKey, JSON.stringify({
+          periodDays: results.periodDays,
+          savedAt: new Date().toISOString(),
+          results,
+        }));
+      } catch { /* Browser cache is best effort; SQLite remains the source of truth. */ }
       setCopyTradeStatus(status);
+      setCopySimulationRunStatus(duneStatus);
+      // Wallet-stats uses the full selected table scope, not only the default screen-pass
+      // candidates used by the broader research view. Read the same persisted simulation
+      // report for these exact rows so their status cannot temporarily appear as “Never queried”.
+      if (loadWalletEvidence && copyTradeSubTab === 'wallet-stats') {
+        const walletAddresses = results.rows.map((row) => row.walletAddress);
+        const simulation = await loadCopySimulation(rosterSnapshotId ?? undefined, walletAddresses, 30);
+        if (simulation) setCopySimulation30d(simulation);
+      }
+      return results;
     } catch (error: unknown) {
       setCopyTradeError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1072,6 +2001,34 @@ function App() {
     } finally {
       setCopyTradeStopBusy(false);
     }
+  };
+
+  const resumeCopyTradeFetch = async () => {
+    if (copyTradeResumeBusy || copyTradeStatus?.running) return;
+    setCopyTradeResumeBusy(true);
+    setCopyTradeError(null);
+    try {
+      const response = await fetch('/api/copytrade/fetch/resume', { method: 'POST' });
+      const body = await response.json() as { runId?: number; error?: string };
+      if (!response.ok) throw new Error(body.error ?? `Resume request failed (${response.status})`);
+      setMessage(`Resumed GMGN top-100 fetch (run ${body.runId ?? '—'}).`);
+      await loadCopyTradeStatus();
+    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
+    finally { setCopyTradeResumeBusy(false); }
+  };
+
+  const resetCopyTradeFetch = async () => {
+    if (copyTradeResetBusy || copyTradeStatus?.running) return;
+    setCopyTradeResetBusy(true);
+    setCopyTradeError(null);
+    try {
+      const response = await fetch('/api/copytrade/fetch/reset', { method: 'POST' });
+      const body = await response.json() as { reset?: boolean; error?: string };
+      if (!response.ok) throw new Error(body.error ?? `Reset request failed (${response.status})`);
+      setMessage(body.reset ? 'GMGN resume snapshot reset. Saved trades were kept.' : 'No GMGN snapshot to reset.');
+      await loadCopyTradeStatus();
+    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
+    finally { setCopyTradeResetBusy(false); }
   };
 
   const importBrowserActivity = async (file: File) => {
@@ -1300,23 +2257,43 @@ function App() {
   };
 
   useEffect(() => {
+    const updateScrollTopVisibility = () => setShowScrollTop(window.scrollY > 500);
+    updateScrollTopVisibility();
+    window.addEventListener('scroll', updateScrollTopVisibility, { passive: true });
+    return () => window.removeEventListener('scroll', updateScrollTopVisibility);
+  }, []);
+  useEffect(() => {
+    if (!copySimulationRunStatus || copySimulationRunStatus.outcome === 'idle') return;
+    setCopySimulationRunReportOpen(copySimulationRunStatus.running);
+  }, [copySimulationRunStatus?.running, copySimulationRunStatus?.outcome]);
+  useEffect(() => {
     if (!watchStatus?.running) return;
     const timer = window.setInterval(() => { void loadWatchStatus(); }, 4000);
     return () => window.clearInterval(timer);
   }, [watchStatus?.running]);
 
   useEffect(() => {
+    if (WALLET_STATS_ONLY) return;
     void loadCopyTradeStatus();
   }, []);
 
   useEffect(() => {
+    if (WALLET_STATS_ONLY) return;
     if (activeMenu !== 'copytrade') return;
+    if (copyTradeSubTab === 'wallet-stats') return;
     void loadCopyTradePage();
-  }, [activeMenu]);
+    const snapshotForStats = selectedRosterSnapshotId ?? copyTradeRosters?.selectedByDefault ?? null;
+    if (snapshotForStats !== null) {
+      void loadGmgnStats(100, snapshotForStats).then((result) => {
+        if (result?.stats) setWalletScreenSummary(buildWalletScreenSummary(result.stats, Math.max(copyTradeRows.length, 100)));
+      });
+    }
+  }, [activeMenu, copyTradeSubTab, selectedRosterSnapshotId, copyTradeRosters?.selectedByDefault]);
   useEffect(() => {
-    if (activeMenu !== 'copytrade' || selectedRosterSnapshotId === null) return;
+    if (WALLET_STATS_ONLY) return;
+    if (activeMenu !== 'copytrade' || selectedRosterSnapshotId === null || copyTradeSubTab === 'wallet-stats') return;
     void loadCopyTradePage();
-  }, [selectedRosterSnapshotId]);
+  }, [selectedRosterSnapshotId, copyTradeSubTab]);
 
   useEffect(() => {
     if (!copyTradeStatus?.running) return;
@@ -1333,17 +2310,138 @@ function App() {
     return () => window.clearInterval(timer);
   }, [copyTradeStatus?.running]);
 
-  useEffect(() => { void loadCopyTradeEstimate(copyTradeLimit, copyTradePeriodDays); }, [copyTradeLimit, copyTradePeriodDays]);
+  useEffect(() => {
+    // The estimate is advisory and can never improve the first render. On the wallet-stats
+    // tab, let the cached/results table render first; otherwise a slow estimate request can
+    // compete with the initial report read and make the page look stuck.
+    if (WALLET_STATS_ONLY && copyTradeSubTab === 'wallet-stats' && !walletStatsReady) return;
+    const timer = window.setTimeout(() => { void loadCopyTradeEstimate(copyTradeLimit, copyTradePeriodDays); }, WALLET_STATS_ONLY ? 1200 : 0);
+    return () => window.clearTimeout(timer);
+  }, [copyTradeLimit, copyTradePeriodDays, copyTradeSubTab, walletStatsReady]);
   // Lazy per sub-tab, mirroring the subgroup-report pattern elsewhere: only fetched once the
   // reader actually opens that tab, not on every CopyTrade page load.
   useEffect(() => {
-    if (copyTradeSubTab === 'historical-consistency') void loadHistoricalConsistency(copyTradeLimit, selectedRosterSnapshotId ?? undefined);
+    if (copyTradeSubTab === 'research') {
+      void loadHistoricalConsistency(copyTradeLimit, selectedRosterSnapshotId ?? undefined);
+      const snapshotForStats = selectedRosterSnapshotId ?? copyTradeRosters?.selectedByDefault ?? null;
+      if (snapshotForStats !== null) void (async () => {
+        const result = await loadGmgnStats(100, snapshotForStats);
+        if (result?.stats) setWalletScreenSummary(buildWalletScreenSummary(result.stats, Math.max(copyTradeRows.length, 100)));
+      })();
+    }
+    else if (copyTradeSubTab === 'wallet-stats') {
+      setWalletStatsReady(false);
+      void (async () => {
+        try {
+          // Render the cached roster/report as soon as the base reads finish. GMGN stats and
+          // Dune evidence refresh in the background instead of blocking the table spinner.
+          const pageResults = await loadCopyTradePage(false);
+          const walletAddresses = pageResults?.rows.map((row) => row.walletAddress);
+          // The roster/results response is enough to render the table shell immediately. The
+          // larger GMGN-stats and Dune reports enrich it in the background; they must not keep
+          // the whole decision view in a loading state.
+          setWalletStatsReady(true);
+          // The decision view is 30-day now. Load that large report once and reuse it for both
+          // legacy state holders; requesting the same 8MB report twice made first load feel hung.
+          // Historical consistency is now a hard gate on the "Passed all tests" verdict, so this
+          // tab must load it too — it was previously fetched only on the `research` tab, which
+          // would have left every wallet here permanently 'insufficient' and unable to pass.
+          const [, simulation] = await Promise.all([
+            loadGmgnStats(),
+            loadCopySimulation(selectedRosterSnapshotId ?? undefined, walletAddresses, 30),
+            loadHistoricalConsistency(copyTradeLimit, selectedRosterSnapshotId ?? undefined),
+          ]);
+          if (simulation) setCopySimulation30d(simulation);
+        } catch { setWalletStatsReady(true); }
+      })();
+    }
     else if (copyTradeSubTab === 'forward-validation') { void loadCaptureHealth(); void loadExperiments(); }
     else if (copyTradeSubTab === 'top-callers') {
       void loadTopCallerData();
       (['leaderboard', 'callouts', 'checkpoints'] as TopCallerCollectionKind[]).forEach((kind) => { void loadTopCallerStatus(kind); });
     }
-  }, [copyTradeSubTab, copyTradeLimit, selectedRosterSnapshotId]);
+    else if (copyTradeSubTab === 'scrutiny') {
+      if (!WALLET_STATS_ONLY) {
+        void loadCopyWinners(copyTradeLimit, selectedRosterSnapshotId ?? undefined);
+      } else if (!walletStatsReady) {
+        // Auto-pin (below) reads the wallet-stats decision table's own candidates — load that
+        // data even when Scrutiny is opened directly, without visiting GMGN wallet stats first.
+        void (async () => {
+          try {
+            const pageResults = await loadCopyTradePage(false);
+            const walletAddresses = pageResults?.rows.map((row) => row.walletAddress);
+            const [, simulation] = await Promise.all([
+              loadGmgnStats(),
+              loadCopySimulation(selectedRosterSnapshotId ?? undefined, walletAddresses, 30),
+            ]);
+            if (simulation) setCopySimulation30d(simulation);
+          } finally { setWalletStatsReady(true); }
+        })();
+      }
+      void loadScrutiny();
+    }
+  }, [copyTradeSubTab, copyTradeLimit, selectedRosterSnapshotId, copyTradeRosters?.selectedByDefault]);
+  useEffect(() => {
+    if (copyTradeSubTab !== 'pattern-discovery') return;
+    void loadPatternDiscoveryExport(copyTradePeriodDays, true);
+  }, [copyTradeSubTab, copyTradePeriodDays]);
+  useEffect(() => {
+    if (copyTradeSubTab !== 'wallet-stats' || !gmgnStatsStatus?.running) return;
+    const timer = window.setInterval(async () => {
+      const status = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
+      setGmgnStatsStatus(status);
+      await loadGmgnStats();
+      if (!status.running) await loadCopyTradePage();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [copyTradeSubTab, gmgnStatsStatus?.running]);
+  useEffect(() => {
+    if (!copySimulationRunStatus?.running) return;
+    let disposed = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (disposed || copySimulationStatusPollInFlight.current) return;
+      copySimulationStatusPollInFlight.current = true;
+      let next: CopySimulationRunStatus | null = null;
+      try {
+        next = await api<CopySimulationRunStatus>('/api/copytrade/copy-simulation/status');
+        if (!disposed) setCopySimulationRunStatus(next);
+      } catch { /* retry on the next poll while the run remains active */ }
+      finally {
+        copySimulationStatusPollInFlight.current = false;
+        // Schedule only after the prior request finishes. A slow backend can no longer
+        // accumulate a backlog of status requests in the browser.
+          if (!disposed && (next?.running ?? copySimulationRunStatus?.running === true)) timer = window.setTimeout(() => void poll(), 3000);
+      }
+    };
+    void poll();
+    return () => { disposed = true; if (timer !== undefined) window.clearTimeout(timer); };
+  }, [copySimulationRunStatus?.running === true]);
+  useEffect(() => {
+    if (!statsDetailWallet) {
+      setStatsDetailTrades(null);
+      setStatsDetailTradesLoading(false);
+      setStatsDetailTradeId(null);
+      return;
+    }
+    let disposed = false;
+    setStatsDetailTradesLoading(true);
+    void api<CopyTradeHistoryResponse>(`/api/copytrade/trades/${encodeURIComponent(statsDetailWallet)}`)
+      .then((result) => { if (!disposed) setStatsDetailTrades(result); })
+      .catch((error: unknown) => { if (!disposed) setMessage(error instanceof Error ? error.message : String(error)); })
+      .finally(() => { if (!disposed) setStatsDetailTradesLoading(false); });
+    return () => { disposed = true; };
+  }, [statsDetailWallet]);
+  const openStatsDetail = (walletAddress: string) => {
+    setMessage(`Opening saved details for ${shortWalletAddress(walletAddress)}`);
+    setMaintenanceOpen(true);
+    setStatsDetailWallet(walletAddress);
+    window.setTimeout(() => document.querySelector('.copytrade-modal')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+  const highlightStatsTrade = (tradeId: number | null, scrollToRow = false) => {
+    setStatsDetailTradeId(tradeId);
+    if (scrollToRow && tradeId !== null) window.requestAnimationFrame(() => document.querySelector(`[data-detail-trade-id="${tradeId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+  };
   useEffect(() => { if (selectedExperimentId !== null) void loadExperimentDetail(selectedExperimentId); }, [selectedExperimentId]);
   useEffect(() => {
     if (copyTradeSubTab !== 'top-callers' || !topCallerSelectedKey) return;
@@ -1371,8 +2469,21 @@ function App() {
   }, [copyTradeSubTab]);
   // Winners is the default-visible content now (everything else is behind the research
   // toggle), so unlike the sub-tab data above it loads unconditionally, not lazily.
-  useEffect(() => { void loadCopyWinners(copyTradeLimit, selectedRosterSnapshotId ?? undefined); }, [copyTradeLimit, selectedRosterSnapshotId]);
-  useEffect(() => { void loadCopySimulation(selectedRosterSnapshotId ?? undefined); void loadLiquidityImpact(selectedRosterSnapshotId ?? undefined); }, [selectedRosterSnapshotId]);
+  useEffect(() => { if (!WALLET_STATS_ONLY) void loadCopyWinners(copyTradeLimit, selectedRosterSnapshotId ?? undefined); }, [copyTradeLimit, selectedRosterSnapshotId]);
+  useEffect(() => {
+    try { window.localStorage.setItem('vantage.crypto.excluded-screening-wallets', JSON.stringify(excludedScreeningWallets)); }
+    catch { /* Persistence is best effort. */ }
+  }, [excludedScreeningWallets]);
+  useEffect(() => {
+    try { window.localStorage.setItem('vantage.crypto.included-screening-wallets', JSON.stringify(includedScreeningWallets)); }
+    catch { /* Persistence is best effort. */ }
+  }, [includedScreeningWallets]);
+  useEffect(() => {
+    try { window.localStorage.setItem('vantage.crypto.scrutiny-pinned-wallets', JSON.stringify(scrutinyPinned)); }
+    catch { /* Persistence is best effort. */ }
+    if (copyTradeSubTab === 'scrutiny') void loadScrutiny();
+  }, [scrutinyPinned]);
+  useEffect(() => { if (!WALLET_STATS_ONLY && copyTradeSubTab !== 'wallet-stats') { void loadCopySimulation(selectedRosterSnapshotId ?? undefined); void loadLiquidityImpact(selectedRosterSnapshotId ?? undefined); } }, [selectedRosterSnapshotId, copyTradeSubTab]);
 
   const loadLogs = async () => {
     setLoadingLogs(true);
@@ -1385,7 +2496,10 @@ function App() {
     }
   };
 
-  useEffect(() => { void refresh().catch((error: unknown) => setMessage(String(error))); }, []);
+  useEffect(() => {
+    if (WALLET_STATS_ONLY) return;
+    void refresh().catch((error: unknown) => setMessage(String(error)));
+  }, []);
   useEffect(() => {
     const intro = document.querySelector<HTMLElement>('.signal-outcome-batch-panel .outcome-inner > p');
     if (intro) intro.textContent = 'Select one or more captured signals. The Dune SQL query uses supported time arithmetic for the signal time and its configured historical checkpoints. A checkpoint whose window has not yet elapsed shows as pending; a token with no matching trade remains unavailable.';
@@ -1579,8 +2693,23 @@ function App() {
   };
 
   useEffect(() => {
+    if (WALLET_STATS_ONLY) {
+      const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
+      const allowedSubTab = WALLET_STATS_ONLY_VISIBLE_SUBTABS.includes(parsed.subTab) ? parsed.subTab : 'wallet-stats';
+      const canonicalHash = `#copytrade/${allowedSubTab}`;
+      if (window.location.hash !== canonicalHash) window.history.replaceState({}, '', canonicalHash);
+    }
     if (window.location.hash.slice(1) === 'birdeye-batch') window.history.replaceState({}, '', '#dune-capture');
     const onLocationChange = () => {
+      if (WALLET_STATS_ONLY) {
+        const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
+        const allowedSubTab = WALLET_STATS_ONLY_VISIBLE_SUBTABS.includes(parsed.subTab) ? parsed.subTab : 'wallet-stats';
+        setActiveMenu('copytrade');
+        setCopyTradeSubTab(allowedSubTab);
+        const canonicalHash = `#copytrade/${allowedSubTab}`;
+        if (window.location.hash !== canonicalHash) window.history.replaceState({}, '', canonicalHash);
+        return;
+      }
       const next = parseCopyTradeRoute(window.location.hash.slice(1) || 'dune-capture');
       setActiveMenu(next.menu);
       setCopyTradeSubTab(next.subTab);
@@ -1676,6 +2805,7 @@ function App() {
   const duneActivity = refreshBusy || measurementPlanRefreshing || outcomeBatchBusy || reconcileBusy || outcomeBusy;
   const duneActivityLabel = outcomeBatchBusy ? 'Dune measurement batches are running' : reconcileBusy ? 'Checking Dune runs for completion' : measurementPlanRefreshing ? 'Refreshing the Dune measurement plan' : refreshBusy ? 'Loading saved Dune evidence' : 'Dune Capture is idle';
   const copyTradeRows = copyTradeResults?.rows ?? [];
+  const historicalConsistencyByWallet = new Map((historicalConsistency?.rows ?? []).map((row) => [row.walletAddress, row]));
   const sortedCopyTradeRows = [...copyTradeRows].sort((left, right) => {
     const value = (row: CopyTradeRow): string | number | null => copyTradeSort.key === 'name' ? (row.name ?? row.walletAddress) : copyTradeSort.key === 'verdict' ? row.verdict : row[copyTradeSort.key];
     const leftValue = value(left);
@@ -1683,8 +2813,704 @@ function App() {
     const comparison = leftValue === null && rightValue === null ? 0 : leftValue === null ? 1 : rightValue === null ? -1 : typeof leftValue === 'number' && typeof rightValue === 'number' ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue));
     return (copyTradeSort.direction === 'asc' ? 1 : -1) * comparison;
   });
+  const sortedGmgnAggregateRows = [...copyTradeRows].sort((left, right) => {
+    const leftValue = left.gmgnAggregate?.realizedProfitPnlPercent ?? null;
+    const rightValue = right.gmgnAggregate?.realizedProfitPnlPercent ?? null;
+    if (leftValue === null && rightValue === null) return left.walletAddress.localeCompare(right.walletAddress);
+    if (leftValue === null) return 1;
+    if (rightValue === null) return -1;
+    return rightValue - leftValue;
+  });
+  const gmgnStatsByWallet = new Map<string, Map<string, GmgnAggregateStats>>();
+  for (const record of gmgnStatsRecords) {
+    const parsed = parseAggregateRecord(record);
+    if (!parsed) continue;
+    const periods = gmgnStatsByWallet.get(record.walletAddress) ?? new Map<string, GmgnAggregateStats>();
+    periods.set(record.period, parsed);
+    gmgnStatsByWallet.set(record.walletAddress, periods);
+  }
+  const visibleWalletScreenSummary = walletScreenSummary ?? (gmgnStatsRecords.length > 0 ? buildWalletScreenSummary(gmgnStatsRecords, Math.max(copyTradeRows.length, 100)) : null);
+  const includedScreeningWalletSet = new Set(includedScreeningWallets);
+  // Triage-eliminated wallets fold into the same exclusion set the manual checkboxes use, so a
+  // wallet the triage rejected is skipped on the next Dune fetch exactly like a manually
+  // unchecked one — same override path too: ticking its checkbox adds it to
+  // includedScreeningWallets, which wins over both sources of exclusion identically. Opt-in via
+  // skipEliminatedInDune and re-derived fresh each render, not written back into
+  // excludedScreeningWallets itself, so it never persists past a re-run of triage or a session.
+  const latestGmgnFetchAt = visibleWalletScreenSummary?.lastFetchedAt ?? null;
+  // What skipping a fetch actually costs, stated in plain terms, from data already on hand — no
+  // new request needed to show this. Derived from each wallet's own historical trade rate
+  // (buy+sell over its stored 30-day window), which is a real measured average, not a guess
+  // conjured for this banner — but it stays an ESTIMATE, never a promise: a quiet wallet could
+  // still trade in the next minute, and a historically busy one could stay silent for a week.
+  // The one thing this can say for certain is the size of the blind window itself (how long
+  // since data was last confirmed current), because that number has no uncertainty in it.
+  const staleDataAgeHours = latestGmgnFetchAt ? (Date.now() - Date.parse(latestGmgnFetchAt)) / 3_600_000 : null;
+  const estimatedTradesSinceLastFetch = staleDataAgeHours !== null
+    ? [...gmgnStatsByWallet.values()].reduce((sum, periods) => {
+      const stats30d = periods.get('30d');
+      const totalTrades30d = stats30d ? (stats30d.buyCount ?? 0) + (stats30d.sellCount ?? 0) : 0;
+      return sum + (totalTrades30d / (30 * 24)) * staleDataAgeHours;
+    }, 0)
+    : null;
+  const latestDuneFetchAt = copySimulationRunStatus?.finishedAt ?? copySimulationRunStatus?.persistedRun?.completedAt ?? null;
+  const triageHasCurrentInputs = Boolean(eliminationReport && latestGmgnFetchAt && latestDuneFetchAt
+    && Date.parse(latestGmgnFetchAt) <= Date.parse(eliminationReport.generatedAt)
+    && Date.parse(latestDuneFetchAt) <= Date.parse(eliminationReport.generatedAt));
+  const triageEliminatedWalletSet = new Set(skipEliminatedInDune && triageHasCurrentInputs && eliminationReport ? eliminationReport.eliminated.map((entry) => entry.walletAddress) : []);
+  // Uses whichever copier-delay assumption the loaded Dune simulation actually used (falling
+  // back to the same 15s default rendered elsewhere in this file), so this never disagrees with
+  // the verdict's own `impossible` check computed from the same trades.
+  const copierDelaySecondsForScope = copySimulation30d?.assumptions.copierDelaySeconds ?? copySimulation?.assumptions.copierDelaySeconds ?? 15;
+  const uncopyableWalletSet = new Set(skipScopeFiltersInDune ? copyTradeRows
+    .filter((row) => row.riskEvidence?.medianHoldSeconds !== null && row.riskEvidence?.medianHoldSeconds !== undefined && row.riskEvidence.medianHoldSeconds < copierDelaySecondsForScope)
+    .map((row) => row.walletAddress) : []);
+  // Seven guardrails built entirely from data the official GMGN API already returns on every
+  // regular fetch (no new request, no blocked web-cookie endpoint): a wallet tagged wash_trader
+  // by GMGN itself, a strongly negative realized 30d PnL% (same -20% bar eliminationFilter.ts
+  // uses post-Dune, applied here pre-fetch instead), unusually high 30d trade volume, a wallet
+  // that has itself created a large number of tokens (deployer/farmer signature, not a trader
+  // worth copying), a very thin 30d trade sample, a weak win rate, and a near-total buy/sell
+  // imbalance (one-sided activity, e.g. airdrop farming rather than round-trip trading). All
+  // seven fields already sit in the same wallet_stats response the other checks read; none of
+  // these needed a new API surface. Cutoffs (volume, created-token-count, trade-count floor,
+  // win-rate floor, imbalance ceiling) are judgment calls picked from the live cohort's own
+  // distribution, each currently cutting a small single-digit slice; the tag and PnL checks are
+  // not judgment calls.
+  const highRiskWalletReasons = new Map<string, string[]>();
+  for (const row of copyTradeRows) {
+    const stats30d = gmgnStatsByWallet.get(row.walletAddress)?.get('30d');
+    if (!stats30d) continue;
+    const reasons: string[] = [];
+    if (stats30d.tags.includes('wash_trader')) reasons.push('GMGN-flagged wash trader');
+    if (stats30d.realizedProfitPnlPercent !== null && stats30d.realizedProfitPnlPercent <= STRONGLY_NEGATIVE_PNL_PERCENT) reasons.push(`30d PnL ${stats30d.realizedProfitPnlPercent.toFixed(0)}%`);
+    const buys30d = stats30d.buyCount ?? 0;
+    const sells30d = stats30d.sellCount ?? 0;
+    const volume30d = buys30d + sells30d;
+    if (volume30d > 5000) reasons.push(`${volume30d.toLocaleString()} trades in 30d`);
+    if (stats30d.createdTokenCount !== null && stats30d.createdTokenCount > 100) reasons.push(`created ${stats30d.createdTokenCount.toLocaleString()} tokens`);
+    if (volume30d > 0 && volume30d < 10) reasons.push(`only ${volume30d} trades in 30d`);
+    if (stats30d.winRatePercent !== null && stats30d.winRatePercent < 20) reasons.push(`${stats30d.winRatePercent.toFixed(0)}% win rate`);
+    if (volume30d > 0) {
+      const imbalancePercent = Math.abs(buys30d - sells30d) / volume30d * 100;
+      if (imbalancePercent > 90) reasons.push(`${imbalancePercent.toFixed(0)}% one-sided (${buys30d} buys / ${sells30d} sells)`);
+    }
+    if (reasons.length > 0) highRiskWalletReasons.set(row.walletAddress, reasons);
+  }
+  const highRiskWalletSet = new Set(skipScopeFiltersInDune ? highRiskWalletReasons.keys() : []);
+  const scopeFilteredWalletSet = new Set([...uncopyableWalletSet, ...highRiskWalletSet]);
+  const excludedScreeningWalletSet = new Set(
+    [...excludedScreeningWallets, ...triageEliminatedWalletSet, ...uncopyableWalletSet, ...highRiskWalletSet].filter((wallet) => !includedScreeningWalletSet.has(wallet)),
+  );
+  const skippedScreeningCount = visibleWalletScreenSummary?.activityLeaders.filter((entry) => excludedScreeningWalletSet.has(entry.wallet)).length ?? 0;
+  const triageExcludedFromDuneCount = visibleWalletScreenSummary?.activityLeaders.filter((entry) => excludedScreeningWalletSet.has(entry.wallet) && triageEliminatedWalletSet.has(entry.wallet)).length ?? 0;
+  const uncopyableExcludedFromDuneCount = visibleWalletScreenSummary?.activityLeaders.filter((entry) => excludedScreeningWalletSet.has(entry.wallet) && uncopyableWalletSet.has(entry.wallet)).length ?? uncopyableWalletSet.size;
+  const researchWalletAddresses = (copyTradeRows.length > 0 ? copyTradeRows.filter((row) => !row.historyFailed).map((row) => row.walletAddress) : visibleWalletScreenSummary?.activityLeaders.map((entry) => entry.wallet) ?? []).filter((wallet) => !excludedScreeningWalletSet.has(wallet));
+  const duneHistoryFailedCount = copyTradeRows.filter((row) => row.historyFailed).length;
+  const duneManuallyExcludedCount = (copyTradeRows.length > 0 ? copyTradeRows.map((row) => row.walletAddress) : visibleWalletScreenSummary?.activityLeaders.map((entry) => entry.wallet) ?? []).filter((wallet) => excludedScreeningWalletSet.has(wallet)).length;
+  const duneSelectionNote = [duneHistoryFailedCount > 0 ? `${duneHistoryFailedCount} history incomplete` : null, duneManuallyExcludedCount > 0 ? `${duneManuallyExcludedCount} excluded` : null].filter(Boolean).join(' · ');
+  const toggleScreeningWallet = (wallet: string) => {
+    if (excludedScreeningWalletSet.has(wallet)) {
+      setExcludedScreeningWallets((current) => current.filter((entry) => entry !== wallet));
+      setIncludedScreeningWallets((current) => current.includes(wallet) ? current : [...current, wallet]);
+    } else {
+      setIncludedScreeningWallets((current) => current.filter((entry) => entry !== wallet));
+      setExcludedScreeningWallets((current) => current.includes(wallet) ? current : [...current, wallet]);
+    }
+  };
+
+  const fetchTop100GmgnHistoryAndWait = async (periodDays: number): Promise<CopyTradeFetchStatus> => {
+    const response = await fetch('/api/copytrade/fetch', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ limit: 100, periodDays }),
+    });
+    const body = await response.json() as { error?: string };
+    if (!response.ok && response.status !== 409) throw new Error(body.error ?? `GMGN history fetch failed (${response.status}).`);
+    let status = await loadCopyTradeStatus();
+    while (status?.running) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      status = await loadCopyTradeStatus();
+    }
+    if (!status) throw new Error('Could not read GMGN history fetch status.');
+    if (status.status !== 'completed') throw new Error(status.message || `GMGN history fetch ${status.status}.`);
+    return status;
+  };
+  useEffect(() => {
+    // Older builds stored automatic >2,000-trade exclusions as permanent exclusions.
+    // Migrate those once; from now on, automatic exclusions are derived defaults and a
+    // user's explicit re-enable is stored separately and wins over the default.
+    if (!visibleWalletScreenSummary || legacyHighActivityMigrationDone.current) return;
+    legacyHighActivityMigrationDone.current = true;
+    const highActivityWallets = new Set(visibleWalletScreenSummary.activityLeaders.filter((entry) => entry.trades > 2_000).map((entry) => entry.wallet));
+    if (highActivityWallets.size > 0) setExcludedScreeningWallets((current) => current.filter((wallet) => !highActivityWallets.has(wallet)));
+  }, [visibleWalletScreenSummary?.snapshotId]);
+  const gmgnStatsValue = (row: CopyTradeRow): string | number | null => {
+    const leaderboard = gmgnLeaderboardMetrics[row.walletAddress];
+    const periods = gmgnStatsByWallet.get(row.walletAddress);
+    const short = periods?.get('7d');
+    const long = periods?.get('30d');
+    if (gmgnStatsSort.key === 'name') return row.name?.trim() || row.walletAddress;
+    const numeric = (value: unknown): number | null => { const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN; return Number.isFinite(parsed) ? parsed : null; };
+    if (gmgnStatsSort.key === 'pnl1d') return numeric(leaderboard?.pnl1d);
+    if (gmgnStatsSort.key === 'pnl7d') return numeric(leaderboard?.pnl7d);
+    if (gmgnStatsSort.key === 'pnl30d') return numeric(leaderboard?.pnl30d);
+    if (gmgnStatsSort.key === 'dailyProfit7d') return formatDailyProfit7d(leaderboard?.dailyProfit7d).total;
+    if (gmgnStatsSort.key === 'win7d') return short?.winRatePercent ?? null;
+    if (gmgnStatsSort.key === 'win30d') return long?.winRatePercent ?? null;
+    if (gmgnStatsSort.key === 'activity') { const activity = long ?? short; return activity ? (activity.buyCount ?? 0) + (activity.sellCount ?? 0) : null; }
+    if (gmgnStatsSort.key === 'equivalent') {
+      const pnl30d = long?.realizedProfitPnlPercent ?? (numeric(leaderboard?.pnl30d) === null ? null : numeric(leaderboard?.pnl30d)! * 100);
+      return pnl30d == null ? null : 100 * (1 + pnl30d / 100);
+    }
+    return long?.fetchedAt ? Date.parse(long.fetchedAt) : short?.fetchedAt ? Date.parse(short.fetchedAt) : null;
+  };
+  const sortedGmgnStatsRows = [...copyTradeRows].sort((left, right) => {
+    const leftValue = gmgnStatsValue(left); const rightValue = gmgnStatsValue(right);
+    const comparison = leftValue === null && rightValue === null ? left.walletAddress.localeCompare(right.walletAddress) : leftValue === null ? 1 : rightValue === null ? -1 : typeof leftValue === 'number' && typeof rightValue === 'number' ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue));
+    return (gmgnStatsSort.direction === 'asc' ? 1 : -1) * comparison;
+  });
+    const copySimulationByWallet = new Map((copySimulation?.wallets ?? []).map((wallet) => [wallet.walletAddress, wallet]));
+  const copySimulation30dByWallet = new Map((copySimulation30d?.wallets ?? []).map((wallet) => [wallet.walletAddress, wallet]));
+  const copyDelayRows = sortedGmgnStatsRows.map((row) => {
+    const tradeRow = copyTradeResults?.rows.find((candidate) => candidate.walletAddress === row.walletAddress);
+    const statsPeriods = gmgnStatsByWallet.get(row.walletAddress);
+    const stats7d = statsPeriods?.get('7d');
+    const stats30d = statsPeriods?.get('30d');
+    const totalTrades7d = stats7d ? (stats7d.buyCount ?? 0) + (stats7d.sellCount ?? 0) : null;
+    const totalTrades30d = stats30d ? (stats30d.buyCount ?? 0) + (stats30d.sellCount ?? 0) : null;
+    const hold = tradeRow?.riskEvidence?.medianHoldSeconds ?? null;
+    const delay = copySimulation30d?.assumptions.copierDelaySeconds ?? copySimulation?.assumptions.copierDelaySeconds ?? 15;
+    const delayShare = hold !== null && Number.isFinite(hold) && hold > 0 ? delay / hold * 100 : null;
+    const sim7 = copySimulationByWallet.get(row.walletAddress);
+    const sim30 = copySimulation30dByWallet.get(row.walletAddress);
+    // Fail closed for the 30-day decision. A broader legacy simulation must never be paired
+    // with 30-day GMGN statistics.
+    const sim = sim30;
+    // Keep the visible fraction and percentage tied to the same denominator. A stale or
+    // differently scoped cached percentage must not disagree with the counts shown in Evidence.
+    const evidenceCoverage = sim && sim.roundTripsConsidered > 0
+      ? Math.round(sim.copiedTrades / sim.roundTripsConsidered * 1000) / 10 : null;
+    const walletMedian = sim?.walletMedianReturnPercent;
+    const simulatedMedian = sim?.simulatedMedianReturnPercent;
+    const portfolioPnl = sim?.portfolio?.realizedPnlUsd ?? null;
+    const edge = walletMedian != null && simulatedMedian != null && Number.isFinite(walletMedian) && Number.isFinite(simulatedMedian) && walletMedian > 0 ? simulatedMedian / walletMedian * 100 : null;
+    const impossible = delayShare !== null && delayShare >= 100;
+    const fragile = delayShare !== null && delayShare >= 25 && !impossible;
+    const survivedDelay = portfolioPnl != null && Number.isFinite(portfolioPnl) && portfolioPnl > 0
+      && sim?.gasCostComplete === true
+      && (evidenceCoverage ?? 0) >= COPY_EVIDENCE_MIN_COVERAGE_PERCENT
+      && (sim?.roundTripsConsidered ?? 0) >= COPY_EVIDENCE_MIN_ROUND_TRIPS;
+    const hasQueriedNoMatch = sim?.trades.some((trade) => trade.status === 'missing_entry_match' || trade.status === 'missing_exit_match') ?? false;
+    const hasNeverQueried = sim?.trades.some((trade) => trade.status === 'not_yet_queried') ?? false;
+    const reading = hold === null ? 'No median hold data' : !sim ? 'Never queried' : sim.coverageStatus === 'missing_local_history' ? 'Missing local history' : sim.coverageStatus === 'no_dune_match' || (hasQueriedNoMatch && sim.copiedTrades === 0) ? 'Queried · no match' : hasNeverQueried ? 'Not queried yet' : sim.coverageStatus === 'small_sample' ? 'Small sample' : !sim.gasCostComplete ? 'Gas cost incomplete' : impossible ? 'Delay exceeds median hold' : fragile ? 'Delay is material' : survivedDelay ? 'Portfolio survived delay and costs' : 'Portfolio result is non-positive';
+    return { row, name: row.name?.trim() || shortAddress(row.walletAddress), totalTrades7d, totalTrades30d, hold, delayShare, coverage: evidenceCoverage, coverage7d: sim7 ? { matched: sim7.copiedTrades, eligible: sim7.roundTripsConsidered, percent: sim7.roundTripsConsidered > 0 ? Math.round(sim7.copiedTrades / sim7.roundTripsConsidered * 1000) / 10 : null } : null, coverage30d: sim30 ? { matched: sim30.copiedTrades, eligible: sim30.roundTripsConsidered, percent: sim30.roundTripsConsidered > 0 ? Math.round(sim30.copiedTrades / sim30.roundTripsConsidered * 1000) / 10 : null } : null, edge, reading, survivedPnl: portfolioPnl, impossible, fragile, survivedDelay, sim, walletMedian };
+  });
+  const unifiedTraderRows = sortedGmgnStatsRows.map((row) => {
+    const periods = gmgnStatsByWallet.get(row.walletAddress);
+    const short = periods?.get('7d');
+    const long = periods?.get('30d');
+    const leaderboard = gmgnLeaderboardMetrics[row.walletAddress];
+    const leaderboardPnl7d = typeof leaderboard?.pnl7d === 'number' ? leaderboard.pnl7d : typeof leaderboard?.pnl7d === 'string' && leaderboard.pnl7d.trim() !== '' ? Number(leaderboard.pnl7d) : NaN;
+    const leaderboardPnl30d = typeof leaderboard?.pnl30d === 'number' ? leaderboard.pnl30d : typeof leaderboard?.pnl30d === 'string' && leaderboard.pnl30d.trim() !== '' ? Number(leaderboard.pnl30d) : NaN;
+    const historical7d = short?.realizedProfitPnlPercent ?? (Number.isFinite(leaderboardPnl7d) ? leaderboardPnl7d * 100 : null);
+    const historical30d = long?.realizedProfitPnlPercent ?? (Number.isFinite(leaderboardPnl30d) ? leaderboardPnl30d * 100 : null);
+    const delay = copyDelayRows.find((entry) => entry.row.walletAddress === row.walletAddress) ?? null;
+    const hasStats = Boolean(long);
+    const coverage = delay?.coverage ?? null;
+    const sample = delay?.sim?.roundTripsConsidered ?? 0;
+    const enoughEvidence = coverage !== null && coverage >= COPY_EVIDENCE_MIN_COVERAGE_PERCENT
+      && sample >= COPY_EVIDENCE_MIN_ROUND_TRIPS && delay?.sim?.gasCostComplete === true;
+    const freshStats = Boolean(long?.fetchedAt && Date.now() - Date.parse(long.fetchedAt) >= 0 && Date.now() - Date.parse(long.fetchedAt) <= 24 * 60 * 60 * 1000);
+    const duneEvidenceAt = copySimulationRunStatus?.finishedAt
+      ?? copySimulationRunStatus?.persistedRun?.completedAt
+      ?? copySimulation30d?.computedAt
+      ?? null;
+    const duneFresh = Boolean(duneEvidenceAt && Date.now() - Date.parse(duneEvidenceAt) >= 0 && Date.now() - Date.parse(duneEvidenceAt) <= 24 * 60 * 60 * 1000);
+    const historyIncomplete = row.truncated === true || row.historyFailed === true || row.failedRules.includes('requested history window incomplete');
+    // The 30-day decision may only use the exact 30-day GMGN statistic. Leaderboard PnL is
+    // useful context, but it has a different provenance and must not make an old/missing 30d
+    // statistic look current or positive.
+    const historicalPositive = long?.realizedProfitPnlPercent !== null
+      && long?.realizedProfitPnlPercent !== undefined
+      && long.realizedProfitPnlPercent > 0;
+
+    // Three gates added so "Passed all tests" can actually support the sentence a reader takes
+    // from it — "this wallet consistently made money over the last 30 days". Before these, the
+    // verdict only required the SUM to be positive, which an audit against live data showed was
+    // materially weaker than it reads: of 28 passing wallets, 9 had a negative delayed-copy
+    // median (their typical copied trade lost money and only a few large winners carried the
+    // total), and 13 had at least one losing week.
+    //
+    // 1. Typical trade must profit, not just the total. Guards the median-vs-total divergence
+    //    this project already has a standing rule about.
+    const copyMedianPositive = delay?.sim?.simulatedMedianReturnPercent != null
+      && delay.sim.simulatedMedianReturnPercent > 0;
+    // 2. The wallet's earlier and recent halves must BOTH hold up — this is exactly what
+    //    historicalConsistency already computes; it simply was never wired into this verdict.
+    //    'insufficient' deliberately does not pass: unknown is not the same as consistent.
+    //
+    // historicalConsistency loads in the background (see the wallet-stats effect above) and,
+    // measured live, a cold cache on this endpoint can take several minutes on a server that is
+    // concurrently mid-fetch. Until the report has actually arrived, `historicalConsistencyByWallet`
+    // is empty for every wallet — silently reading that as "not consistent" would make a
+    // genuinely consistent wallet flash "Watch" for however long the load takes. `Needs data` is
+    // the honest state for "not measured yet", exactly as `hasStats`/`enoughEvidence` already
+    // treat their own not-yet-loaded evidence.
+    const consistencyDataMissing = historicalConsistency === null;
+    const consistencyVerdict = historicalConsistencyByWallet.get(row.walletAddress)?.verdict ?? null;
+    const historicallyConsistent = consistencyVerdict === 'consistent';
+    // 3. No losing week inside the window. Uses the wallet's own weekly medians, and requires at
+    //    least MIN_CONSISTENT_WEEKS measured weeks so a wallet with one good week cannot pass by
+    //    having no negative week to show.
+    const measuredWeeks = (row.weeklyPerformance ?? []).filter((week) => week.trades > 0);
+    const noLosingWeek = measuredWeeks.length >= MIN_CONSISTENT_WEEKS
+      && measuredWeeks.every((week) => (week.medianReturnPercent ?? 0) > 0);
+    const consistentlyProfitable = copyMedianPositive && historicallyConsistent && noLosingWeek;
+
+    const verdict = historyIncomplete
+      ? 'Needs data'
+      : delay?.impossible
+        ? 'Not copyable'
+      : !hasStats || !enoughEvidence
+        ? 'Needs data'
+        : !freshStats || !duneFresh
+          ? 'Historical / stale'
+          // Everything except historical consistency already qualifies this wallet: if that one
+          // input just hasn't arrived yet, say so honestly rather than reporting the negative
+          // 'Watch' a not-yet-loaded value would otherwise silently produce.
+          : delay?.survivedDelay && historicalPositive && copyMedianPositive && noLosingWeek && consistencyDataMissing
+            ? 'Needs data'
+            : delay?.survivedDelay && historicalPositive && consistentlyProfitable
+              ? 'Tested candidate'
+              : historicalPositive
+                ? 'Watch'
+                : 'Historical screen failed';
+    const priority = verdict === 'Tested candidate' ? 0 : verdict === 'Watch' ? 1 : verdict === 'Needs data' ? 2 : verdict === 'Historical / stale' ? 3 : 4;
+    return { row, name: row.name?.trim() || shortAddress(row.walletAddress), short, long, historical7d, historical30d, delay, coverage, sample, freshStats, duneFresh, duneEvidenceAt, historyIncomplete, verdict, priority };
+  });
+  // Scrutiny mirrors the complete 30-day Wallet Stats population.
+  useEffect(() => {
+    if (copyTradeSubTab !== 'scrutiny' || !walletStatsReady || unifiedTraderRows.length === 0) return;
+    const source = unifiedTraderRows.map((entry) => entry.row.walletAddress).slice(0, MAX_SCRUTINY_WALLETS_UI);
+    setScrutinyPinned((current) => current.length === source.length && current.every((wallet, index) => wallet === source[index]) ? current : source);
+  }, [copyTradeSubTab, walletStatsReady, unifiedTraderRows]);
+  const decisionSortValue = (entry: typeof unifiedTraderRows[number]): string | number | null => {
+    if (decisionSort.key === 'default') return entry.priority;
+    if (decisionSort.key === 'rank') return entry.row.rankHistory.currentRank;
+    if (decisionSort.key === 'name') return entry.name;
+    if (decisionSort.key === 'verdict') return entry.verdict;
+    if (decisionSort.key === 'gmgnPnl') return entry.long?.realizedProfit ?? entry.historical30d;
+    // The table displays the delayed simulated median return in this column. Sort by that
+    // same value; portfolio net P&L is a separate winner/ranking metric and must not make the
+    // visible percentages appear out of order.
+    if (decisionSort.key === 'copyResult') return entry.delay?.sim?.simulatedMedianReturnPercent ?? null;
+    if (decisionSort.key === 'copyCapital') return entry.delay?.sim?.portfolio?.endingCapitalUsd ?? null;
+    if (decisionSort.key === 'coverage') return entry.coverage;
+    return entry.delay?.hold ?? null;
+  };
+  const sortedUnifiedTraderRows = [...unifiedTraderRows].sort((left, right) => {
+    const leftValue = decisionSortValue(left); const rightValue = decisionSortValue(right);
+    const comparison = leftValue === null && rightValue === null ? left.name.localeCompare(right.name) : leftValue === null ? 1 : rightValue === null ? -1 : typeof leftValue === 'number' && typeof rightValue === 'number' ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue));
+    return (decisionSort.direction === 'asc' ? 1 : -1) * comparison || left.name.localeCompare(right.name);
+  });
+  const winnerRankedRows = [...unifiedTraderRows].sort((left, right) => {
+    const priority = left.priority - right.priority;
+    if (priority !== 0) return priority;
+    const returnGap = (right.delay?.survivedPnl ?? Number.NEGATIVE_INFINITY) - (left.delay?.survivedPnl ?? Number.NEGATIVE_INFINITY);
+    if (returnGap !== 0) return returnGap;
+    const copyGap = (right.delay?.sim?.simulatedMeanReturnPercent ?? Number.NEGATIVE_INFINITY) - (left.delay?.sim?.simulatedMeanReturnPercent ?? Number.NEGATIVE_INFINITY);
+    if (copyGap !== 0) return copyGap;
+    const coverageGap = (right.coverage ?? Number.NEGATIVE_INFINITY) - (left.coverage ?? Number.NEGATIVE_INFINITY);
+    if (coverageGap !== 0) return coverageGap;
+    return (left.row.rankHistory.currentRank ?? Number.POSITIVE_INFINITY) - (right.row.rankHistory.currentRank ?? Number.POSITIVE_INFINITY) || left.name.localeCompare(right.name);
+  });
+  const unifiedVerdictCounts = unifiedTraderRows.reduce<Record<string, number>>((counts, entry) => { counts[entry.verdict] = (counts[entry.verdict] ?? 0) + 1; return counts; }, {});
+  const researchVerdictChanges = researchUpdateSummary
+    ? unifiedTraderRows.filter((entry) => researchUpdateSummary.beforeVerdictByWallet[entry.row.walletAddress] && researchUpdateSummary.beforeVerdictByWallet[entry.row.walletAddress] !== entry.verdict)
+      .map((entry) => ({ name: entry.name, from: researchUpdateSummary.beforeVerdictByWallet[entry.row.walletAddress], to: entry.verdict }))
+    : [];
+  const walletStatsTableLoading = !walletStatsReady || (copyTradeLoading && !copyTradeResults) || researchUpdateBusy;
+  const researchVerdictLabels = (counts: Record<string, number>) => Object.entries(counts).filter(([, count]) => count > 0).map(([label, count]) => `${count} ${label}`).join(' · ') || 'none';
+  const primary30dWinner = winnerRankedRows.find((entry) => entry.verdict === 'Tested candidate') ?? null;
+  const selectedCopyDelayEntry = selectedCopyDelayWallet
+    ? copyDelayRows.find((entry) => entry.row.walletAddress === selectedCopyDelayWallet) ?? null
+    : null;
+  const copyDelaySortValue = (entry: typeof copyDelayRows[number]): string | number | null => {
+    if (copyDelaySort.key === 'trader') return entry.name;
+    if (copyDelaySort.key === 'totalTrades7d') return entry.totalTrades7d;
+    if (copyDelaySort.key === 'totalTrades30d') return entry.totalTrades30d;
+    if (copyDelaySort.key === 'medianHold') return entry.hold;
+    if (copyDelaySort.key === 'delayShare') return entry.delayShare;
+    if (copyDelaySort.key === 'edge') return entry.edge;
+    return entry.reading;
+  };
+  const sortedCopyDelayRows = [...copyDelayRows].sort((left, right) => {
+    const leftValue = copyDelaySortValue(left);
+    const rightValue = copyDelaySortValue(right);
+    let comparison = 0;
+    if (leftValue === null && rightValue === null) comparison = left.row.walletAddress.localeCompare(right.row.walletAddress);
+    else if (leftValue === null) comparison = 1;
+    else if (rightValue === null) comparison = -1;
+    else if (typeof leftValue === 'number' && typeof rightValue === 'number') comparison = leftValue - rightValue;
+    else comparison = String(leftValue).localeCompare(String(rightValue));
+    return (copyDelaySort.direction === 'asc' ? 1 : -1) * comparison;
+  });
+  const hasPositiveCopyGain = (entry: { delay?: { sim?: { portfolio?: { realizedPnlUsd?: number | null } | null } | null } | null }): boolean => {
+    const pnl = entry.delay?.sim?.portfolio?.realizedPnlUsd;
+    return pnl !== null && pnl !== undefined && Number.isFinite(pnl) && pnl > 0;
+  };
+  const hasPositiveCopyDelayGain = (entry: typeof copyDelayRows[number]): boolean => {
+    const pnl = entry.sim?.portfolio?.realizedPnlUsd;
+    return pnl !== null && pnl !== undefined && Number.isFinite(pnl) && pnl > 0;
+  };
+  const visibleDecisionRows = showDelaySurvivorsOnly
+    ? sortedUnifiedTraderRows.filter(hasPositiveCopyGain)
+    : sortedUnifiedTraderRows;
+  const duneScopeWalletSet = new Set(researchWalletAddresses);
+  const duneNeedsDataCount = unifiedTraderRows.filter((entry) => duneScopeWalletSet.has(entry.row.walletAddress) && decisionStateFor(entry.verdict) === 'needs_data').length;
+  const duneNeedsDataWalletAddresses = unifiedTraderRows.filter((entry) => duneScopeWalletSet.has(entry.row.walletAddress) && decisionStateFor(entry.verdict) === 'needs_data').map((entry) => entry.row.walletAddress);
+  const duneResultWalletSet = new Set((copySimulation?.wallets ?? []).map((wallet) => wallet.walletAddress));
+  const duneResultCount = researchWalletAddresses.filter((wallet) => duneResultWalletSet.has(wallet)).length;
+  const copyDelaySurvivorWallets = new Set(copyDelayRows.filter(hasPositiveCopyDelayGain).map((entry) => entry.row.walletAddress));
+  const visibleGmgnStatsRows = showDelaySurvivorsOnly
+    ? sortedGmgnStatsRows.filter((row) => copyDelaySurvivorWallets.has(row.walletAddress))
+    : sortedGmgnStatsRows;
+  const visibleCopyDelayRows = showDelaySurvivorsOnly
+    ? sortedCopyDelayRows.filter(hasPositiveCopyDelayGain)
+    : sortedCopyDelayRows;
+  const copyDelayByWallet = new Map(copyDelayRows.map((entry) => [entry.row.walletAddress, entry]));
+  const visibleCombinedStatsRows = visibleGmgnStatsRows.map((row) => ({ row, delay: copyDelayByWallet.get(row.walletAddress) ?? null }));
+  // Drain every eligible wallet. Sort by the saved GMGN 7-day activity count so small
+  // wallets finish first; unknown counts are retained at the end rather than silently dropped.
+  const copyDelayDuneEligibleWallets = [...copyDelayRows]
+    .sort((left, right) => (left.totalTrades7d ?? Number.POSITIVE_INFINITY) - (right.totalTrades7d ?? Number.POSITIVE_INFINITY))
+    .map((entry) => entry.row.walletAddress);
+  const wideRetryExhausted = copySimulationRunStatus?.mode === 'wide_retry'
+    && !copySimulationRunStatus.running
+    && copySimulationRunStatus.retryableTargetsRemaining === 0;
+  const wideRetryRemaining = copySimulationRunStatus?.mode === 'wide_retry'
+    ? copySimulationRunStatus.retryableTargetsRemaining
+    : null;
+  const toggleCopyDelaySort = (key: CopyDelaySortKey) => setCopyDelaySort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
+  const copyDelaySortIndicator = (key: CopyDelaySortKey) => copyDelaySort.key === key ? (copyDelaySort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+  const exportCopyDelayCsv = () => {
+    if (visibleCopyDelayRows.length === 0) return;
+    saveCsv(visibleCopyDelayRows.map((entry) => ({
+      trader: entry.name,
+      wallet_address: entry.row.walletAddress,
+      gmgn_total_trades_7d: entry.totalTrades7d,
+      gmgn_total_trades_30d: entry.totalTrades30d,
+      median_hold_seconds: entry.hold,
+      delay_share_percent: entry.delayShare,
+      copy_coverage_percent: entry.coverage,
+      edge_kept_percent: entry.edge,
+      reading: entry.reading,
+    })), `copy-delay-feasibility-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
+  };
+  const exportUnifiedTraderCsv = async () => {
+    if (sortedUnifiedTraderRows.length === 0) return;
+    setExportBusy(true);
+    try {
+      const histories = await Promise.all(sortedUnifiedTraderRows.map(async (entry) => {
+        try { return await api<CopyTradeHistoryResponse>(`/api/copytrade/trades/${encodeURIComponent(entry.row.walletAddress)}`); }
+        catch { return null; }
+      }));
+      saveCsv(sortedUnifiedTraderRows.map((entry, index) => {
+        const history = histories[index];
+        const sells = history?.rows.filter((trade) => trade.eventType.toLowerCase().startsWith('sell')) ?? [];
+        const holds = history ? holdingSecondsBySellId(history.rows) : new Map<number, number>();
+        const sellHistory = sells.map((trade) => ({
+          id: trade.id, observed_timestamp: trade.observedTimestamp, token_address: trade.tokenAddress,
+          token_symbol: trade.tokenSymbol, hold_seconds: holds.get(trade.id) ?? null,
+          realized_return_percent: tradeReturnPercent(trade.eventType, trade.costUsd, trade.buyCostUsd),
+          transaction: trade.txHash,
+        }));
+        return {
+          trader: entry.name,
+          wallet_address: entry.row.walletAddress,
+          verdict: entry.verdict,
+          gmgn_7d_return_percent: entry.historical7d,
+          gmgn_30d_context_percent: entry.historical30d,
+          gmgn_7d_json: entry.short ? JSON.stringify(entry.short) : null,
+          gmgn_30d_json: entry.long ? JSON.stringify(entry.long) : null,
+          risk_evidence_json: entry.row.riskEvidence ? JSON.stringify(entry.row.riskEvidence) : null,
+          copy_evidence_json: entry.delay?.sim ? JSON.stringify(entry.delay.sim) : null,
+          dune_matched_round_trips: entry.delay?.sim?.copiedTrades ?? null,
+          dune_round_trips_considered: entry.delay?.sim?.roundTripsConsidered ?? null,
+          dune_coverage_percent: entry.coverage,
+          median_hold_seconds: entry.delay?.hold,
+          evidence_fresh_within_24h: entry.freshStats,
+          stored_sell_history_json: JSON.stringify(sellHistory),
+          stored_history_coverage_json: history?.coverage ? JSON.stringify(history.coverage) : null,
+        };
+      }), `copytrade-candidates-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
+    } finally { setExportBusy(false); }
+  };
+  const delayExample = sortedGmgnStatsRows.map((row) => {
+    const holdSeconds = row.riskEvidence?.medianHoldSeconds ?? null;
+    const delaySeconds = copySimulation?.assumptions.copierDelaySeconds ?? 15;
+    return {
+      row,
+      holdSeconds,
+      delaySeconds,
+      delayShare: holdSeconds !== null && Number.isFinite(holdSeconds) && holdSeconds > 0 ? (delaySeconds / holdSeconds) * 100 : null,
+      walletAgeDays: row.riskEvidence?.walletAgeDays ?? null,
+    };
+  }).find((example) => example.holdSeconds !== null) ?? null;
+  const toggleGmgnStatsSort = (key: GmgnStatsSortKey) => setGmgnStatsSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
+  const gmgnStatsSortIndicator = (key: GmgnStatsSortKey) => gmgnStatsSort.key === key ? (gmgnStatsSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+  const gmgnStatsRowsWithData = copyTradeRows.filter((row) => gmgnLeaderboardMetrics[row.walletAddress] || gmgnStatsByWallet.has(row.walletAddress)).length;
+  const gmgnStatsFreshRows = copyTradeRows.filter((row) => {
+    const periods = gmgnStatsByWallet.get(row.walletAddress);
+    const fetched = periods?.get('30d')?.fetchedAt ?? periods?.get('7d')?.fetchedAt;
+    return fetched ? Date.now() - Date.parse(fetched) < 24 * 60 * 60 * 1000 : false;
+  }).length;
+  const exportGmgnAggregateCsv = () => {
+    if (!copyTradeResults || sortedCopyTradeRows.length === 0) return;
+    const rows: Array<Record<string, unknown>> = sortedGmgnAggregateRows.map((row) => {
+      const stats = row.gmgnAggregate;
+      const traderName = row.name?.trim() || shortAddress(row.walletAddress);
+      return {
+        model: 'gmgn_reported_aggregate',
+        starting_capital_usd: 100,
+        gmgn_period: stats?.period ?? null,
+        fetched_at: stats?.fetchedAt ?? null,
+        trader_name: traderName,
+        wallet_address: row.walletAddress,
+        realized_profit: stats?.realizedProfit ?? null,
+        realized_profit_pnl_percent: stats?.realizedProfitPnlPercent ?? null,
+        hundred_dollar_equivalent: stats?.realizedProfitPnlPercent === null || stats?.realizedProfitPnlPercent === undefined ? null : 100 * (1 + stats.realizedProfitPnlPercent / 100),
+        win_rate_percent: stats?.winRatePercent ?? null,
+        buy_count: stats?.buyCount ?? null,
+        sell_count: stats?.sellCount ?? null,
+        token_count: stats?.tokenCount ?? null,
+        native_balance: stats?.nativeBalance ?? null,
+        bought_cost: stats?.boughtCost ?? null,
+        sold_income: stats?.soldIncome ?? null,
+        bought_fee: stats?.boughtFee ?? null,
+        sold_fee: stats?.soldFee ?? null,
+        average_holding_period_seconds: stats?.averageHoldingPeriodSeconds ?? null,
+      };
+    });
+    saveCsv(rows, `copytrade-gmgn-aggregate-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
+  };
+
+  const loadGmgnStats = async (limitOverride = copyTradeLimit, snapshotOverride = selectedRosterSnapshotId) => {
+    setGmgnStatsLoading(true);
+    try {
+      const query = `?limit=${limitOverride}${snapshotOverride ? `&snapshotId=${snapshotOverride}` : ''}`;
+      const result = await api<{ stats: GmgnStatsRecord[]; leaderboard: Record<string, GmgnLeaderboardMetric> }>(`/api/copytrade/stats${query}`);
+      setGmgnStatsRecords(result.stats);
+      setGmgnLeaderboardMetrics(result.leaderboard ?? {});
+      setGmgnStatsStatus(await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status'));
+      return result;
+    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
+    finally { setGmgnStatsLoading(false); }
+    return null;
+  };
+
+  function buildWalletScreenSummary(records: GmgnStatsRecord[], walletCount: number): WalletScreenSummary {
+    const periodRows = records.filter((record) => record.period === '30d');
+    const aggregateRows = periodRows.map(parseAggregateRecord).filter((row): row is GmgnAggregateStats => row !== null);
+    const fastWallets = aggregateRows.filter((row) => row.averageHoldingPeriodSeconds !== null && row.averageHoldingPeriodSeconds < 60).length;
+    const activityLeaders = periodRows.map((record) => ({ record, aggregate: parseAggregateRecord(record) })).filter((row): row is { record: GmgnStatsRecord; aggregate: GmgnAggregateStats } => row.aggregate !== null).map(({ record, aggregate }) => { const trader = copyTradeRows.find((row) => row.walletAddress === record.walletAddress); return { wallet: record.walletAddress, name: trader?.name ?? null, trades: (aggregate.buyCount ?? 0) + (aggregate.sellCount ?? 0), rank: trader?.rankHistory.currentRank ?? null, netProfit: aggregate.realizedProfit, averageHoldSeconds: aggregate.averageHoldingPeriodSeconds }; }).sort((left, right) => right.trades - left.trades);
+    const lastFetchedAt = periodRows.map((row) => row.fetchedAt).sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+    return { completedAt: new Date().toISOString(), snapshotId: selectedRosterSnapshotId, walletCount, statsWalletCount: aggregateRows.length, fastWallets, notFastWallets: Math.max(0, aggregateRows.length - fastWallets), missingStatsWallets: Math.max(0, walletCount - aggregateRows.length), totalTrades: activityLeaders.reduce((sum, row) => sum + row.trades, 0), maxTrades: activityLeaders[0]?.trades ?? 0, maxTradesWallet: activityLeaders[0]?.wallet ?? null, activityLeaders, periodDays: 30, averageHoldThresholdSeconds: 60, lastFetchedAt };
+  }
+
+  const startGmgnStatsFetch = async (limitOverride = copyTradeLimit, snapshotOverride = selectedRosterSnapshotId): Promise<boolean> => {
+    setGmgnStatsBusy(true);
+    try {
+      const body = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/fetch', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ limit: limitOverride, snapshotId: snapshotOverride ?? undefined, periods: ['7d', '30d'], maxAgeHours: 24 }),
+      });
+      setGmgnStatsStatus(body);
+      return true;
+    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); return false; }
+    finally { setGmgnStatsBusy(false); }
+  };
+
+  const waitForGmgnStats = async () => {
+    let status = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
+    while (status.running) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      status = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
+      setGmgnStatsStatus(status);
+      await loadGmgnStats();
+    }
+    setGmgnStatsStatus(status);
+    return status;
+  };
+
+  const stopGmgnStatsFetch = async () => {
+    try { setGmgnStatsStatus(await api<GmgnStatsFetchStatus>('/api/copytrade/stats/stop', { method: 'POST' })); }
+    catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
+  };
+
+  const syncLatestWalletRoster = async (useSavedSnapshot = false): Promise<{ snapshotId: number | null; walletCount: number; added: number; alreadyPresent: number } | null> => {
+    setRosterSyncBusy(true);
+    setRosterRefreshMessage('Contacting GMGN for the current top 100…');
+    setRosterRefreshError(null);
+    setCopyTradeError(null);
+    try {
+      const result = await api<{ snapshotId: number | null; added?: number; alreadyPresent?: number; total?: number; walletCount?: number; inserted?: boolean; live?: boolean; fallbackReason?: string; capturedAt?: string; joinedWallets?: string[]; leftWallets?: string[]; roster?: { snapshotId: number | null; added: number; alreadyPresent: number; total: number }; researchFilter?: { orderby: string; minWinrate30d: number } }>('/api/copytrade/roster/refresh', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ limit: 100, useSavedSnapshot }),
+      });
+      setCopyTradeLimit(100);
+      // The response contains two different IDs: snapshotId is the raw GMGN leaderboard
+      // capture, while roster.snapshotId is the copytrade_wallets snapshot used by stats and
+      // Dune selection. Mixing them makes the saved stats appear empty and disables step 2.
+      const rosterSnapshotId = result.roster?.snapshotId ?? null;
+      if (rosterSnapshotId !== null) setSelectedRosterSnapshotId(rosterSnapshotId);
+      setRosterChange({ joinedWallets: result.live ? (result.joinedWallets ?? []) : [], leftWallets: result.live ? (result.leftWallets ?? []) : [], live: result.live === true, capturedAt: result.capturedAt ?? null });
+      const refreshMessage = result.snapshotId === null
+        ? 'GMGN returned no usable wallet leaderboard; no roster was changed.'
+        : result.live === false
+          ? `Used approved saved snapshot ${result.snapshotId} from ${result.capturedAt ? formatTime(result.capturedAt) : 'the latest capture'}: ${result.walletCount ?? result.roster?.total ?? result.total ?? 0} wallets. No old data was overwritten.`
+          : `Success: GMGN top ${result.walletCount ?? result.roster?.total ?? result.total ?? 0} saved as snapshot ${result.snapshotId}. ${result.roster?.added ?? result.added ?? 0} new wallet${(result.roster?.added ?? result.added ?? 0) === 1 ? '' : 's'} · ${result.roster?.alreadyPresent ?? result.alreadyPresent ?? 0} already known. Older snapshots were kept.`;
+      setRosterRefreshMessage(refreshMessage);
+      setMessage(refreshMessage);
+      await loadCopyTradePage();
+      await loadGmgnStats();
+      return {
+        snapshotId: rosterSnapshotId,
+        walletCount: result.walletCount ?? result.roster?.total ?? result.total ?? 0,
+        added: result.roster?.added ?? result.added ?? 0,
+        alreadyPresent: result.roster?.alreadyPresent ?? result.alreadyPresent ?? 0,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!useSavedSnapshot && window.confirm(`Live GMGN top-100 fetch failed. Read the latest saved local snapshot instead?\n\nThis will not fetch new wallets.`)) {
+        return syncLatestWalletRoster(true);
+      }
+      setRosterRefreshError(`Refresh failed: ${errorMessage}. The previous roster was left unchanged.`);
+      setRosterRefreshMessage(null);
+      setCopyTradeError(errorMessage);
+      return null;
+    }
+    finally { setRosterSyncBusy(false); }
+  };
+
+  const openRosterComparison = async () => {
+    setRosterComparisonLoading(true);
+    try {
+      setRosterComparison(await api<RosterComparison>('/api/copytrade/roster/compare'));
+      setRosterComparisonOpen(true);
+    } catch (error: unknown) { setCopyTradeError(error instanceof Error ? error.message : String(error)); }
+    finally { setRosterComparisonLoading(false); }
+  };
+
+  const screenTopWallets = async () => {
+    if (researchUpdateBusy) return;
+    setResearchUpdateBusy(true);
+    setCopyTradeError(null);
+    try {
+      setResearchUpdateStage('Refreshing the top 100 GMGN roster…');
+      setWalletScreenSummary(null);
+      const rosterResult = await syncLatestWalletRoster();
+      if (!rosterResult) throw new Error('GMGN roster refresh failed.');
+      setResearchUpdateStage('Fetching complete GMGN trade history for all 100 wallets…');
+      const historyStatus = await fetchTop100GmgnHistoryAndWait(30);
+      if (historyStatus.status !== 'completed') {
+        setResearchUpdateStage(`GMGN history ${historyStatus.status}. Saved progress is retained; resume it when ready.`);
+        return;
+      }
+      if ((historyStatus.failedWallets ?? 0) > 0) setMessage(`${historyStatus.failedWallets} GMGN wallet fetches failed and were skipped; they are marked as failed.`);
+      setResearchUpdateStage('Fetching 7-day and 30-day GMGN summaries…');
+      const statsStatus = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
+      if (!statsStatus.running && !(await startGmgnStatsFetch(100, rosterResult.snapshotId))) throw new Error('GMGN summary fetch could not be started.');
+      const completedStats = await waitForGmgnStats();
+      if (completedStats.status === 'failed') throw new Error(completedStats.error ?? `GMGN summary fetch ${completedStats.status}.`);
+      const statsResult = await loadGmgnStats(100, rosterResult.snapshotId);
+      const periodRows = (statsResult?.stats ?? []).filter((record) => record.period === '30d');
+      const aggregateRows = periodRows.map(parseAggregateRecord).filter((row): row is GmgnAggregateStats => row !== null);
+      const fastWallets = aggregateRows.filter((row) => row.averageHoldingPeriodSeconds !== null && row.averageHoldingPeriodSeconds < 60).length;
+      const missingStatsWallets = Math.max(0, rosterResult.walletCount - aggregateRows.length);
+      const totalTrades = aggregateRows.reduce((sum, row) => sum + (row.buyCount ?? 0) + (row.sellCount ?? 0), 0);
+      const activityRows = periodRows.map((record) => ({ record, aggregate: parseAggregateRecord(record) })).filter((row): row is { record: GmgnStatsRecord; aggregate: GmgnAggregateStats } => row.aggregate !== null).map(({ record, aggregate }) => { const trader = copyTradeRows.find((row) => row.walletAddress === record.walletAddress); return { wallet: record.walletAddress, name: trader?.name ?? null, trades: (aggregate.buyCount ?? 0) + (aggregate.sellCount ?? 0), rank: trader?.rankHistory.currentRank ?? null, netProfit: aggregate.realizedProfit, averageHoldSeconds: aggregate.averageHoldingPeriodSeconds }; }).sort((left, right) => right.trades - left.trades);
+      const summary: WalletScreenSummary = { ...buildWalletScreenSummary(statsResult?.stats ?? [], rosterResult.walletCount), completedAt: new Date().toISOString(), snapshotId: rosterResult.snapshotId, totalTrades, maxTrades: activityRows[0]?.trades ?? 0, maxTradesWallet: activityRows[0]?.wallet ?? null, activityLeaders: activityRows, missingStatsWallets };
+      setWalletScreenSummary(summary);
+      setResearchUpdateStage('Screening complete. Review the counts, then approve Dune research.');
+      setMessage(`Screened ${summary.statsWalletCount} wallets: ${summary.notFastWallets} not fast, ${summary.fastWallets} fast, ${summary.totalTrades.toLocaleString()} 30-day trades. Highest activity: ${summary.maxTrades.toLocaleString()}.`);
+      await loadCopyTradePage();
+      await loadGmgnStats(100, rosterResult.snapshotId);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCopyTradeError(message);
+      setResearchUpdateStage(`Screening stopped: ${message}`);
+    } finally { setResearchUpdateBusy(false); }
+  };
+
+  const approveAndResearch = async () => {
+    if (researchUpdateBusy || !visibleWalletScreenSummary) return;
+    if (researchUpdateBusy) return;
+    const screeningSummary = visibleWalletScreenSummary;
+    let approvedWalletAddresses = duneNeedsDataWalletAddresses;
+    // A localStorage triage result is only a hint. Before spending Dune budget, refresh it from
+    // the backend when its GMGN/Dune inputs are no longer current (including changes made in
+    // another browser session), then derive the actual fetch list from that fresh report.
+    if (skipEliminatedInDune && eliminationReport?.eliminated.length && !triageHasCurrentInputs) {
+      const freshTriage = await loadElimination(screeningSummary.snapshotId ?? selectedRosterSnapshotId);
+      if (!freshTriage) return;
+      const freshEliminated = new Set(freshTriage.eliminated.map((entry) => entry.walletAddress));
+      const manuallyExcluded = new Set(excludedScreeningWallets);
+      const manuallyIncluded = new Set(includedScreeningWallets);
+      const allWallets = duneNeedsDataWalletAddresses;
+      approvedWalletAddresses = allWallets.filter((wallet) => !manuallyExcluded.has(wallet)
+        && (!freshEliminated.has(wallet) || manuallyIncluded.has(wallet)));
+    }
+    if (approvedWalletAddresses.length === 0) {
+      setCopyTradeError('All screened wallets are excluded. Re-enable at least one candidate before researching.');
+      return;
+    }
+    setResearchUpdateBusy(true);
+    setResearchUpdateFailedStage(null);
+    setCopyTradeError(null);
+    let currentResearchStage = -1;
+    try {
+      currentResearchStage = 0;
+      setResearchUpdateStage('Fetching missing Dune prices…');
+      const beforeVerdictByWallet = Object.fromEntries(unifiedTraderRows.map((entry) => [entry.row.walletAddress, entry.verdict]));
+      const beforeVerdicts = { ...unifiedVerdictCounts };
+      const beforeRows = copyTradeRows.length;
+      const beforeStatsRows = gmgnStatsRowsWithData;
+      const beforeMatched = copySimulation?.duneMatchedTargets ?? 0;
+      setResearchUpdateSummary(null);
+      const duneResult = await runCopySimulationBatch(approvedWalletAddresses, 30, false, screeningSummary.snapshotId ?? selectedRosterSnapshotId);
+      currentResearchStage = 1;
+      setResearchUpdateStage('Refreshing the decision table…');
+      await loadCopyTradePage();
+      await loadGmgnStats();
+      // Refresh the exact approved wallet scope so the decision table immediately reflects
+      // the Dune results just stored; omitting walletAddresses would fall back to the server's
+      // narrower default candidate scope and leave many rows showing “Not measured”.
+      await loadCopySimulation(screeningSummary.snapshotId ?? selectedRosterSnapshotId, approvedWalletAddresses, 30);
+      setResearchUpdateSummary({
+        completedAt: new Date().toISOString(), rosterSnapshotId: screeningSummary.snapshotId,
+        rosterWalletCount: screeningSummary.walletCount, rosterAdded: 0,
+        rosterAlreadyPresent: screeningSummary.walletCount, statsStatus: 'completed',
+        statsWalletDone: screeningSummary.statsWalletCount, statsWalletTotal: screeningSummary.walletCount,
+        statsRequests: 0, statsReused: screeningSummary.statsWalletCount,
+        duneSubmitted: duneResult?.targetsSubmitted ?? 0, duneBatches: duneResult?.batchesRun ?? 0,
+        duneExhausted: duneResult?.exhausted ?? false, beforeRows, beforeStatsRows, beforeMatched,
+        beforeVerdicts, beforeVerdictByWallet, leaderboardOrderby: 'pnl_30d', leaderboardMinWinrate30d: 0.5,
+      });
+      setMessage('Research update complete. Saved evidence was reused; only missing or stale work was requested.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCopyTradeError(message);
+      setResearchUpdateFailedStage(currentResearchStage >= 0 ? currentResearchStage : null);
+      setResearchUpdateStage(`Update stopped: ${message}`);
+    } finally {
+      setResearchUpdateBusy(false);
+    }
+  };
+
   const toggleCopyTradeSort = (key: CopyTradeSortKey) => setCopyTradeSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
   const copyTradeSortIndicator = (key: CopyTradeSortKey) => copyTradeSort.key === key ? (copyTradeSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+  const toggleDecisionSort = (key: Exclude<DecisionSortKey, 'default'>) => setDecisionSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
+  const decisionSortIndicator = (key: Exclude<DecisionSortKey, 'default'>) => decisionSort.key === key ? (decisionSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
   const toggleTopCallerTableSort = (key: TopCallerTableSortKey) => {
     setTopCallerTableSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
     setTopCallerAllPage(0);
@@ -1694,21 +3520,71 @@ function App() {
   const winnerSimulationWallets = copySimulation && copyWinners
     ? copySimulation.wallets.filter((wallet) => copyWinners.candidates.some((candidate) => candidate.walletAddress === wallet.walletAddress))
     : [];
-  const copyTradeProgressPercent = copyTradeStatus && (copyTradeStatus.walletTotal ?? 0) > 0 ? Math.min(100, (copyTradeStatus.walletDone ?? 0) / (copyTradeStatus.walletTotal ?? 1) * 100) : null;
+  const currentDuneBatch = copySimulationRunStatus?.batches.find((batch) => batch.status === 'running')
+    ?? copySimulationRunStatus?.batches.at(-1)
+    ?? null;
+  // All Dune evidence counters come from the backend's canonical leg-level snapshot. The UI
+  // must not reconstruct them from round-trip rows, because one round trip contains two legs.
+  const duneMatchedTargets = copySimulation?.duneMatchedTargets ?? 0;
+  const preciseTargetsRemaining = copySimulation?.pendingDuneTargets ?? null;
+  const widerRetryCandidates = copySimulation?.duneNoMatchTargets ?? null;
+  const duneHasNewTargets = preciseTargetsRemaining === null || preciseTargetsRemaining > 0;
+  const duneRunActive = researchUpdateBusy || copySimulationRunStatus?.running === true;
+  const copyTradeProgressPercent = copyTradeStatus?.totalTradeProgressPercent ?? (copyTradeStatus && (copyTradeStatus.walletTotal ?? 0) > 0 ? Math.min(100, (copyTradeStatus.walletDone ?? 0) / (copyTradeStatus.walletTotal ?? 1) * 100) : null);
+  const rosterFetchStatus = copyTradeStatus?.scope === 'roster' ? copyTradeStatus : null;
+  const rosterProgressPercent = rosterFetchStatus?.totalTradeProgressPercent ?? (rosterFetchStatus?.walletTotal ? Math.min(100, (rosterFetchStatus.walletDone ?? 0) / rosterFetchStatus.walletTotal * 100) : null);
+  const copyTradeProcessedRows = copyTradeStatus
+    ? (copyTradeStatus.tradesFetched ?? 0) + (copyTradeStatus.tradesDuplicate ?? 0) + (copyTradeStatus.tradesDailyCapped ?? 0)
+    : 0;
   const signalRoutes = new Set(['imports', 'capture', 'dune-capture', 'patterns']);
   const signalMenuActive = signalRoutes.has(activeMenu);
   const navigateSignal = () => navigateTo('dune-capture');
-  return <main className={`shell routed-view page-${activeMenu} ${focusedView ? 'focused-view' : ''}`}>
+  const researchStageIndex = researchUpdateStage?.startsWith('Refreshing the top 100') ? 0
+    : researchUpdateStage?.startsWith('Fetching complete GMGN trade history') ? 1
+      : researchUpdateStage?.startsWith('Fetching 7-day') ? 2
+        : researchUpdateStage?.startsWith('Fetching missing Dune') ? 3
+          : researchUpdateStage?.startsWith('Refreshing the decision') ? 4 : -1;
+  const researchStepState = (index: number): 'done' | 'active' | 'waiting' | 'failed' => {
+    if (researchUpdateFailedStage !== null) return index < researchUpdateFailedStage ? 'done' : index === researchUpdateFailedStage ? 'failed' : 'waiting';
+    if (!researchUpdateBusy && !researchUpdateStage?.startsWith('Update stopped:')) return 'done';
+    return index < researchStageIndex ? 'done' : index === researchStageIndex ? 'active' : 'waiting';
+  };
+  const researchStepDetail = (index: number, state: ReturnType<typeof researchStepState>): string => {
+    if (state === 'failed') return 'Failed; saved work was retained.';
+    if (index === 0) return state === 'done' ? 'Roster saved.' : state === 'active' ? 'Refreshing the top 100 roster…' : 'Waiting to select the roster.';
+    if (index === 1) {
+      if (copyTradeStatus?.running) return `${copyTradeStatus.walletDone ?? 0} / ${copyTradeStatus.walletTotal ?? 100} wallets · ${copyTradeStatus.tradesFetched ?? 0} new trades · ${copyTradeStatus.requestsMade ?? 0} requests`;
+      if (state === 'done') return `${copyTradeStatus?.walletDone ?? copyTradeStatus?.walletTotal ?? 0} wallets complete · saved in SQLite.`;
+      return state === 'active' ? 'Starting the GMGN history fetch…' : 'Waiting for the roster step.';
+    }
+    if (index === 2) {
+      if (gmgnStatsStatus?.running) return `${gmgnStatsStatus.walletDone} / ${gmgnStatsStatus.walletTotal} wallets · ${gmgnStatsStatus.requestsMade} requests`;
+      if (state === 'done') return `Complete · ${gmgnStatsStatus?.skippedFresh ?? 0} saved summaries reused.`;
+      return state === 'active' ? 'Starting the GMGN summary fetch…' : 'Waiting for GMGN history.';
+    }
+    if (index === 3) {
+      if (copySimulationRunStatus?.running) return `${copySimulationRunStatus.targetsProcessed} / ${copySimulationRunStatus.targetsTotal} Dune targets · ${copySimulationRunStatus.remainingTargets} remaining`;
+      if (state === 'done') return `Complete · ${copySimulationRunStatus?.storedTargets ?? 0} targets stored.`;
+      return state === 'active' ? 'Starting the Dune fetch…' : 'Waiting for approval and GMGN summaries.';
+    }
+    return state === 'done' ? 'Decision table refreshed.' : state === 'active' ? 'Recomputing decisions from saved evidence…' : 'Waiting for Dune results.';
+  };
+  return <main className={`shell routed-view page-${activeMenu} ${focusedView ? 'focused-view' : ''} ${WALLET_STATS_ONLY ? 'wallet-stats-only' : ''} ${WALLET_STATS_ONLY && copyTradeSubTab === 'scrutiny' ? 'lightweight-scrutiny' : ''} ${WALLET_STATS_ONLY && copyTradeSubTab === 'pattern-discovery' ? 'lightweight-pattern-discovery' : ''}`}>
     <header className="hero">
       <div>
         <p className="eyebrow">GMGN / DUNE · BACKTEST</p>
         <h1>GMGN/Dune Backtest</h1>
-        <p className="lede">A local collection desk for Solana cohort exports and GMGN observations. Every upload is persisted to SQLite, logged, and archived as a ZIP.</p>
+        <p className="lede">Find promising Solana wallets by comparing GMGN performance with realistic delayed-copy backtests.</p>
       </div>
       <div className="status-pill"><span className="dot" /> SQLite connected</div>
     </header>
 
     <nav className="section-nav" aria-label="Research desk sections">
+      {WALLET_STATS_ONLY ? <>
+      <button className={`nav-button ${copyTradeSubTab === 'wallet-stats' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('wallet-stats')}>CopyTrade · GMGN wallet stats</button>
+      <button className={`nav-button ${copyTradeSubTab === 'pattern-discovery' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('pattern-discovery')}>CopyTrade · Pattern Discovery</button>
+      <button className={`nav-button ${copyTradeSubTab === 'scrutiny' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('scrutiny')}>CopyTrade · Scrutiny</button>
+      </> : <>
       <button className={`nav-button advanced-toggle ${focusedView ? 'active' : ''}`} onClick={() => setFocusedView((current) => !current)}>{focusedView ? 'Main workflow' : 'Show all sections'}</button>
       <button className={`nav-button advanced-section ${activeMenu === 'overview' ? 'active' : ''}`} onClick={() => navigateTo('overview')}>Overview</button>
       <button className={`nav-button ${signalMenuActive ? 'active' : ''}`} onClick={navigateSignal}>Signal</button>
@@ -1717,8 +3593,9 @@ function App() {
       <button className={`nav-button advanced-section ${activeMenu === 'scoring' ? 'active' : ''}`} onClick={() => navigateTo('scoring')}>Scoring</button>
       <button className={`nav-button advanced-section ${activeMenu === 'evidence' ? 'active' : ''}`} onClick={() => navigateTo('evidence')}>Evidence</button>
       <button className={`nav-button advanced-section ${activeMenu === 'diagnostics' ? 'active' : ''}`} onClick={() => navigateTo('diagnostics')}>Diagnostics</button>
+      </>}
     </nav>
-    {signalMenuActive && <nav className="subsection-nav" aria-label="Signal workspace">
+    {!WALLET_STATS_ONLY && signalMenuActive && <nav className="subsection-nav" aria-label="Signal workspace">
       <span className="subsection-label">Signal</span>
       <button className={`nav-button ${activeMenu === 'imports' ? 'active' : ''}`} onClick={() => navigateTo('imports')}>Imports</button>
       <button className={`nav-button ${activeMenu === 'capture' ? 'active' : ''}`} onClick={() => navigateTo('capture')}>GMGN Capture</button>
@@ -1853,7 +3730,7 @@ function App() {
           <tr>
             {rawEndpointType === 'radar' && 'category' in row && <><td>{row.chain ?? '—'}</td><td>{row.period ?? '—'}</td><td>{row.category ?? '—'}</td></>}
             {rawEndpointType === 'wallet-rank' && 'window' in row && <><td>{row.window ?? '—'}</td><td>{row.orderby ?? '—'}</td></>}
-            {rawEndpointType === 'smart-money' && 'walletAddress' in row && <><td><span className="address-compact" title={row.walletAddress}>{row.walletAddress}</span></td><td>{row.chain ?? '—'}</td></>}
+            {rawEndpointType === 'smart-money' && 'walletAddress' in row && <><td><span className="address-compact" title={row.walletAddress}>{row.walletAddress}</span><CopyAddressButton address={row.walletAddress} /><SaveRowButton row={row} filename={`smart-money-${row.id}.json`} /></td><td>{row.chain ?? '—'}</td></>}
             {rawEndpointType === 'twitter' && 'twType' in row && <><td>{row.twType ?? '—'}</td><td>{row.hasToken === null ? '—' : row.hasToken ? 'yes' : 'no'}</td></>}
             <td>{formatTime(row.capturedAt)}</td>
             <td><button className="secondary" onClick={() => setRawEndpointExpandedId(rawEndpointExpandedId === row.id ? null : row.id)}>{rawEndpointExpandedId === row.id ? 'Hide raw' : 'Show raw'}</button></td>
@@ -2064,14 +3941,20 @@ function App() {
     <section id="copytrade" className="menu-section panel copytrade-panel">
       <div className="panel-heading"><div><p className="eyebrow">COPYTRADE · RESEARCH</p><h2>Top-trader copy research</h2></div><span className="tag">$100 START</span></div>
       <p className="compact-info-line"><span>Historical wallet research</span><InfoTip label="About CopyTrade research" text="Fetches GMGN trade history, preserves it in SQLite, and estimates what a $100 copy would have become. Results are descriptive research, not trading instructions." /></p>
-      <nav className="subsection-nav copytrade-subnav" aria-label="CopyTrade sections">
+      {!WALLET_STATS_ONLY ? <nav className="subsection-nav copytrade-subnav" aria-label="CopyTrade sections">
         <span className="subsection-label">CopyTrade</span>
         <button className={`nav-button ${copyTradeSubTab === 'research' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('research')}>Top-trader copy research</button>
-        <button className={`nav-button ${copyTradeSubTab === 'winners' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('winners')}>Winners</button>
-        <button className={`nav-button ${copyTradeSubTab === 'historical-consistency' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('historical-consistency')}>Historical consistency</button>
+        <button className={`nav-button ${copyTradeSubTab === 'wallet-stats' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('wallet-stats')}>GMGN wallet stats</button>
+        <button className={`nav-button ${copyTradeSubTab === 'pattern-discovery' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('pattern-discovery')}>Pattern Discovery</button>
         <button className={`nav-button ${copyTradeSubTab === 'forward-validation' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('forward-validation')}>Forward validation</button>
         <button className={`nav-button ${copyTradeSubTab === 'top-callers' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('top-callers')}>Top callers</button>
-      </nav>
+        <button className={`nav-button ${copyTradeSubTab === 'scrutiny' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('scrutiny')}>Scrutiny</button>
+      </nav> : <p className="copytrade-stats-only-label">Lightweight mode · GMGN wallet stats, Pattern Discovery, and Scrutiny are visible and loaded.</p>}
+      {copyTradeSubTab === 'research' && <div className={`copytrade-analysis-status ${copyTradeLoading ? 'running' : copyTradeResults ? 'complete' : 'idle'}`} role="status">
+        {copyTradeLoading ? <span className="loading-spinner" aria-hidden="true" /> : <span className="copytrade-analysis-status-dot" aria-hidden="true" />}
+        <div><strong>{copyTradeLoading ? 'Building CopyTrade report…' : copyTradeResults ? 'CopyTrade report ready' : 'CopyTrade report not loaded'}</strong>
+          <small>{copyTradeLoading ? 'Reading saved SQLite history and building the local representative sample. No GMGN request is being made.' : copyTradeResults?.representativeSampling ? `${formatCount(copyTradeResults.representativeSampling.selectedTrades)} of ${formatCount(copyTradeResults.representativeSampling.populationTrades)} stored sells selected locally; raw history is unchanged.` : 'Choose Refresh to load the saved report.'}</small></div>
+      </div>}
 
       {copyTradeSubTab === 'research' && <div className="copytrade-research-route">
       <div className="copytrade-fetch-box">
@@ -2096,7 +3979,7 @@ function App() {
               : 'No completed fetch yet; this is a seeded estimate that will sharpen after the first run.'} />
           </p>
         )}
-        {copyTradeStatus?.running && copyTradeStatus.scope === 'roster' && <div className="copytrade-progress"><div className="copytrade-progress-heading"><strong>Fetching trades</strong><span>{formatCount(copyTradeStatus.walletDone)}/{formatCount(copyTradeStatus.walletTotal)} wallets · {formatCount(copyTradeStatus.tradesFetched)} trades{copyTradeStatus.estimatedRemainingSeconds !== null && <> · ~{formatDuration(copyTradeStatus.estimatedRemainingSeconds)} remaining</>}</span></div><div className="copytrade-progress-track"><i style={{ width: `${copyTradeProgressPercent ?? 12}%` }} /></div><small>{copyTradeStatus.message || 'Saving each wallet and trade to SQLite.'}</small></div>}
+        {copyTradeStatus?.running && copyTradeStatus.scope === 'roster' && <div className="copytrade-progress"><div className="copytrade-progress-heading"><strong>Fetching complete GMGN history</strong><span>{formatCount(copyTradeStatus.walletDone)}/{formatCount(copyTradeStatus.walletTotal)} wallets · {formatCount(copyTradeStatus.tradesFetched)} new · {formatCount(copyTradeProcessedRows)} processed · {formatCount(copyTradeStatus.requestsMade)} GMGN requests</span></div><div className="copytrade-progress-track"><i style={{ width: `${copyTradeProgressPercent ?? 1}%` }} /></div><small>{copyTradeStatus.currentWalletAddress ? <>Current wallet {copyTradeStatus.currentWalletAddress.slice(0, 6)}…{copyTradeStatus.currentWalletAddress.slice(-4)}: {formatCount(copyTradeStatus.currentWalletStoredTrades)} / {formatCount(copyTradeStatus.currentWalletExpectedTrades)} trades · {copyTradeStatus.currentWalletProgressPercent === null || copyTradeStatus.currentWalletProgressPercent === undefined ? 'measuring' : `${copyTradeStatus.currentWalletProgressPercent.toFixed(1)}%`} · {copyTradeStatus.currentWalletEstimatedRemainingSeconds !== null ? `~${formatDuration(copyTradeStatus.currentWalletEstimatedRemainingSeconds)} left` : 'ETA calculating'}<br />All wallets: {formatCount(copyTradeStatus.storedTradesTotal)}{copyTradeStatus.estimateExceeded ? ' stored (estimate exceeded)' : <> / {formatCount(copyTradeStatus.expectedTradesTotal)} trades</>} · {copyTradeStatus.totalEstimatedRemainingSeconds !== null ? `~${formatDuration(copyTradeStatus.totalEstimatedRemainingSeconds)} left` : 'ETA calculating'}</> : (copyTradeStatus.message || 'Saving every API-delivered trade to SQLite. No local trade or request cap is applied.')}</small></div>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'roster' && copyTradeStatus.status === 'completed' && <small className="copytrade-fetch-summary">{copyTradeStatus.message}</small>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'roster' && copyTradeStatus.status === 'rate_limited' && <p className="copytrade-status-warning">Rate limited until {copyTradeStatus.rateLimitedUntil ? formatTime(copyTradeStatus.rateLimitedUntil) : '—'}. Retrying early can extend the wait.</p>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'roster' && copyTradeStatus.status === 'failed' && <p className="copytrade-status-warning">Fetch failed: {copyTradeStatus.message || 'See diagnostics for details.'}</p>}
@@ -2110,7 +3993,7 @@ function App() {
           <button className="primary" disabled={singleTraderBusy || !singleTraderQuery.trim() || copyTradeStatus?.running} onClick={() => void fetchSingleTrader()}>{singleTraderBusy ? 'Looking up…' : 'Fetch this trader'}</button>
         </div>
         <p className="compact-info-line"><span>Address/name lookup</span><InfoTip label="Lookup rules" text="Wallet-shaped input is used directly. Other text is matched only against names already captured from a real leaderboard snapshot; unknown names are never guessed." /></p>
-        {copyTradeStatus?.running && copyTradeStatus.scope === 'single' && <div className="copytrade-progress"><div className="copytrade-progress-heading"><strong>Fetching trades</strong><span>{formatCount(copyTradeStatus.walletDone)}/{formatCount(copyTradeStatus.walletTotal)} wallets · {formatCount(copyTradeStatus.tradesFetched)} trades</span></div><div className="copytrade-progress-track"><i style={{ width: `${copyTradeProgressPercent ?? 12}%` }} /></div><small>{copyTradeStatus.message || 'Saving trades to SQLite.'}</small></div>}
+        {copyTradeStatus?.running && copyTradeStatus.scope === 'single' && <div className="copytrade-progress"><div className="copytrade-progress-heading"><strong>Fetching trades</strong><span>{formatCount(copyTradeStatus.walletDone)}/{formatCount(copyTradeStatus.walletTotal)} wallets · {formatCount(copyTradeStatus.tradesFetched)} new · {formatCount(copyTradeProcessedRows)} processed · {formatCount(copyTradeStatus.requestsMade)} GMGN requests</span></div><div className="copytrade-progress-track"><i style={{ width: `${copyTradeProgressPercent ?? 12}%` }} /></div><small>{copyTradeStatus.message || 'Saving trades to SQLite.'}</small></div>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'single' && copyTradeStatus.status === 'completed' && <small className="copytrade-fetch-summary">{copyTradeStatus.message}</small>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'single' && copyTradeStatus.status === 'rate_limited' && <p className="copytrade-status-warning">Rate limited until {copyTradeStatus.rateLimitedUntil ? formatTime(copyTradeStatus.rateLimitedUntil) : '—'}. Retrying early can extend the wait.</p>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'single' && copyTradeStatus.status === 'failed' && <p className="copytrade-status-warning">Fetch failed: {copyTradeStatus.message || 'See diagnostics for details.'}</p>}
@@ -2127,7 +4010,7 @@ function App() {
       {copyTradeLoading && <p className="muted">Loading saved CopyTrade results…</p>}
       </div>}
 
-      {copyTradeSubTab === 'winners' && <div className="winners-route">
+      {copyTradeSubTab === 'research' && <div className="winners-route">
       <div className="copytrade-fetch-box">
         <div className="copytrade-fields">
           {copyTradeStatus?.running
@@ -2135,7 +4018,7 @@ function App() {
             : <button className="primary" disabled={winnersFetchBusy} onClick={() => void fetchWinnersTrades()}>{winnersFetchBusy ? 'Starting…' : "Fetch winners' trades"}</button>}
         </div>
         <p className="compact-info-line"><span>Current winners only</span><InfoTip label="Winner fetch scope" text="Fetches only wallets that currently qualify as Winners and only what is missing since each wallet's last fetch. It does not start a new top-N discovery run." /></p>
-        {copyTradeStatus?.running && copyTradeStatus.scope === 'winners' && <div className="copytrade-progress"><div className="copytrade-progress-heading"><strong>Fetching trades</strong><span>{formatCount(copyTradeStatus.walletDone)}/{formatCount(copyTradeStatus.walletTotal)} wallets · {formatCount(copyTradeStatus.tradesFetched)} trades{copyTradeStatus.estimatedRemainingSeconds !== null && <> · ~{formatDuration(copyTradeStatus.estimatedRemainingSeconds)} remaining</>}</span></div><div className="copytrade-progress-track"><i style={{ width: `${copyTradeProgressPercent ?? 12}%` }} /></div><small>{copyTradeStatus.message || 'Saving each wallet and trade to SQLite.'}</small></div>}
+        {copyTradeStatus?.running && copyTradeStatus.scope === 'winners' && <div className="copytrade-progress"><div className="copytrade-progress-heading"><strong>Fetching trades</strong><span>{formatCount(copyTradeStatus.walletDone)}/{formatCount(copyTradeStatus.walletTotal)} wallets · {formatCount(copyTradeStatus.tradesFetched)} new · {formatCount(copyTradeProcessedRows)} processed · {formatCount(copyTradeStatus.requestsMade)} GMGN requests{copyTradeStatus.estimatedRemainingSeconds !== null && <> · ~{formatDuration(copyTradeStatus.estimatedRemainingSeconds)} remaining</>}</span></div><div className="copytrade-progress-track"><i style={{ width: `${copyTradeProgressPercent ?? 12}%` }} /></div><small>{copyTradeStatus.message || 'Saving each wallet and trade to SQLite.'}</small></div>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'winners' && copyTradeStatus.status === 'completed' && <small className="copytrade-fetch-summary">{copyTradeStatus.message}</small>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'winners' && copyTradeStatus.status === 'rate_limited' && <p className="copytrade-status-warning">Rate limited until {copyTradeStatus.rateLimitedUntil ? formatTime(copyTradeStatus.rateLimitedUntil) : '—'}. Retrying early can extend the wait.</p>}
         {copyTradeStatus && !copyTradeStatus.running && copyTradeStatus.scope === 'winners' && copyTradeStatus.status === 'failed' && <p className="copytrade-status-warning">Fetch failed: {copyTradeStatus.message || 'See diagnostics for details.'}</p>}
@@ -2143,6 +4026,7 @@ function App() {
       </div>
 
       <div className="copytrade-winners">
+        <details open className="winner-details"><summary>Winner classifications</summary>
         <p className="eyebrow copytrade-step-label">WINNERS</p>
         <p className="compact-info-line"><span>Current Screen Pass winners</span><InfoTip label="Winner rules" text="Winners must pass historical consistency and copyability gates: sufficient earlier and recent history, no split-second flip pattern, and no single-token concentration. Return ranks only wallets that clear every gate." /></p>
         {copyWinnersLoading && <p className="muted">Loading…</p>}
@@ -2151,21 +4035,52 @@ function App() {
           {copyWinners.pendingCopySimulationCount > 0 && <> {copyWinners.pendingCopySimulationCount} trader{copyWinners.pendingCopySimulationCount === 1 ? '' : 's'} passed every other gate but still need{copyWinners.pendingCopySimulationCount === 1 ? 's' : ''} copy-survival verification — click Run simulation below to check {copyWinners.pendingCopySimulationCount === 1 ? 'it' : 'them'}.</>}
         </p>}
         {copyWinners && copyWinners.candidates.length > 0 && <div className="winner-list">
-          {copyWinners.candidates.map((candidate) => (
-            <div className="winner-card" key={candidate.walletAddress}>
+          {copyWinners.candidates.map((candidate) => {
+            const portfolio = copySimulationByWallet.get(candidate.walletAddress)?.portfolio;
+            return <div className={`winner-card${candidate.dormant ? ' winner-card-dormant' : ''}`} key={candidate.walletAddress}>
               <div className="winner-headline">
                 <strong>{candidate.name?.trim() || shortAddress(candidate.walletAddress)}</strong>
                 <span className={`winner-median ${(candidate.medianReturnPercent ?? 0) >= 0 ? 'copytrade-positive' : 'copytrade-negative'}`}>{formatPct(candidate.medianReturnPercent)} median</span>
               </div>
-              <a className="primary winner-copy-link" href={candidate.gmgnProfileUrl} target="_blank" rel="noreferrer">Copy on GMGN ↗</a>
-            </div>
-          ))}
+              <div className="winner-capital-path"><strong>{formatUsd(portfolio?.endingCapitalUsd ?? null)}</strong><span>{portfolio ? `$10 per copied trade · max ${portfolio.maxOpenPositions} open · ${portfolio.copiedTrades}/${portfolio.eligibleTrades} eligible trades placed` : 'Run the delayed-copy simulation to calculate a cash-constrained $100 result'}</span></div>
+              <div className="winner-activity">
+                {candidate.daysSinceLastTrade === null
+                  ? <span className="muted">No completed trades on record</span>
+                  : candidate.dormant
+                    ? <span className="winner-dormant-flag">Dormant — no trades in {Math.round(candidate.daysSinceLastTrade)} days. These returns are history, not live activity.</span>
+                    : <span className="muted">Last traded {candidate.daysSinceLastTrade < 1 ? 'today' : `${Math.round(candidate.daysSinceLastTrade)}d ago`}</span>}
+              </div>
+              <div className="winner-actions">
+                <a className="primary winner-copy-link" href={candidate.gmgnProfileUrl} target="_blank" rel="noreferrer">Copy on GMGN ↗</a>
+                <button type="button" className="secondary" onClick={() => { toggleScrutinyPin(candidate.walletAddress); navigateCopyTradeSubTab('scrutiny'); }}>{scrutinyPinned.includes(candidate.walletAddress) ? 'Unpin from Scrutiny' : 'Scrutinize'}</button>
+              </div>
+            </div>;
+          })}
         </div>}
+        {copyWinners && <div className="high-upside-winners">
+          <p className="eyebrow copytrade-step-label">HIGH-UPSIDE CANDIDATES</p>
+          <p className="compact-info-line"><span>Exceptional wins, separate from consistent winners</span><InfoTip label="High-upside rules" text="These traders have a positive mean outcome but a non-positive typical (median) outcome. They passed the same history, consistency, holding-time, speed, and concentration checks, and their simulated mean is positive with at least 70% coverage and one trade above +100%." /></p>
+          {copyWinners.highUpsideCandidates.length === 0
+            ? <p className="muted">No high-upside candidate has cleared the current evidence gates. {copyWinners.highUpsidePendingSimulationCount > 0 ? `${copyWinners.highUpsidePendingSimulationCount} still need copy simulation.` : ''}</p>
+            : <div className="winner-list high-upside-list">{copyWinners.highUpsideCandidates.map((candidate) => { const portfolio = copySimulationByWallet.get(candidate.walletAddress)?.portfolio; return <div className="winner-card high-upside-card" key={`tail-${candidate.walletAddress}`}>
+              <div className="winner-headline"><strong>{candidate.name?.trim() || shortAddress(candidate.walletAddress)}</strong><span className="copytrade-positive">{formatPct(candidate.simulatedMeanReturnPercent)} simulated mean</span></div>
+              <div className="winner-capital-path"><strong>{formatUsd(portfolio?.endingCapitalUsd ?? null)}</strong><span>{portfolio ? `$10 per copied trade · max ${portfolio.maxOpenPositions} open · ${portfolio.copiedTrades}/${portfolio.eligibleTrades} eligible trades placed` : 'Run the delayed-copy simulation to calculate a cash-constrained $100 result'}</span></div>
+              <p className="muted">Typical copied result: {formatPct(candidate.simulatedMedianReturnPercent)} median · {formatCount(candidate.tradesAbove100Percent)} trades above +100% · {formatPct(candidate.copySimulationCoverageRatePercent)} coverage</p>
+              <div className="winner-actions">
+                <a className="primary winner-copy-link" href={candidate.gmgnProfileUrl} target="_blank" rel="noreferrer">View on GMGN ↗</a>
+                <button type="button" className="secondary" onClick={() => { toggleScrutinyPin(candidate.walletAddress); navigateCopyTradeSubTab('scrutiny'); }}>{scrutinyPinned.includes(candidate.walletAddress) ? 'Unpin from Scrutiny' : 'Scrutinize'}</button>
+              </div>
+            </div>; })}</div>}
+        </div>}
+        </details>
       </div>
 
       <div className="copy-simulation">
+        <details className="winner-details">
+        <summary>Copy simulation and trade-size evidence</summary>
         <p className="eyebrow copytrade-step-label">COPY SIMULATION</p>
         <p className="compact-info-line"><span>Winner-only delayed-copy estimate</span><InfoTip label="Copy simulation method" text="Estimates a copier entering and exiting a few seconds later, using nearby market prices instead of the trader's own fills. It is historical estimation, not live execution." /></p>
+        <p className="compact-info-line"><span>Median = typical trade · Mean = equal-size portfolio</span><InfoTip label="Median and mean" text="Median shows the typical copied trade. Mean shows what equal-size copying would have returned across the simulated trades. They can disagree because a few very large winners can move the mean." /></p>
         {copySimulationLoading && <p className="muted">Loading…</p>}
         {copySimulation && copyWinners && winnerSimulationWallets.length === 0 && <p className="muted">No winner has a completed copy simulation yet.</p>}
         {winnerSimulationWallets.length > 0 && <div className="copy-sim-winner-grid">
@@ -2184,12 +4099,22 @@ function App() {
               <div className="copy-sim-comparison" aria-label="Wallet and simulated copier median return comparison">
                 <div className="copy-sim-comparison-row"><span>Wallet median</span><div className="copy-sim-bar-track"><i className={(own ?? 0) >= 0 ? 'positive' : 'negative'} style={{ width: `${Math.min(100, Math.abs(own ?? 0) / scale * 100)}%` }} /></div><b className={(own ?? 0) >= 0 ? 'copytrade-positive' : 'copytrade-negative'}>{formatPct(own)}</b></div>
                 <div className="copy-sim-comparison-row"><span>Copier median</span><div className="copy-sim-bar-track"><i className={(copier ?? 0) >= 0 ? 'positive' : 'negative'} style={{ width: `${Math.min(100, Math.abs(copier ?? 0) / scale * 100)}%` }} /></div><b className={(copier ?? 0) >= 0 ? 'copytrade-positive' : 'copytrade-negative'}>{formatPct(copier)}</b></div>
+                <div className="copy-sim-comparison-row"><span>Wallet mean</span><div className="copy-sim-bar-track"><i className={(wallet.walletMeanReturnPercent ?? 0) >= 0 ? 'positive' : 'negative'} style={{ width: `${Math.min(100, Math.abs(wallet.walletMeanReturnPercent ?? 0) / scale * 100)}%` }} /></div><b className={(wallet.walletMeanReturnPercent ?? 0) >= 0 ? 'copytrade-positive' : 'copytrade-negative'}>{formatPct(wallet.walletMeanReturnPercent)}</b></div>
+                <div className="copy-sim-comparison-row"><span>Copier mean</span><div className="copy-sim-bar-track"><i className={(wallet.simulatedMeanReturnPercent ?? 0) >= 0 ? 'positive' : 'negative'} style={{ width: `${Math.min(100, Math.abs(wallet.simulatedMeanReturnPercent ?? 0) / scale * 100)}%` }} /></div><b className={(wallet.simulatedMeanReturnPercent ?? 0) >= 0 ? 'copytrade-positive' : 'copytrade-negative'}>{formatPct(wallet.simulatedMeanReturnPercent)}</b></div>
               </div>
               <div className="copy-sim-winner-summary"><strong className={delay !== null && delay >= 0 ? 'copytrade-positive' : 'copytrade-negative'}>{delay === null ? '—' : `${delay >= 0 ? '+' : ''}${delay.toFixed(2)}pp`}</strong><span>impact from delayed entry/exit</span></div>
+              {wallet.portfolio && <><div className="winner-capital-path"><strong className={wallet.portfolio.endingCapitalUsd >= 100 ? 'copytrade-positive' : 'copytrade-negative'}>{formatUsd(wallet.portfolio.endingCapitalUsd)}</strong><span>$100 account · $10 per trade · max {wallet.portfolio.maxOpenPositions} open positions</span></div>
+              <CapitalPathChart points={wallet.portfolio.capitalPath} /></>}
               <dl className="copy-sim-detail-grid">
+                {wallet.portfolio && <><div><dt>Portfolio trades</dt><dd>{wallet.portfolio.copiedTrades} / {wallet.portfolio.eligibleTrades}</dd></div>
+                {(wallet.portfolio.openPositionsMarked !== undefined || wallet.portfolio.openPositionsUnpriced !== undefined) && <div><dt>Open at cutoff</dt><dd>{wallet.portfolio.openPositionsMarked ?? 0} marked · {wallet.portfolio.openPositionsUnpriced ?? 0} unpriced</dd></div>}
+                <div><dt>Skipped: no capacity</dt><dd>{wallet.portfolio.skippedInsufficientCash + wallet.portfolio.skippedMaxOpenPositions}</dd></div></>}
                 <div><dt>Coverage</dt><dd>{wallet.copiedTrades} / {wallet.roundTripsConsidered} <small>({coverage}%)</small></dd></div>
                 <div><dt>Missed trades</dt><dd>{wallet.missedTrades}</dd></div>
                 <div><dt>Worst copied trade</dt><dd className="copytrade-negative">{formatPct(wallet.worstSimulatedReturnPercent)}</dd></div>
+                <div><dt>Best copied trade</dt><dd className="copytrade-positive">{formatPct(wallet.bestSimulatedReturnPercent)}</dd></div>
+                <div><dt>Big wins</dt><dd title={`${wallet.tradesAbove300Percent} trades above +300%`}>{wallet.tradesAbove100Percent} &gt;+100% <small>({wallet.tradesAbove300Percent} &gt;+300%)</small></dd></div>
+                <div><dt>Tail concentration</dt><dd title="Share of the summed simulated return contributed by trades above +100%. A high share means the mean depends on a few extreme winners.">{formatPct(wallet.tailShareOfMeanPercent)}</dd></div>
                 <div><dt>Gas</dt><dd>{wallet.totalGasFeeSol !== null ? `${wallet.totalGasFeeSol} SOL` : '—'}</dd></div>
               </dl>
               {(() => {
@@ -2219,12 +4144,15 @@ function App() {
             </article>;
           })}
         </div>}
-        {copySimulation && <p className="compact-info-line copy-sim-assumptions"><span>Simulation assumptions</span><InfoTip label="Simulation assumptions" text={`${copySimulation.assumptions.copierDelaySeconds}s copier delay; ${(copySimulation.assumptions.feeBps / 100).toFixed(2)}% GMGN fee; ${(copySimulation.assumptions.slippageBps / 100).toFixed(2)}% assumed slippage; ${copySimulation.assumptions.gasPriorityFeeSolPerTx} SOL priority gas per transaction; matches older than ${copySimulation.assumptions.maxMatchGapSeconds}s are rejected.`} /></p>}
-        <button className="secondary" onClick={() => void runCopySimulationBatch()} disabled={copySimulationRunBusy}>{copySimulationRunBusy ? 'Querying Dune…' : 'Run simulation'}</button>
-        <p className="compact-info-line copy-sim-limitations"><span>Historical estimate · limitations</span><InfoTip label="Copy simulation limitations" text={`In-sample estimate using each wallet's latest ${copySimulation?.assumptions.maxRoundTripsPerWallet ?? 150} round trips. It does not model position sizing, partial fills, overlapping positions, liquidity-dependent slippage, or guaranteed execution; nearby Dune trades are price proxies.`} /></p>
+        {copySimulation && <p className="compact-info-line copy-sim-assumptions"><span>Simulation assumptions</span><InfoTip label="Simulation assumptions" text={`Starts with $${copySimulation.assumptions.startingCapitalUsd}; $${copySimulation.assumptions.stakePerTradeUsd} fixed stake; max ${copySimulation.assumptions.maxOpenPositions} simultaneous positions; ${copySimulation.assumptions.copierDelaySeconds}s copier delay; ${(copySimulation.assumptions.feeBps / 100).toFixed(2)}% GMGN fee; ${(copySimulation.assumptions.slippageBps / 100).toFixed(2)}% assumed slippage; recorded GMGN gas USD is deducted from portfolio P&L, with ${copySimulation.assumptions.gasPriorityFeeSolPerTx} SOL priority gas also reported; matches older than ${copySimulation.assumptions.maxMatchGapSeconds}s are rejected.`} /></p>}
+        {copySimulationRunBusy ? <button className="secondary copytrade-stop-button" onClick={() => void stopCopySimulation()}>Stop after current batch</button> : <button className="secondary" onClick={() => void runCopySimulationBatch(undefined, 30)}>Run 30-day simulation</button>}
+        <p className="compact-info-line copy-sim-limitations"><span>Historical estimate · limitations</span><InfoTip label="Copy simulation limitations" text={`In-sample estimate using every locally stored round trip in the requested period. It models fixed position sizing, proportional partial sells, open positions carried at cost, and overlapping-position cash limits. It does not model liquidity-dependent slippage or guaranteed execution; nearby Dune trades are price proxies. Candidates require at least 90% Dune coverage, 30 round trips, and recorded GMGN gas USD for every copied leg.`} /></p>
+        </details>
       </div>
 
       <div className="liquidity-impact">
+        <details className="winner-details">
+        <summary>Liquidity impact (exploratory)</summary>
         <p className="eyebrow copytrade-step-label">LIQUIDITY IMPACT (EXPLORATORY)</p>
         <p className="compact-info-line"><span>Trade-size liquidity proxy</span><InfoTip label="Liquidity impact method" text="Compares delayed-copy results across three groups split by the USD size of the matched Dune entry trade. This is a proxy for local trading activity, not directly measured pool liquidity, and is not a winner gate." /></p>
         {liquidityImpactLoading && <p className="muted">Loading…</p>}
@@ -2250,10 +4178,11 @@ function App() {
           </table>
         </div>}
         {liquidityImpact && <p className="compact-info-line copy-sim-assumptions"><span>Liquidity data quality</span><InfoTip label="Liquidity proxy data quality" text={`Source: matched Dune entry-trade USD size. ${liquidityImpact.unbandableCount} round trip${liquidityImpact.unbandableCount === 1 ? '' : 's'} without a matched entry are excluded, never treated as zero liquidity. Each band needs at least ${liquidityImpact.minReliableSample} simulated trades before its numbers are reliable.`} /></p>}
+        </details>
       </div>
 
 
-      {copyWinners && copyWinners.candidates.length > 0 && <div className="winners-why-panel">
+      {copyWinners && copyWinners.candidates.length > 0 && <details className="winner-details winners-why-details"><summary>Why these traders passed the gates</summary><div className="winners-why-panel">
         <p className="eyebrow copytrade-step-label">WHY THESE TRADERS WON</p>
         <p className="compact-info-line"><span>Gate comparison</span><InfoTip label="Winner gate comparison" text="Each meter shows a winner's measured value against the threshold it had to clear. This explains selection; it is not an additional score." /></p>
         <div className="winner-gate-grid">
@@ -2326,43 +4255,7 @@ function App() {
           {copyWinners.pendingCopySimulationCount > 0 && <> {copyWinners.pendingCopySimulationCount} still need{copyWinners.pendingCopySimulationCount === 1 ? 's' : ''} copy-survival verification.</>}
           {copyWinners.failedCopySurvivalCount > 0 && <> {copyWinners.failedCopySurvivalCount} passed every other gate but did not survive the copy simulation.</>}
         </p>
-      </div>}
-      </div>}
-
-      {copyTradeSubTab === 'historical-consistency' && <div className="historical-consistency-panel">
-        <p className="eyebrow copytrade-step-label">HISTORICAL CONSISTENCY</p>
-        <p className="compact-info-line"><span>Earlier vs recent performance</span><InfoTip label="Historical consistency method" text="Compares today's traders with their earlier and recent history. This is backward-looking only; it does not test future performance." /></p>
-        {historicalConsistencyLoading && <p className="muted">Loading…</p>}
-        {historicalConsistency && <>
-          <p className="compact-info-line"><span>History split</span><InfoTip label="History split rules" text={historicalConsistency.rules.description} /></p>
-          <div className="quality-grid copytrade-summary-grid">
-            <div className="quality-metric"><strong>{formatCount(historicalConsistency.totalWallets)}</strong><span>traders analyzed</span></div>
-            <div className="quality-metric hc-consistent"><strong>{formatCount(historicalConsistency.counts.consistent)}</strong><span>consistent</span></div>
-            <div className="quality-metric hc-declining"><strong>{formatCount(historicalConsistency.counts.declining)}</strong><span>declining</span></div>
-            <div className="quality-metric hc-recent-only"><strong>{formatCount(historicalConsistency.counts.recent_only)}</strong><span>recent-only</span></div>
-            <div className="quality-metric hc-consistently-negative"><strong>{formatCount(historicalConsistency.counts.consistently_negative)}</strong><span>consistently negative</span></div>
-            <div className="quality-metric hc-insufficient"><strong>{formatCount(historicalConsistency.counts.insufficient)}</strong><span>insufficient</span></div>
-          </div>
-          <div className="table-wrap copytrade-table-wrap"><table className="copytrade-table"><thead><tr>
-            <th>Trader</th><th>Depth &amp; split</th><th>Early period</th><th>Recent period</th><th>Verdict</th>
-          </tr></thead><tbody>
-            {historicalConsistency.rows.length === 0
-              ? <tr><td colSpan={5} className="muted">No trader results yet. Fetch trade data first.</td></tr>
-              : historicalConsistency.rows.map((row) => {
-                const traderName = row.name?.trim() || shortAddress(row.walletAddress);
-                const depthLabel = row.split === 'insufficient_depth' ? `${row.availableDays?.toFixed(0) ?? 0}d available (under 30d floor)`
-                  : row.split === 'relative_half' ? `${row.availableDays?.toFixed(0)}d available (half-split)`
-                  : 'Full 90d (fixed 60/30 split)';
-                return <tr key={row.walletAddress}>
-                  <td><strong>{traderName}</strong>{row.riskFlags.length > 0 && <span className="copytrade-risk-flags">{row.riskFlags.map((flag) => <span className="copytrade-risk-chip" key={flag}>{flag}</span>)}</span>}<small className="address-compact" title={row.walletAddress}>{shortAddress(row.walletAddress)}</small></td>
-                  <td>{depthLabel}</td>
-                  <td>{row.early.trades === 0 ? '—' : <>{formatPct(row.early.summary.medianReturnPercent)} median · {formatPct(row.early.summary.winRatePercent)} win<small> ({formatCount(row.early.trades)} trades)</small></>}</td>
-                  <td>{row.recent.trades === 0 ? '—' : <>{formatPct(row.recent.summary.medianReturnPercent)} median · {formatPct(row.recent.summary.winRatePercent)} win<small> ({formatCount(row.recent.trades)} trades)</small></>}</td>
-                  <td><span className={`hc-verdict hc-${row.verdict}`}>{row.verdict.replace('_', ' ')}</span></td>
-                </tr>;
-              })}
-          </tbody></table></div>
-        </>}
+      </div></details>}
       </div>}
 
       {copyTradeSubTab === 'top-callers' && <div className="top-callers-panel">
@@ -2423,8 +4316,8 @@ function App() {
                 return TOP_CALLER_CHECKPOINTS.indexOf(a.checkpoint) - TOP_CALLER_CHECKPOINTS.indexOf(b.checkpoint);
               }
               const key = topCallerTableSort.key;
-              const left: string | number | boolean | null = key === 'callerKey' ? a.callerKey : key === 'checkpoint' ? a.checkpoint : key === 'reliable' ? a.reliable : a[key];
-              const right: string | number | boolean | null = key === 'callerKey' ? b.callerKey : key === 'checkpoint' ? b.checkpoint : key === 'reliable' ? b.reliable : b[key];
+              const left: string | number | boolean | null = key === 'callerKey' ? a.callerKey : key === 'checkpoint' ? a.checkpoint : key === 'reliable' ? a.reliable : key === 'estimatedValue' ? (a.medianReturnPercent === null ? null : 100 * (1 + a.medianReturnPercent / 100)) : a[key];
+              const right: string | number | boolean | null = key === 'callerKey' ? b.callerKey : key === 'checkpoint' ? b.checkpoint : key === 'reliable' ? b.reliable : key === 'estimatedValue' ? (b.medianReturnPercent === null ? null : 100 * (1 + b.medianReturnPercent / 100)) : b[key];
               let comparison = left === null && right === null ? 0 : left === null ? 1 : right === null ? -1 : typeof left === 'number' && typeof right === 'number' ? left - right : typeof left === 'boolean' && typeof right === 'boolean' ? Number(left) - Number(right) : String(left).localeCompare(String(right));
               if (comparison === 0) comparison = a.callerKey.localeCompare(b.callerKey) || TOP_CALLER_CHECKPOINTS.indexOf(a.checkpoint) - TOP_CALLER_CHECKPOINTS.indexOf(b.checkpoint);
               return (topCallerTableSort.direction === 'asc' ? 1 : -1) * comparison;
@@ -2463,7 +4356,7 @@ function App() {
             {!workflowRunning && !pausedKind && !gmgnCoolingDown && !topCallerError && <div className="top-caller-status-bar" role="status"><strong>{hasLeaderboard ? 'COMPLETE' : 'READY'}</strong><span>{hasLeaderboard ? `${capturedCount ?? '—'} callers captured · ${duneMeasuredCount ?? '—'} with measured Dune outcomes` : 'No GMGN caller snapshot yet. Run the workflow to begin.'}</span></div>}
             <div className="top-caller-orchestrator"><div className="top-caller-orchestrator-actions"><button className="primary" disabled={topCallerWorkflowBusy} onClick={() => void runTopCallerWorkflow()}>{topCallerWorkflowBusy ? 'Research workflow running…' : 'Run complete caller research'}</button>{(workflowRunning || topCallerWorkflowBusy) && <button className="secondary top-caller-stop" disabled={topCallerStopBusy} onClick={() => void stopTopCallerWork()}>{topCallerStopBusy ? 'Stopping…' : 'Stop all Top Caller work'}</button>}</div><p>{topCallerWorkflowStage ?? 'Captures GMGN → tracks top 25 → fetches history → measures with Dune → shows the best performer.'}</p></div>
             <div className="top-caller-scope"><span>Captured <b>{capturedCount ?? '—'}</b></span><span>Included <b>{includedCount ?? '—'}</b></span><span>Not included <b>{notIncludedCount ?? '—'}</b></span><span>Dune measured <b>{duneMeasuredCount ?? '—'}</b></span></div>
-            <section className="top-caller-top10"><div className="top-callers-section-heading"><div><p className="eyebrow">ALL CHECKPOINT RESULTS</p><h3>Best measured wallet × checkpoint</h3></div><label className="top-caller-table-toggle"><input type="checkbox" checked={showUnreliableTopCallers} onChange={(event) => { setShowUnreliableTopCallers(event.target.checked); setTopCallerAllPage(0); }} /> Show insufficient rows</label></div><p className="muted top-caller-table-explainer">Each row is one wallet at one time horizon. Reliable rows are shown by default; the toggle reveals measured rows that do not yet meet the sample or coverage requirements. Click a column heading to sort.</p>{visibleCheckpointRows.length === 0 ? <p className="muted">No reliable checkpoint results yet. Measure matured Dune checkpoints, or enable “Show insufficient rows.”</p> : <><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-caller-top10-table"><thead><tr><th>#</th><th onClick={() => toggleTopCallerTableSort('callerKey')} className="sortable-header" title="Sort by wallet">Wallet{topCallerTableSortIndicator('callerKey')}</th><th onClick={() => toggleTopCallerTableSort('checkpoint')} className="sortable-header" title="Sort by checkpoint">Checkpoint{topCallerTableSortIndicator('checkpoint')}</th><th onClick={() => toggleTopCallerTableSort('medianReturnPercent')} className="sortable-header" title="Sort by median return">Median{topCallerTableSortIndicator('medianReturnPercent')}</th><th onClick={() => toggleTopCallerTableSort('winRatePercent')} className="sortable-header" title="Sort by win rate">Win{topCallerTableSortIndicator('winRatePercent')}</th><th onClick={() => toggleTopCallerTableSort('measuredCallCount')} className="sortable-header" title="Sort by measured calls">Measured{topCallerTableSortIndicator('measuredCallCount')}</th><th onClick={() => toggleTopCallerTableSort('coverageRatePercent')} className="sortable-header" title="Sort by coverage">Coverage{topCallerTableSortIndicator('coverageRatePercent')}</th><th>$100</th><th onClick={() => toggleTopCallerTableSort('reliable')} className="sortable-header" title="Sort by status">Status{topCallerTableSortIndicator('reliable')}</th></tr></thead><tbody>{checkpointPageRows.map((row, index) => { const rowCoverage = row.callCount > 0 ? row.measuredCallCount / row.callCount * 100 : null; const rowValue = row.medianReturnPercent === null ? null : 100 * (1 + row.medianReturnPercent / 100); const absoluteIndex = checkpointPage * checkpointPageSize + index; return <tr key={`${row.callerKey}-${row.checkpoint}`} className={absoluteIndex === 0 ? 'top-caller-top10-best' : undefined} onClick={() => { setTopCallerSelectedKey(row.callerKey); setTopCallerEvaluationCheckpoint(row.checkpoint); }}><td><strong>{absoluteIndex + 1}</strong></td><td><strong>{shortAddress(row.callerKey)}</strong></td><td><strong>+{row.checkpoint}</strong></td><td className={row.medianReturnPercent !== null && row.medianReturnPercent >= 0 ? 'positive' : 'negative'}>{formatPct(row.medianReturnPercent)}</td><td>{formatPct(row.winRatePercent)}</td><td>{row.measuredCallCount} / {row.callCount}</td><td>{rowCoverage === null ? '—' : `${rowCoverage.toFixed(0)}%`}</td><td>{formatUsd(rowValue)}</td><td><span className={`top-caller-table-status ${row.reliable ? 'reliable' : 'pending'}`}>{row.reliable ? 'Reliable' : 'Insufficient data'}</span></td></tr>; })}</tbody></table></div><div className="top-caller-table-pagination"><span>Showing {checkpointPageRows.length} of {visibleCheckpointRows.length} rows · {checkpointPageSize} per page</span><button className="secondary" disabled={checkpointPage === 0} onClick={() => setTopCallerAllPage((page) => Math.max(0, page - 1))}>Previous</button><span>Page {checkpointPage + 1} of {checkpointPageCount}</span><button className="secondary" disabled={checkpointPage >= checkpointPageCount - 1} onClick={() => setTopCallerAllPage((page) => Math.min(checkpointPageCount - 1, page + 1))}>Next</button></div></>}</section>
+            <section className="top-caller-top10"><div className="top-callers-section-heading"><div><p className="eyebrow">ALL CHECKPOINT RESULTS</p><h3>Best measured wallet × checkpoint</h3></div><label className="top-caller-table-toggle"><input type="checkbox" checked={showUnreliableTopCallers} onChange={(event) => { setShowUnreliableTopCallers(event.target.checked); setTopCallerAllPage(0); }} /> Show insufficient rows</label></div><p className="muted top-caller-table-explainer">Each row is one wallet at one time horizon. Reliable rows are shown by default; the toggle reveals measured rows that do not yet meet the sample or coverage requirements. Click a column heading to sort.</p>{visibleCheckpointRows.length === 0 ? <p className="muted">No reliable checkpoint results yet. Measure matured Dune checkpoints, or enable “Show insufficient rows.”</p> : <><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-caller-top10-table"><thead><tr><th>#</th><th onClick={() => toggleTopCallerTableSort('callerKey')} className="sortable-header" title="Sort by wallet">Wallet{topCallerTableSortIndicator('callerKey')}</th><th onClick={() => toggleTopCallerTableSort('checkpoint')} className="sortable-header" title="Sort by checkpoint">Checkpoint{topCallerTableSortIndicator('checkpoint')}</th><th onClick={() => toggleTopCallerTableSort('medianReturnPercent')} className="sortable-header" title="Sort by median return">Median{topCallerTableSortIndicator('medianReturnPercent')}</th><th title="Median of per-token medians — each token counted once, so one heavily-repeated coin cannot carry the result">Per token</th><th title="Share of measured buys landing on this wallet's single most-called token">Top token</th><th onClick={() => toggleTopCallerTableSort('winRatePercent')} className="sortable-header" title="Sort by win rate">Win{topCallerTableSortIndicator('winRatePercent')}</th><th onClick={() => toggleTopCallerTableSort('measuredCallCount')} className="sortable-header" title="Sort by measured calls">Measured{topCallerTableSortIndicator('measuredCallCount')}</th><th onClick={() => toggleTopCallerTableSort('coverageRatePercent')} className="sortable-header" title="Sort by coverage">Coverage{topCallerTableSortIndicator('coverageRatePercent')}</th><th onClick={() => toggleTopCallerTableSort('estimatedValue')} className="sortable-header" title="Sort by estimated value from $100">$100{topCallerTableSortIndicator('estimatedValue')}</th><th onClick={() => toggleTopCallerTableSort('reliable')} className="sortable-header" title="Sort by status">Status{topCallerTableSortIndicator('reliable')}</th></tr></thead><tbody>{checkpointPageRows.map((row, index) => { const rowCoverage = row.callCount > 0 ? row.measuredCallCount / row.callCount * 100 : null; const rowValue = row.medianReturnPercent === null ? null : 100 * (1 + row.medianReturnPercent / 100); const absoluteIndex = checkpointPage * checkpointPageSize + index; return <tr key={`${row.callerKey}-${row.checkpoint}`} className={absoluteIndex === 0 ? 'top-caller-top10-best' : undefined} onClick={() => { setTopCallerSelectedKey(row.callerKey); setTopCallerEvaluationCheckpoint(row.checkpoint); }}><td><strong>{absoluteIndex + 1}</strong></td><td><strong>{shortAddress(row.callerKey)}</strong><CopyAddressButton address={row.callerKey} label="caller wallet" /><SaveRowButton row={row} filename={`caller-${row.callerKey.slice(0, 8)}-${row.checkpoint}.json`} /></td><td><strong>+{row.checkpoint}</strong></td><td className={row.medianReturnPercent !== null && row.medianReturnPercent >= 0 ? 'positive' : 'negative'}>{formatPct(row.medianReturnPercent)}</td><td className={row.medianReturnPercentByToken !== null && row.medianReturnPercentByToken >= 0 ? 'positive' : 'negative'} title="Each token counted once">{formatPct(row.medianReturnPercentByToken)}</td><td title={row.topTokenSymbol ? `${row.topTokenSymbol} is ${row.topTokenSharePercent}% of measured buys` : undefined}>{row.topTokenSharePercent === null ? '—' : <span className={row.topTokenSharePercent > 40 ? 'top-caller-table-status pending' : undefined}>{row.topTokenSharePercent}%</span>}</td><td>{formatPct(row.winRatePercent)}</td><td>{row.measuredCallCount} / {row.callCount}</td><td>{rowCoverage === null ? '—' : `${rowCoverage.toFixed(0)}%`}</td><td>{formatUsd(rowValue)}</td><td><span className={`top-caller-table-status ${row.reliable ? 'reliable' : 'pending'}`}>{row.reliable ? 'Reliable' : 'Insufficient data'}</span></td></tr>; })}</tbody></table></div><div className="top-caller-table-pagination"><span>Showing {checkpointPageRows.length} of {visibleCheckpointRows.length} rows · {checkpointPageSize} per page</span><button className="secondary" disabled={checkpointPage === 0} onClick={() => setTopCallerAllPage((page) => Math.max(0, page - 1))}>Previous</button><span>Page {checkpointPage + 1} of {checkpointPageCount}</span><button className="secondary" disabled={checkpointPage >= checkpointPageCount - 1} onClick={() => setTopCallerAllPage((page) => Math.min(checkpointPageCount - 1, page + 1))}>Next</button></div></>}</section>
             <div className="top-caller-overview-toolbar"><label htmlFor="top-caller-selected">Inspect a caller</label><select id="top-caller-selected" value={topCallerSelectedKey ?? ''} onChange={(event) => setTopCallerSelectedKey(event.target.value || null)}><option value="">Choose a tracked caller</option>{trackedRows.map((row) => <option key={row.callerKey} value={row.callerKey}>{shortAddress(row.callerKey)} · {row.callCount ?? 0} calls</option>)}</select><span className="muted">Viewing only — does not change the research run.</span></div>
             <section className="top-caller-verdict"><div><span className="top-caller-verdict-label">{selectedEvaluation?.reliable ? 'RELIABLE SAMPLE' : 'DATA STATUS'}</span><h3>{selectedName}: <span className={`top-caller-verdict-text ${verdictClass}`}>{verdict}</span></h3><p className="muted">{selectedMeasured > 0 ? `Based on ${selectedMeasured} measured calls at the ${topCallerEvaluation?.checkpoint ?? '24h'} checkpoint.` : 'Fetch caller history first, then measure matured calls with Dune.'}</p></div><div className="top-caller-value-result"><strong>{estimatedValue === null ? '—' : formatUsd(estimatedValue)}</strong><span>estimated value from a $100 equal-size copy</span></div></section>
             <div className="top-caller-overview-metrics"><div><strong>{selectedWinRate === null ? '—' : formatPct(selectedWinRate)}</strong><span>winning calls</span></div><div><strong className={selectedMedian !== null && selectedMedian >= 0 ? 'positive' : selectedMedian !== null ? 'negative' : ''}>{formatPct(selectedMedian)}</strong><span>median return per call</span></div><div><strong>{selectedMeasured ? `${selectedMeasured} / ${selectedCalls}` : '—'}</strong><span>measured by Dune</span></div><div><strong>{coverage === null ? '—' : `${coverage.toFixed(1)}%`}</strong><span>usable coverage</span></div></div>
@@ -2477,8 +4370,8 @@ function App() {
                   ? `paused · ${status.walletDone ?? 0} of ${status.walletTotal ?? '?'} wallets${(status.retryCount ?? 0) >= 1 ? ' · needs Resume' : ' · retrying automatically'}`
                   : (status?.status ?? 'idle');
               const retrySuffix = status && status.retryCount > 0 ? ` · ${status.retryCount} retry used` : '';
-              return <span key={kind} className={status?.running ? 'top-callers-running' : status?.status === 'paused' ? 'top-callers-paused' : ''}><b>{label}</b> · {runningLabel}{retrySuffix}{status?.message ? ` · ${status.message}` : ''}</span>; })}</div><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-callers-table"><thead><tr><th>Rank</th><th>Caller</th><th>Calls</th><th>Track</th></tr></thead><tbody>{!topCallerLeaderboard || topCallerLeaderboard.rows.length === 0 ? <tr><td colSpan={4} className="muted">No leaderboard snapshot captured yet.</td></tr> : topCallerLeaderboard.rows.map((row) => <tr key={row.callerKey} className={topCallerSelectedKey === row.callerKey ? 'top-callers-selected' : ''} onClick={() => setTopCallerSelectedKey(row.callerKey)}><td>#{row.rankPosition}</td><td><strong>{shortAddress(row.callerKey)}</strong><small className="address-compact">{row.callerKey}</small></td><td>{row.callCount ?? '—'}</td><td><button className={row.tracked ? 'secondary top-caller-track active' : 'secondary top-caller-track'} onClick={(event) => { event.stopPropagation(); void toggleTopCallerTracking(row); }}>{row.tracked ? 'Tracking' : 'Track'}</button></td></tr>)}</tbody></table></div><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-caller-detail-table"><thead><tr><th>Token</th><th>Called</th><th>GMGN price</th><th>Dune +1h</th><th>Dune +24h</th></tr></thead><tbody>{!topCallerDetail || topCallerDetail.callouts.length === 0 ? <tr><td colSpan={5} className="muted">Select a tracked caller with captured callouts.</td></tr> : topCallerDetail.callouts.map((callout) => <tr key={callout.id}><td><strong>{callout.tokenSymbol?.trim() || shortAddress(callout.tokenAddress)}</strong><button className="icon-copy" title="Copy token address" onClick={() => void copyAddress(callout.tokenAddress)}>⧉</button></td><td>{formatTime(callout.callTimestamp)}</td><td>{callout.callPriceUsd ?? '—'}</td><td>{formatPct(callout.outcomes.find((item) => item.checkpoint === '1h')?.measuredReturnPct ?? null)}</td><td>{formatPct(callout.outcomes.find((item) => item.checkpoint === '24h')?.measuredReturnPct ?? null)}</td></tr>)}</tbody></table></div><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-caller-checkpoint-breakdown-table"><thead><tr><th>Checkpoint</th><th>Measured</th><th>Waiting</th><th>No trade</th><th>Dates</th><th>Coverage</th><th>Result</th></tr></thead><tbody>{!topCallerCheckpointBreakdown || topCallerCheckpointBreakdown.rows.length === 0 ? <tr><td colSpan={7} className="muted">Select a tracked caller with captured callouts.</td></tr> : topCallerCheckpointBreakdown.rows.map((row) => {
-                const reasonLabels: Record<TopCallerReliabilityReason, string> = { awaiting_dune_fetch: 'Awaiting Dune fetch', insufficient_coverage: 'No qualifying trade', awaiting_more_capture_dates: 'Awaiting more capture dates', no_callouts: 'No callouts yet' };
+              return <span key={kind} className={status?.running ? 'top-callers-running' : status?.status === 'paused' ? 'top-callers-paused' : ''}><b>{label}</b> · {runningLabel}{retrySuffix}{status?.message ? ` · ${status.message}` : ''}</span>; })}</div><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-callers-table"><thead><tr><th>Rank</th><th>Caller</th><th>Calls</th><th>Track</th></tr></thead><tbody>{!topCallerLeaderboard || topCallerLeaderboard.rows.length === 0 ? <tr><td colSpan={4} className="muted">No leaderboard snapshot captured yet.</td></tr> : topCallerLeaderboard.rows.map((row) => <tr key={row.callerKey} className={topCallerSelectedKey === row.callerKey ? 'top-callers-selected' : ''} onClick={() => setTopCallerSelectedKey(row.callerKey)}><td>#{row.rankPosition}</td><td><strong>{shortAddress(row.callerKey)}</strong><small className="address-compact">{row.callerKey}</small><CopyAddressButton address={row.callerKey} label="caller wallet" /><SaveRowButton row={row} filename={`caller-leaderboard-${row.callerKey.slice(0, 8)}.json`} /></td><td>{row.callCount ?? '—'}</td><td><button className={row.tracked ? 'secondary top-caller-track active' : 'secondary top-caller-track'} onClick={(event) => { event.stopPropagation(); void toggleTopCallerTracking(row); }}>{row.tracked ? 'Tracking' : 'Track'}</button></td></tr>)}</tbody></table></div><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-caller-detail-table"><thead><tr><th>Token</th><th>Called</th><th>GMGN price</th><th>Dune +1h</th><th>Dune +24h</th></tr></thead><tbody>{!topCallerDetail || topCallerDetail.callouts.length === 0 ? <tr><td colSpan={5} className="muted">Select a tracked caller with captured callouts.</td></tr> : topCallerDetail.callouts.map((callout) => <tr key={callout.id}><td><strong>{callout.tokenSymbol?.trim() || shortAddress(callout.tokenAddress)}</strong><button className="icon-copy" title="Copy token address" onClick={() => void copyAddress(callout.tokenAddress)}>⧉</button></td><td>{formatTime(callout.callTimestamp)}</td><td>{callout.callPriceUsd ?? '—'}</td><td>{formatPct(callout.outcomes.find((item) => item.checkpoint === '1h')?.measuredReturnPct ?? null)}</td><td>{formatPct(callout.outcomes.find((item) => item.checkpoint === '24h')?.measuredReturnPct ?? null)}</td></tr>)}</tbody></table></div><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table top-caller-checkpoint-breakdown-table"><thead><tr><th>Checkpoint</th><th>Measured</th><th>Waiting</th><th>No trade</th><th>Dates</th><th>Coverage</th><th>Result</th></tr></thead><tbody>{!topCallerCheckpointBreakdown || topCallerCheckpointBreakdown.rows.length === 0 ? <tr><td colSpan={7} className="muted">Select a tracked caller with captured callouts.</td></tr> : topCallerCheckpointBreakdown.rows.map((row) => {
+                const reasonLabels: Record<TopCallerReliabilityReason, string> = { awaiting_dune_fetch: 'Awaiting Dune fetch', insufficient_coverage: 'No qualifying trade', awaiting_more_capture_dates: 'Awaiting more capture dates', single_token_concentration: 'One token dominates', no_callouts: 'No callouts yet' };
                 const resultText = row.reliable ? 'Reliable measurement' : (row.reasons[0] ? reasonLabels[row.reasons[0]] : 'Insufficient data');
                 const resultClass = row.reliable ? 'reliable' : row.reasons.includes('insufficient_coverage') ? 'unavailable' : 'pending';
                 return <tr key={row.checkpoint}><td>+{row.checkpoint}</td><td>{row.measuredCallCount} / {row.callCount}</td><td>{row.waitingCallCount}</td><td>{row.unavailableCallCount}</td><td>{row.callCount === 0 ? '—' : row.reasons.includes('awaiting_more_capture_dates') ? <span className="top-caller-table-status pending">too few</span> : 'ok'}</td><td>{row.coverageRatePercent === null ? '—' : `${row.coverageRatePercent}%`}</td><td><span className={`top-caller-table-status ${resultClass}`} title={row.reasons.map((r) => reasonLabels[r]).join(', ')}>{resultText}</span></td></tr>;
@@ -2523,7 +4416,7 @@ function App() {
               <th>Trader</th><th>Rank</th><th>Group</th><th>Forward timeline</th>
             </tr></thead><tbody>
               {selectedExperiment.wallets.map((wallet) => <tr key={wallet.walletAddress}>
-                <td><small className="address-compact" title={wallet.walletAddress}>{shortAddress(wallet.walletAddress)}</small></td>
+                <td><small className="address-compact" title={wallet.walletAddress}>{shortAddress(wallet.walletAddress)}</small><CopyAddressButton address={wallet.walletAddress} /><SaveRowButton row={wallet} filename={`forward-wallet-${wallet.walletAddress.slice(0, 8)}.json`} /></td>
                 <td>#{wallet.rankAtSelection}</td>
                 <td>{wallet.selectedGroup}</td>
                 <td>{renderForwardTimeline(wallet.windows)}</td>
@@ -2536,15 +4429,30 @@ function App() {
       {copyTradeSubTab === 'research' && <div className="historical-wallet-performance-panel">
       <p className="eyebrow copytrade-step-label">HISTORICAL WALLET PERFORMANCE · NOT COPY PERFORMANCE</p>
       {copyTradeResults && <>
-        <div className="copytrade-results-meta"><span>{formatCount(copyTradeResults.periodDays)} days · computed {formatTime(copyTradeResults.computedAt)}</span><button className="secondary" onClick={() => void saveCopyTradeSnapshot()}>Save snapshot</button></div>
+        <div className="copytrade-results-meta"><span>{formatCount(copyTradeResults.periodDays)} days · computed {formatTime(copyTradeResults.computedAt)}</span><div className="copytrade-results-actions"><button className="secondary" onClick={exportGmgnAggregateCsv} disabled={sortedGmgnAggregateRows.length === 0}>Export GMGN stats CSV</button><button className="secondary" onClick={() => void saveCopyTradeSnapshot()}>Save snapshot</button></div></div>
         <p className="compact-info-line"><span>Roster source</span><InfoTip label="Selected roster" text={`Snapshot #${copyTradeResults.scope?.rosterSnapshotId ?? selectedRosterSnapshotId ?? '—'} · ${copyTradeResults.scope?.rosterProvenance?.window ?? 'legacy'} / ${copyTradeResults.scope?.rosterProvenance?.orderby ?? 'filter not recorded'} · captured ${formatTime(copyTradeResults.scope?.rosterProvenance?.capturedAt ?? null)}. All CopyTrade reports use this wallet list.`} /></p>
         {copyTradeResults.scope?.rosterProvenance && <details className="copytrade-rules"><summary>Exact GMGN leaderboard source</summary><p>Captured {formatTime(copyTradeResults.scope.rosterProvenance.capturedAt)} · window {copyTradeResults.scope.rosterProvenance.window ?? 'not recorded'} · ordered by {copyTradeResults.scope.rosterProvenance.orderby ?? 'not recorded'}.</p><pre>{JSON.stringify(copyTradeResults.scope.rosterProvenance.requestQuery, null, 2)}</pre></details>}
         <div className="copytrade-method-card"><strong>Wallet performance is available</strong><span>{copyTradeResults.walletPerformance?.description ?? 'This table describes the target wallets’ own realized trades.'}</span></div>
+        <details open className="copytrade-capital-summary" style={{ display: 'none' }}>
+          <summary>GMGN-reported wallet performance · 30 days</summary>
+          <p className="muted">This table uses GMGN’s aggregate wallet-statistics response for the same selected traders. The $100 figure is only a simple translation of GMGN’s reported PnL percentage; it is not calculated trade by trade. The delayed, fee-adjusted $10 copy account remains separate in Copy simulation above.</p>
+          <p className="compact-info-line"><span>Aggregate source</span><InfoTip label="GMGN aggregate statistics" text="Each row comes from GMGN portfolio stats for the selected roster. The raw response is preserved in SQLite in copytrade_wallet_stats. This table does not infer missing trades and does not make another request while you view it." /><small>30-day GMGN snapshot · refreshed during Fetch trades</small></p>
+          <div className="table-wrap copytrade-table-wrap"><table className="copytrade-table copytrade-capital-table"><thead><tr><th>Trader</th><th>GMGN PnL</th><th>$100 equivalent</th><th>Win rate</th><th>Buys / sells</th><th>Tokens</th><th>Stats fetched</th></tr></thead><tbody>{sortedGmgnAggregateRows.map((row) => {
+            const traderName = row.name?.trim() || shortAddress(row.walletAddress);
+            const stats = row.gmgnAggregate;
+            const pnl = stats?.realizedProfitPnlPercent ?? null;
+            const equivalent = pnl === null ? null : 100 * (1 + pnl / 100);
+            const capitalClass = equivalent === null ? '' : equivalent >= 100 ? 'copytrade-positive' : 'copytrade-negative';
+            return <tr key={`gmgn-aggregate-${row.walletAddress}`}><td><strong>{traderName}</strong><small className="address-compact" title={row.walletAddress}>{shortAddress(row.walletAddress)}</small><CopyAddressButton address={row.walletAddress} /></td><td className={pnl === null ? '' : pnl >= 0 ? 'copytrade-positive' : 'copytrade-negative'}>{formatPct(pnl)}</td><td className={capitalClass}>{formatUsd(equivalent)}</td><td>{formatPct(stats?.winRatePercent ?? null)}</td><td>{stats?.buyCount == null || stats?.sellCount == null ? '—' : `${formatCount(stats.buyCount)} / ${formatCount(stats.sellCount)}`}</td><td>{formatCount(stats?.tokenCount ?? null)}</td><td>{stats ? formatTime(stats.fetchedAt) : 'Not fetched'}</td></tr>;
+          })}</tbody></table></div>
+        </details>
+        {copyTradeResults.representativeSampling && <p className="compact-info-line"><span>Full stored history</span><InfoTip label="Full stored history" text="No local sell-sample cap is applied. The report uses every stored sell; raw history is retained." /><small>{formatCount(copyTradeResults.representativeSampling.selectedTrades)} of {formatCount(copyTradeResults.representativeSampling.populationTrades)} stored sells included</small></p>}
+        <p className="compact-info-line"><span>Consistency column</span><InfoTip label="Historical consistency in this table" text="Compares each trader's earlier and recent history. A consistent result means the trader's typical outcome did not materially deteriorate across the available period; it is historical evidence, not a future guarantee." />{historicalConsistencyLoading && <small>Loading…</small>}</p>
         <div className="table-wrap copytrade-table-wrap"><table className="copytrade-table"><thead><tr>
           {([['name', 'Trader'], ['trades', 'Trades'], ['winRatePercent', 'Win%'], ['medianReturnPercent', 'Median'], ['averageReturnPercent', 'Average'], ['endingCapitalUsd', '$100 →']] as Array<[CopyTradeSortKey, string]>).map(([key, label]) => <th key={key} onClick={() => toggleCopyTradeSort(key)} className="sortable-header">{label}{copyTradeSortIndicator(key)}</th>)}
-          <th>Across time</th><th>Profit concentration</th><th>Rank history</th><th onClick={() => toggleCopyTradeSort('verdict')} className="sortable-header">Assessment{copyTradeSortIndicator('verdict')}</th>
+           <th>Across time</th><th>Profit concentration</th><th>Rank history</th><th>Consistency</th><th onClick={() => toggleCopyTradeSort('verdict')} className="sortable-header">Assessment{copyTradeSortIndicator('verdict')}</th>
         </tr></thead><tbody>
-          {sortedCopyTradeRows.length === 0 ? <tr><td colSpan={10} className="muted">No trader results yet. Fetch trade data first.</td></tr> : sortedCopyTradeRows.map((row) => {
+           {sortedCopyTradeRows.length === 0 ? <tr><td colSpan={11} className="muted">No trader results yet. Fetch trade data first.</td></tr> : sortedCopyTradeRows.map((row) => {
             const traderName = row.name?.trim() || shortAddress(row.walletAddress);
             const failedRules = row.failedRules.length ? row.failedRules.map(formatRule).join('; ') : 'All historical screen rules passed';
             const capitalClass = row.endingCapitalUsd === null ? '' : row.endingCapitalUsd > 100 ? 'copytrade-positive' : row.endingCapitalUsd < 100 ? 'copytrade-negative' : 'copytrade-neutral';
@@ -2553,13 +4461,16 @@ function App() {
             const concentration = row.profitConcentration;
             const bestToken = concentration.bestToken?.tokenSymbol || (concentration.bestToken ? shortAddress(concentration.bestToken.tokenAddress) : '—');
             const weeklyDots = row.weeklyPerformance.map((period) => <span key={`w-dot-${period.period}`} className={`copytrade-spark-segment ${period.medianReturnPercent === null ? 'neutral' : period.medianReturnPercent >= 0 ? 'positive' : 'negative'}`} title={`Week ${period.period}: ${formatPct(period.medianReturnPercent)} median`} />);
-            const rankDots = Array.from({ length: Math.min(8, row.rankHistory.leaderboardCaptures) }, (_, index) => <span key={`rank-dot-${index}`} className={`copytrade-rank-dot ${index < row.rankHistory.topFiveAppearances ? 'active' : ''}`} />);
+             const rankDots = Array.from({ length: Math.min(8, row.rankHistory.leaderboardCaptures) }, (_, index) => <span key={`rank-dot-${index}`} className={`copytrade-rank-dot ${index < row.rankHistory.topFiveAppearances ? 'active' : ''}`} />);
+             const consistency = historicalConsistencyByWallet.get(row.walletAddress);
+             const consistencyDepth = consistency?.split === 'insufficient_depth' ? `${consistency.availableDays?.toFixed(0) ?? 0}d history` : consistency?.split === 'relative_half' ? `${consistency.availableDays?.toFixed(0)}d half-split` : consistency ? '90d history' : '—';
             const topThreeShare = concentration.bestThreeSharePositiveProfitPercent ?? 0;
-            return <tr key={row.walletAddress}><td><strong>{traderName}</strong>{row.riskFlags.length > 0 && <span className="copytrade-risk-flags">{row.riskFlags.map((flag) => <span className="copytrade-risk-chip" key={flag}>{flag}</span>)}</span>}<small className="address-compact" title={row.walletAddress}>{shortAddress(row.walletAddress)}</small></td><td>{formatCount(row.trades)}</td><td>{formatPct(row.winRatePercent)}</td><td>{formatPct(row.medianReturnPercent)}</td><td>{formatPct(row.averageReturnPercent)}</td><td className={`copytrade-capital ${capitalClass}`}>{formatUsd(row.endingCapitalUsd)}</td>
+            return <tr key={row.walletAddress}><td><strong>{traderName}</strong>{row.riskFlags.length > 0 && <span className="copytrade-risk-flags">{row.riskFlags.map((flag) => <span className="copytrade-risk-chip" key={flag}>{flag}</span>)}</span>}<small className="address-compact" title={row.walletAddress}>{shortAddress(row.walletAddress)}</small><CopyAddressButton address={row.walletAddress} /><SaveRowButton row={row} filename={`copytrade-wallet-${row.walletAddress.slice(0, 8)}.json`} /></td><td>{formatCount(row.trades)}</td><td>{formatPct(row.winRatePercent)}</td><td>{formatPct(row.medianReturnPercent)}</td><td>{formatPct(row.averageReturnPercent)}</td><td className={`copytrade-capital ${capitalClass}`}>{formatUsd(row.endingCapitalUsd)}</td>
               <td className="copytrade-evidence-cell"><strong>{positiveWeeks}/{row.weeklyPerformance.length} positive weeks</strong><div className="copytrade-sparkline" aria-label={`${positiveWeeks} of ${row.weeklyPerformance.length} positive weeks`}>{weeklyDots}</div><small>{positiveMonths}/{row.monthlyPerformance.length} positive months</small><details><summary>Breakdown</summary>{row.weeklyPerformance.map((period) => <small key={`w-${period.period}`}>Week {period.period}: {formatPct(period.medianReturnPercent)} median ({period.trades})</small>)}{row.monthlyPerformance.map((period) => <small key={`m-${period.period}`}>Month {period.period}: {formatPct(period.medianReturnPercent)} median ({period.trades})</small>)}</details></td>
               <td className="copytrade-evidence-cell"><strong>{bestToken} · {formatPct(concentration.bestTokenSharePositiveProfitPercent)}</strong><div className="copytrade-concentration-bar" title={`Top three tokens account for ${formatPct(concentration.bestThreeSharePositiveProfitPercent)} of positive profit`}><i style={{ width: `${Math.min(100, Math.max(0, topThreeShare))}%` }} /></div><small>top 3: {formatPct(concentration.bestThreeSharePositiveProfitPercent)} of positive profit</small><details><summary>Exclusions</summary><small>without best trade: {formatUsd(concentration.excludingBestTrade.endingCapitalUsd)}</small><small>without best token: {formatUsd(concentration.excludingBestToken.endingCapitalUsd)}</small></details></td>
-              <td className="copytrade-evidence-cell"><strong>Top 5: {row.rankHistory.topFiveAppearances}/{row.rankHistory.leaderboardCaptures}</strong><div className="copytrade-rank-dots" aria-label={`${row.rankHistory.topFiveAppearances} top-five appearances across ${row.rankHistory.leaderboardCaptures} captures`}>{rankDots}</div><small>{formatPct(row.rankHistory.topFiveMembershipPercent)} of captures</small><small>current #{row.rankHistory.currentRank ?? '—'} · best #{row.rankHistory.bestRank ?? '—'} · worst #{row.rankHistory.worstRank ?? '—'}</small></td>
-              <td title={failedRules}><span className={`copytrade-verdict copytrade-verdict-${row.verdict}`}><b>{copyTradeVerdictIcon[row.verdict]}</b> {copyTradeVerdictLabel[row.verdict]}</span></td></tr>;
+               <td className="copytrade-evidence-cell"><strong>Top 5: {row.rankHistory.topFiveAppearances}/{row.rankHistory.leaderboardCaptures}</strong><div className="copytrade-rank-dots" aria-label={`${row.rankHistory.topFiveAppearances} top-five appearances across ${row.rankHistory.leaderboardCaptures} captures`}>{rankDots}</div><small>{formatPct(row.rankHistory.topFiveMembershipPercent)} of captures</small><small>current #{row.rankHistory.currentRank ?? '—'} · best #{row.rankHistory.bestRank ?? '—'} · worst #{row.rankHistory.worstRank ?? '—'}</small></td>
+               <td className="copytrade-evidence-cell"><strong>{consistency ? <span className={`hc-verdict hc-${consistency.verdict}`}>{consistency.verdict.replace('_', ' ')}</span> : '—'}</strong><small>{consistencyDepth}</small>{consistency && <small>early {formatPct(consistency.early.summary.medianReturnPercent)} · recent {formatPct(consistency.recent.summary.medianReturnPercent)}</small>}</td>
+               <td title={failedRules}><span className={`copytrade-verdict copytrade-verdict-${row.verdict}`}><b>{copyTradeVerdictIcon[row.verdict]}</b> {copyTradeVerdictLabel[row.verdict]}</span></td></tr>;
           })}
           {/* Both aggregations are shown because they answer different questions and routinely
               disagree: pooling every trade lets the busiest wallet define the headline, while
@@ -2571,8 +4482,8 @@ function App() {
               <td>{formatPct(row.winRatePercent)}</td>
               <td>{formatPct(row.medianReturnPercent)}</td>
               <td>{formatPct(row.averageReturnPercent)}</td>
-              <td className={`copytrade-capital ${row.endingCapitalUsd === null ? '' : row.endingCapitalUsd > 100 ? 'copytrade-positive' : row.endingCapitalUsd < 100 ? 'copytrade-negative' : 'copytrade-neutral'}`}>{formatUsd(row.endingCapitalUsd)}</td>
-              <td colSpan={4}>—</td>
+               <td className={`copytrade-capital ${row.endingCapitalUsd === null ? '' : row.endingCapitalUsd > 100 ? 'copytrade-positive' : row.endingCapitalUsd < 100 ? 'copytrade-negative' : 'copytrade-neutral'}`}>{formatUsd(row.endingCapitalUsd)}</td>
+               <td colSpan={5}>—</td>
             </tr>
           ))}
         </tbody></table></div>
@@ -2581,7 +4492,506 @@ function App() {
         <div className="copytrade-method-card"><strong>Copy simulation is separate and not available</strong><span>{copyTradeResults.copySimulation?.description ?? 'No execution simulation is mixed into these wallet results.'} Required before simulation: {copyTradeResults.copySimulation?.requiredInputs.join(', ') ?? 'delay, slippage, fees, liquidity, and failed-order assumptions'}.</span></div>
       </>}
       </div>}
+
+      {copyTradeSubTab === 'scrutiny' && <div className="scrutiny-panel">
+        <p className="eyebrow copytrade-step-label">SCRUTINY · INDIVIDUAL CANDIDATE INTERROGATION</p>
+        <div className="top-callers-heading">
+          <div><h2>Does each wallet hold up?</h2><p className="muted">Mirrors the saved 30-day GMGN Wallet Stats table. Scrutiny reads the same local SQLite evidence automatically; no provider request is made here.</p></div>
+        </div>
+
+        <p className="compact-info-line scrutiny-selection-note">Automatically reviewing {scrutinyPinned.length || 'all'} wallets from the 30-day GMGN Wallet Stats table. Click a row for the detailed view.</p>
+
+        {scrutinyOutcome && <p className="muted scrutiny-outcome">{scrutinyOutcome}</p>}
+        {scrutinyError && <p className="copytrade-status-warning">{scrutinyError}</p>}
+        {scrutinyResponse && scrutinyResponse.missingWallets.length > 0 && <p className="copytrade-status-warning">No scored data yet for: {scrutinyResponse.missingWallets.map((wallet) => shortAddress(wallet)).join(', ')}. Fetch their trades first.</p>}
+
+        {scrutinyLoading && <p className="muted scrutiny-loading-note"><span className="loading-spinner" aria-hidden="true" /> Reading saved GMGN and Dune evidence from SQLite — no provider fetch is running.</p>}
+        {!scrutinyLoading && scrutinyPinned.length > 0 && (!scrutinyResponse || scrutinyResponse.reports.length === 0) && <p className="muted">No scrutiny data yet for the pinned wallets.</p>}
+
+        {scrutinyResponse?.reports.length ? <div className="scrutiny-table-wrap"><table className="scrutiny-table"><thead><tr><th>Wallet</th>{Object.values(scrutinyResponse.reports[0].checks).map((check) => <th key={check.key}>{check.label}</th>)}</tr></thead><tbody>{scrutinyResponse.reports.map((report) => <tr key={report.walletAddress} className="scrutiny-table-row" tabIndex={0} role="button" onClick={() => setSelectedScrutinyWallet(report.walletAddress)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedScrutinyWallet(report.walletAddress); }}><td><strong>{report.name?.trim() || shortAddress(report.walletAddress)}</strong><small title={report.walletAddress}>{shortAddress(report.walletAddress)}</small></td>{Object.values(report.checks).map((check) => <td key={check.key} className={`scrutiny-cell-${check.verdict}`} title={check.detail}>{SCRUTINY_VERDICT_LABELS[check.verdict]}</td>)}</tr>)}</tbody></table></div> : null}
+        {scrutinyResponse?.reports.filter((report) => report.walletAddress === selectedScrutinyWallet).map((report) => <div className="copytrade-modal-backdrop scrutiny-detail-backdrop" role="presentation" onClick={() => setSelectedScrutinyWallet(null)} key={report.walletAddress}>
+          <article className="scrutiny-card scrutiny-detail-card copytrade-modal" role="dialog" aria-modal="true" aria-label={`Scrutiny details for ${report.name?.trim() || shortAddress(report.walletAddress)}`} onClick={(event) => event.stopPropagation()}>
+          <header className="scrutiny-card-header">
+            <div><strong>{report.name?.trim() || shortAddress(report.walletAddress)}</strong><small title={report.walletAddress}>{shortAddress(report.walletAddress)}</small></div>
+            <button type="button" className="quiet" onClick={() => setSelectedScrutinyWallet(null)}>Close details</button>
+            <a className="quiet" href={`https://gmgn.ai/sol/address/${report.walletAddress}`} target="_blank" rel="noreferrer">View on GMGN ↗</a>
+          </header>
+          <p className="compact-info-line scrutiny-selection-note"><span>{report.selectionContext.note}</span></p>
+          <section className="scrutiny-gmgn-risk" aria-label="GMGN risk details">
+            <div className="scrutiny-gmgn-risk-heading"><div><strong>GMGN 30-day risk details</strong><small>Click <b>View on GMGN ↗</b> above, then export the 30d risk JSON from the extension.</small></div></div>
+            <label className="scrutiny-risk-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void importGmgnRiskFile(file, report.walletAddress); }}>
+              <span>Drop the exported JSON here</span><small>or choose a file from your computer</small><input type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importGmgnRiskFile(file, report.walletAddress); event.currentTarget.value = ''; }} />
+            </label>
+            <div className="scrutiny-gmgn-period-grid">{(['30d'] as const).map((period) => {
+              const result = gmgnRiskResults[`${report.walletAddress}|${period}`];
+              const metrics = result?.metrics;
+              return <div className="scrutiny-gmgn-period" key={period}><h4>30d</h4>
+                {!result && <small className="muted">Open GMGN and import the exported JSON above.</small>}
+                {result && !result.available && <small className="copytrade-status-warning">Unavailable{result.error ? ` — ${result.error}` : ''}</small>}
+                {metrics && <div className="scrutiny-gmgn-metrics">
+                  <span><b>P&amp;L</b>{formatGmgnRiskValue(metrics.realizedProfit)}</span><span><b>Win rate</b>{formatGmgnRiskRatio(metrics.winRate)}</span>
+                  <span><b>Fees</b>{formatGmgnRiskValue(metrics.fees)}</span><span><b>Avg hold</b>{metrics.averageHoldingSeconds === null ? '—' : `${(metrics.averageHoldingSeconds / 3600).toFixed(1)}h`}</span>
+                  <span><b>Fast tx</b>{formatGmgnRiskRatio(metrics.risk.fastTxRatio ?? metrics.risk.fastTx)}</span><span><b>Sell&gt;buy</b>{formatGmgnRiskRatio(metrics.risk.sellPassBuyRatio ?? metrics.risk.sellPassBuy)}</span>
+                  <span><b>No buy/hold</b>{formatGmgnRiskRatio(metrics.risk.noBuyHoldRatio ?? metrics.risk.noBuyHold)}</span><span><b>Native balance</b>{formatGmgnRiskValue(metrics.nativeBalance)}</span>
+                </div>}
+              </div>;
+            })}</div>
+          </section>
+          <div className="scrutiny-check-grid">
+            {Object.values(report.checks).map((check) => <div className={`scrutiny-check scrutiny-check-${check.verdict}`} key={check.key}>
+              <div className="scrutiny-check-header"><strong>{check.label}</strong><span className={`scrutiny-verdict-badge scrutiny-verdict-${check.verdict}`}>{SCRUTINY_VERDICT_LABELS[check.verdict]}</span></div>
+              <p className="scrutiny-check-detail">{check.detail}</p>
+              <small className="scrutiny-check-n">n = {formatCount(check.n)}</small>
+            </div>)}
+          </div>
+          </article>
+        </div>)}
+      </div>}
     </section>
+
+    {copyTradeSubTab === 'wallet-stats' && <section id="copytrade-wallet-stats" className="menu-section panel copytrade-research-route">
+      <div className="panel-heading"><div><p className="eyebrow">30-DAY COHORT · 30-DAY DECISION</p><h2>Who is worth following?</h2></div><span className="tag">30D DECISION VIEW</span></div>
+      {walletStatsTableLoading && <div className="copytrade-analysis-status running" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><strong>Loading saved trader evidence…</strong><small>Reading the roster, GMGN summaries, and Dune results from SQLite. Temporary verdicts are hidden until loading finishes.</small></div></div>}
+      <div className="copytrade-final-decision-panel">
+        <div className="copytrade-decision-state-counts">
+          {DECISION_ORDER.map((state) => {
+            const count = walletStatsTableLoading ? null : unifiedTraderRows.reduce((total, entry) => total + (decisionStateFor(entry.verdict) === state ? 1 : 0), 0);
+            return <div key={state} className={`copytrade-decision-state-tile tone-${DECISION_STATES[state].tone}`} title={DECISION_STATES[state].blurb}>
+              <strong>{count ?? '—'}</strong><span>{DECISION_STATES[state].label}</span>
+            </div>;
+          })}
+        </div>
+        <div className="copytrade-decision-panel-foot">
+          <span>
+            {showDelaySurvivorsOnly ? 'Showing positive-copy rows · ' : ''}GMGN summaries: {gmgnStatsFreshRows}/{copyTradeRows.length} fresh
+            {visibleWalletScreenSummary?.lastFetchedAt ? ` (${formatFetchTime(visibleWalletScreenSummary.lastFetchedAt)})` : ' (not completed)'}
+            {' · '}
+            Dune: {copySimulationRunStatus?.outcome === 'complete' ? 'complete' : duneMatchedTargets > 0 ? 'partial' : 'not completed'}
+            {' · 30-day period'}
+          </span>
+        </div>
+      </div>
+      <div className="copytrade-top-fetch-controls">
+        <div className="copytrade-top-fetch-heading"><strong>Fetch controls</strong><span>Update saved GMGN history first, then run the Dune copy test.</span></div>
+        <div className="copytrade-workflow-row copytrade-prefetch-scope-row">
+          <div className="copytrade-workflow-label">
+            <span className="copytrade-workflow-step" title="Runs before step 1 — this only narrows which wallets steps 1 and 2 will touch, it fetches nothing itself.">0</span>
+            <div>
+              <strong>Narrow the Dune scope first</strong>
+              <small>
+                Skips wallets Dune fetching can never help or shouldn't be spent on — see the checkbox tooltip for the full list of checks.
+                {scopeFilteredWalletSet.size > 0 && ` Currently ${scopeFilteredWalletSet.size} wallet${scopeFilteredWalletSet.size === 1 ? '' : 's'}.`}
+              </small>
+            </div>
+          </div>
+          <label className="copytrade-filter-toggle" title={`Two kinds of check, both from data already on hand — no new Dune or GMGN request:\n\n• Can't be copied: median hold time < the ${copierDelaySecondsForScope}s copy delay. Not a judgment call — the verdict already forces "Not copyable" for this regardless of what Dune returns, so spending credits on it is provably wasted (${uncopyableWalletSet.size} wallet${uncopyableWalletSet.size === 1 ? '' : 's'}).\n\n• GMGN-flagged high-risk: wash_trader tag, 30d PnL ≤ -20%, >5,000 trades in 30d, >100 tokens created, <10 trades in 30d, <20% win rate, or >90% one-sided buy/sell activity. These ARE judgment calls, not provable waste — a legitimate trader could still trip one (${highRiskWalletReasons.size} wallet${highRiskWalletReasons.size === 1 ? '' : 's'}).\n\nOverride any individual wallet in the activity table below regardless of which check it hit.`}>
+            <input type="checkbox" checked={skipScopeFiltersInDune} onChange={(event) => setSkipScopeFiltersInDune(event.target.checked)} />
+            Skip low-value wallets (uncopyable or GMGN-flagged high-risk){scopeFilteredWalletSet.size > 0 ? ` (${scopeFilteredWalletSet.size})` : ''}
+          </label>
+        </div>
+        {/* Server-derived `rosterFetchStatus.running` only, matching how the button row below
+            decides Pause vs Resume vs Fetch — NOT the client-only `researchUpdateBusy` flag. That
+            flag is set at the start of screenTopWallets and only cleared in its own finally block;
+            when a fetch is interrupted by something outside that flow (e.g. the dev server
+            restarting mid-run, confirmed live: "Interrupted: the server restarted while this fetch
+            was running"), it can stay stuck true while the server has already moved on, hiding
+            this banner indefinitely even though the button correctly shows "Resume". */}
+        {!rosterFetchStatus?.running && staleDataAgeHours !== null && (
+          <p className="copytrade-status-warning" title="Estimate only, from each wallet's own historical average trade rate over its stored 30-day window — not a live check. A quiet wallet can still trade any minute; a busy one can go silent for days. The one certain number here is how long ago the data was last confirmed current.">
+            Your GMGN data is <strong>{formatDuration(Math.round(staleDataAgeHours * 3600))} old</strong> (last fetched {formatFetchTime(latestGmgnFetchAt)}).
+            {' '}Based on this cohort's historical trading pace, an estimated <strong>~{Math.round(estimatedTradesSinceLastFetch ?? 0).toLocaleString()} trades</strong> may
+            {' '}have happened since then that this view does not yet reflect. Skip fetching only if that's a risk you're fine carrying.
+          </p>
+        )}
+        {researchUpdateBusy && <div className="copytrade-live-fetch-status" role="status" aria-live="polite"><div><strong>{researchUpdateStage ?? 'Preparing research…'}</strong><small>Existing GMGN and Dune responses are retained; only missing work is requested.</small></div>{gmgnStatsStatus?.running && <div><b>GMGN summaries</b><span>{gmgnStatsStatus.walletDone} / {gmgnStatsStatus.walletTotal} wallets · {gmgnStatsStatus.requestsMade} requests</span><small>Fetching and parsing wallet statistics</small></div>}{copySimulationRunStatus?.running && <div><b>Dune copy prices</b><span>Query {copySimulationRunStatus.currentBatch || '—'} / {copySimulationRunStatus.batchesTotal || '—'} · {copySimulationRunStatus.targetsProcessed.toLocaleString()} / {copySimulationRunStatus.targetsTotal.toLocaleString()} targets</span><small>{copySimulationRunStatus.storedTargets.toLocaleString()} stored · {copySimulationRunStatus.failedTargets.toLocaleString()} failed · {copySimulationRunStatus.remainingTargets.toLocaleString()} remaining · Dune {copySimulationRunStatus.duneState?.replace('QUERY_STATE_', '').toLowerCase() ?? 'submitting'}</small><small>{copySimulationRunStatus.message}</small></div>}</div>}
+        <div className="copytrade-workflow-actions">
+          <div className="copytrade-workflow-row">
+            <div className="copytrade-workflow-label"><span className="copytrade-workflow-step">1</span><div><strong>GMGN screening</strong><small>{visibleWalletScreenSummary ? `${visibleWalletScreenSummary.statsWalletCount}/${visibleWalletScreenSummary.walletCount} wallets · fetched ${formatFetchTime(visibleWalletScreenSummary.lastFetchedAt)}` : 'No saved screening yet'}</small></div><button type="button" className="copytrade-icon-button" onClick={() => void openRosterComparison()} disabled={rosterComparisonLoading} title="Compare the current GMGN top 100 with the previous saved list" aria-label="Open GMGN top 100 comparison">{rosterComparisonLoading ? '…' : '☷'}</button></div>
+            <div className="copytrade-workflow-status"><strong>{rosterFetchStatus?.running ? 'Fetching…' : visibleWalletScreenSummary ? 'Saved screening available' : 'Not fetched'}</strong><small>Complete wallet history and 30-day summaries</small></div>
+            {rosterFetchStatus?.running && <div className="copytrade-top-fetch-detail" role="status" aria-live="polite">
+              <div className="copytrade-top-fetch-detail-head"><strong>{rosterFetchStatus.walletDone ?? 0}/{rosterFetchStatus.walletTotal ?? 0} wallets</strong><span>{rosterProgressPercent === null ? 'Progress calculating' : `${rosterProgressPercent.toFixed(1)}%`}</span></div>
+              <progress max={100} value={rosterProgressPercent ?? 0} />
+              <small>{rosterFetchStatus.currentWalletAddress ? `Current: ${shortAddress(rosterFetchStatus.currentWalletAddress)}` : 'Preparing wallet'} · {(rosterFetchStatus.storedTradesTotal ?? 0).toLocaleString()} stored · {(rosterFetchStatus.tradesFetched ?? 0).toLocaleString()} new · {(rosterFetchStatus.tradesDuplicate ?? 0).toLocaleString()} duplicates · {(rosterFetchStatus.requestsMade ?? 0).toLocaleString()} requests</small>
+              <small>{(rosterFetchStatus.failedWallets ?? 0).toLocaleString()} failed wallets · {rosterFetchStatus.currentWalletEstimatedRemainingSeconds == null ? 'Wallet ETA calculating' : `${formatSeconds(rosterFetchStatus.currentWalletEstimatedRemainingSeconds)} current wallet remaining`} · {rosterFetchStatus.totalEstimatedRemainingSeconds == null ? 'Total ETA calculating' : `${formatSeconds(rosterFetchStatus.totalEstimatedRemainingSeconds)} total remaining`}</small>
+            </div>}
+            {rosterFetchStatus?.running
+              ? <button className="primary copytrade-stop-button" disabled={copyTradeStopBusy} onClick={() => void stopCopyTradeFetch()}>{copyTradeStopBusy ? 'Pausing…' : 'Pause GMGN fetch'}</button>
+              : rosterFetchStatus?.resumeAvailable
+                ? <button className="primary" disabled={copyTradeResumeBusy || researchUpdateBusy || gmgnStatsBusy || gmgnStatsStatus?.running || rosterSyncBusy || copySimulationRunStatus?.running} onClick={() => void resumeCopyTradeFetch()}>{copyTradeResumeBusy ? 'Resuming…' : 'Resume GMGN fetch'}</button>
+                : <button className="primary" onClick={() => void screenTopWallets()} disabled={researchUpdateBusy || gmgnStatsBusy || gmgnStatsStatus?.running || rosterSyncBusy || copySimulationRunStatus?.running}>{researchUpdateBusy && !visibleWalletScreenSummary ? 'Fetching…' : 'Fetch top 100'}</button>}
+            {!rosterFetchStatus?.running && rosterFetchStatus?.runId !== null && rosterFetchStatus?.runId !== undefined && <button className="quiet" disabled={copyTradeResetBusy} onClick={() => void resetCopyTradeFetch()} title="Forget only the resumable cursor. Saved GMGN trades remain in SQLite.">{copyTradeResetBusy ? 'Resetting…' : 'Reset resume snapshot'}</button>}
+            {/* Was computed but never rendered — a live-vs-fallback roster refresh looked
+                identical to the user, with the distinction only visible in a transient toast
+                that the next fetch stage immediately overwrote. */}
+            {rosterRefreshError && <p className="copytrade-status-warning" role="alert">{rosterRefreshError}</p>}
+            {!rosterRefreshError && rosterRefreshMessage && <p className={rosterRefreshMessage.startsWith('Live refresh blocked') ? 'copytrade-status-warning' : 'muted'} role="status">{rosterRefreshMessage}</p>}
+            {!rosterFetchStatus?.running && rosterFetchStatus?.message && <p className={rosterFetchStatus.status === 'failed' ? 'copytrade-status-warning' : 'muted'}>{rosterFetchStatus.message}</p>}
+            {visibleWalletScreenSummary && <div className="copytrade-screening-summary">
+              <div className="copytrade-screening-summary-facts"><span><strong>{visibleWalletScreenSummary.statsWalletCount}/{visibleWalletScreenSummary.walletCount}</strong> wallets</span><span><strong>{visibleWalletScreenSummary.notFastWallets}</strong> not fast · <strong>{visibleWalletScreenSummary.fastWallets}</strong> fast</span><span><strong>{visibleWalletScreenSummary.totalTrades.toLocaleString()}</strong> trades · {visibleWalletScreenSummary.periodDays}d</span><span>Most active: <strong>{visibleWalletScreenSummary.maxTrades.toLocaleString()}</strong>{visibleWalletScreenSummary.maxTradesWallet ? ` · ${shortAddress(visibleWalletScreenSummary.maxTradesWallet)}` : ''}</span><span><strong>{researchWalletAddresses.length}</strong> selected for Dune</span>{skippedScreeningCount > 0 && <span><strong>{skippedScreeningCount}</strong> excluded{triageExcludedFromDuneCount > 0 && ` (${triageExcludedFromDuneCount} by triage)`}</span>}</div>
+              <label className="copytrade-filter-toggle" title={triageHasCurrentInputs ? `Skips the ${eliminationReport?.eliminated.length ?? 0} wallets rejected by the current triage run. Uncheck to include them, or re-check an individual row below.` : 'Run triage after the latest GMGN and Dune fetches before using its exclusions.'}>
+                <input type="checkbox" checked={skipEliminatedInDune} disabled={!triageHasCurrentInputs || eliminationReport?.eliminated.length === 0} onChange={(event) => setSkipEliminatedInDune(event.target.checked)} />
+                Skip wallets triage rejected{eliminationReport ? ` (${eliminationReport.eliminated.length})` : ''}{eliminationReport && !triageHasCurrentInputs ? ' · triage out of date' : ''}
+              </label>
+              <details><summary>Show activity table ({visibleWalletScreenSummary.activityLeaders.length})</summary><div className="table-wrap copytrade-screening-activity-table"><table><thead><tr><th>Fetch?</th><th>Activity #</th><th>Rank</th><th>Trader</th><th>Trades</th><th>Net profit (30d)</th><th>Delay fit</th></tr></thead><tbody>{visibleWalletScreenSummary.activityLeaders.map((entry, index) => { const excluded = excludedScreeningWalletSet.has(entry.wallet); const rejectedByTriage = triageEliminatedWalletSet.has(entry.wallet); const highRiskReasons = highRiskWalletReasons.get(entry.wallet); const delayFit = entry.averageHoldSeconds === null ? 'Unknown' : entry.averageHoldSeconds < 60 ? 'Poor fit — fast trader' : 'Better fit — fetch'; return <tr key={entry.wallet} className={excluded ? 'copytrade-screening-excluded' : undefined}><td><input type="checkbox" checked={!excluded} onChange={() => toggleScreeningWallet(entry.wallet)} aria-label={`${excluded ? 'Include' : 'Exclude'} ${entry.name?.trim() || shortAddress(entry.wallet)} in Dune research`} /></td><td>{index + 1}</td><td>{entry.rank === null ? '—' : `#${entry.rank}`}</td><td>{entry.name?.trim() || shortAddress(entry.wallet)}{rejectedByTriage && <small className="copytrade-warning-text" title="The last triage run rejected this wallet. Check the box to fetch it anyway."> · rejected by triage</small>}{highRiskReasons && highRiskReasons.length > 0 && <small className="copytrade-warning-text" title="Check the box to fetch it anyway."> · {highRiskReasons.join(', ')}</small>}</td><td>{entry.trades.toLocaleString()}</td><td className={entry.netProfit !== null && entry.netProfit >= 0 ? 'positive' : entry.netProfit !== null ? 'negative' : undefined}>{formatUsd(entry.netProfit)}</td><td title="GMGN provides average holding time here; this is the best available delay-risk proxy.">{delayFit}<small>{entry.averageHoldSeconds === null ? 'No hold-time data' : `${formatHoldingTime(entry.averageHoldSeconds)} average hold`}</small></td></tr>; })}</tbody></table></div></details>{visibleWalletScreenSummary.missingStatsWallets > 0 && <small>{visibleWalletScreenSummary.missingStatsWallets} summaries missing</small>}
+            </div>}
+          </div>
+          <div className="copytrade-workflow-row">
+            <div className="copytrade-workflow-label"><span className="copytrade-workflow-step">2</span><div><strong>Dune copy test</strong><small>{copySimulationRunStatus?.persistedRun?.completedAt ? `Last fetched ${formatFetchTime(copySimulationRunStatus.persistedRun.completedAt)}` : 'No saved Dune run yet'}</small></div></div>
+            <div className="copytrade-workflow-status"><strong>{duneRunActive ? 'Processing Dune targets…' : preciseTargetsRemaining === 0 ? 'Dune complete · no new targets' : copySimulationRunStatus?.outcome === 'complete' ? 'Dune run complete' : copySimulationRunStatus?.persistedRun ? 'Saved Dune evidence available' : 'Not fetched'}</strong><small>{duneRunActive && copySimulationRunStatus ? `${copySimulationRunStatus.targetsProcessed.toLocaleString()} / ${copySimulationRunStatus.targetsTotal.toLocaleString()} targets processed · ${copySimulationRunStatus.remainingTargets.toLocaleString()} remaining` : `${duneNeedsDataCount} wallets need more evidence; ${preciseTargetsRemaining === null ? 'Dune target count is loading' : `${preciseTargetsRemaining.toLocaleString()} price targets remain`}`}</small></div>
+            <button className="primary" onClick={() => void approveAndResearch()} disabled={researchUpdateBusy || !visibleWalletScreenSummary || !duneNeedsDataWalletAddresses.length || !duneHasNewTargets || gmgnStatsStatus?.running || copySimulationRunStatus?.running}>{researchUpdateBusy && visibleWalletScreenSummary ? 'Fetching…' : preciseTargetsRemaining === 0 ? 'No new Dune data to fetch' : copySimulationRunStatus?.outcome === 'partial' || copySimulationRunStatus?.outcome === 'stopped' ? `Resume Dune (${preciseTargetsRemaining?.toLocaleString() ?? '…'} targets · ${duneNeedsDataCount} wallets)` : `Fetch ${preciseTargetsRemaining?.toLocaleString() ?? '…'} Dune targets (${duneNeedsDataCount} wallets)`}</button>
+          </div>
+          <div className="copytrade-dune-scope" role="status" aria-live="polite">
+            <div className="copytrade-dune-scope-head"><strong>Dune research scope</strong><span>{duneNeedsDataCount} wallets still need more data</span></div>
+            <div className="copytrade-dune-scope-grid"><span><b>{researchWalletAddresses.length}</b> selected wallets</span><span><b>{duneNeedsDataCount}</b> need more evidence</span><span><b>{duneResultCount}</b> have a saved Dune result</span><span><b>{preciseTargetsRemaining == null ? '—' : preciseTargetsRemaining.toLocaleString()}</b> price targets unqueried</span><span><b>{widerRetryCandidates == null ? '—' : widerRetryCandidates.toLocaleString()}</b> queried with no usable match</span></div>
+            {copySimulationRunStatus?.running && <><progress max={100} value={copySimulationRunStatus.targetsTotal > 0 ? Math.min(100, copySimulationRunStatus.targetsProcessed / copySimulationRunStatus.targetsTotal * 100) : 0} /><small>{copySimulationRunStatus.targetsProcessed.toLocaleString()} / {copySimulationRunStatus.targetsTotal.toLocaleString()} targets · {copySimulationRunStatus.remainingTargets.toLocaleString()} remaining · {copySimulationRunStatus.failedTargets.toLocaleString()} failed</small></>}
+            {copySimulationRunStatus?.audit && !copySimulationRunStatus.running && <small>Last audited run: planned {copySimulationRunStatus.audit.plannedTargets.toLocaleString()} · submitted {copySimulationRunStatus.audit.submittedTargets.toLocaleString()} · stored {copySimulationRunStatus.audit.storedTargets.toLocaleString()} · failed {copySimulationRunStatus.audit.failedTargets.toLocaleString()} · remaining {copySimulationRunStatus.audit.remainingTargets.toLocaleString()}</small>}
+            <small>{duneNeedsDataCount > 0 && preciseTargetsRemaining === 0 ? `These ${duneNeedsDataCount} wallets still fail a decision-evidence rule, but Dune has no unqueried prices left. The missing evidence may be insufficient sample/coverage or a price Dune could not match; another normal fetch cannot create it.` : duneNeedsDataCount > 0 ? `The button above targets only these ${duneNeedsDataCount} wallets. It fetches their missing eligible price targets and keeps completed results; it does not fetch the other ${Math.max(0, researchWalletAddresses.length - duneNeedsDataCount)} wallets.` : 'No selected wallet currently needs more evidence; the Dune button is disabled.'}</small>
+            {(() => {
+              // The real reason a batch failed (Dune's own error text — e.g. an exhausted
+              // billing quota) was captured by the backend all along but never rendered here;
+              // only a generic failed-count ever reached the UI. Deduplicated because the same
+              // failure (like an account-level quota) repeats identically across every batch.
+              const failureMessages = [...new Set((copySimulationRunStatus?.batches ?? [])
+                .filter((batch) => batch.status === 'failed' && batch.error)
+                .map((batch) => batch.error as string))];
+              return failureMessages.length > 0 ? (
+                <p className="copytrade-status-warning" role="alert">
+                  {failureMessages.length === 1 ? 'Dune reported: ' : `Dune reported ${failureMessages.length} distinct errors: `}
+                  {failureMessages.join(' · ')}
+                </p>
+              ) : null;
+            })()}
+          </div>
+        </div>
+      </div>
+      {rosterComparisonOpen && rosterComparison && <div className="copytrade-modal-backdrop" role="presentation" onClick={() => setRosterComparisonOpen(false)}><div className="copytrade-modal copytrade-roster-modal" role="dialog" aria-modal="true" aria-label="GMGN top 100 comparison" onClick={(event) => event.stopPropagation()}>
+        <div className="copytrade-modal-head"><div><p className="eyebrow">GMGN ROSTER</p><h3>Top 100 wallet comparison</h3><small>{rosterComparison.currentCapturedAt ? `Current: ${formatFetchTime(rosterComparison.currentCapturedAt)}` : 'No saved snapshot'}</small></div><button className="secondary" onClick={() => setRosterComparisonOpen(false)}>Close</button></div>
+        {!rosterComparison.baselineAvailable ? <p className="muted">No earlier GMGN list is saved, so there is no baseline for identifying new or departed wallets.</p> : <><p className="copytrade-roster-modal-summary"><strong>{rosterComparison.joined.length} new today</strong><span>·</span><strong>{rosterComparison.left.length} left the previous list</strong></p><div className="copytrade-roster-modal-left"><h4>Left the list</h4>{rosterComparison.left.length === 0 ? <p className="muted">None.</p> : <div>{rosterComparison.left.map((wallet) => <a key={wallet.walletAddress} href={`https://gmgn.ai/sol/address/${wallet.walletAddress}`} target="_blank" rel="noreferrer"><span>{wallet.rankPosition ? `#${wallet.rankPosition}` : '—'}</span>{wallet.name?.trim() || shortWalletAddress(wallet.walletAddress)} ↗</a>)}</div>}</div></>}
+        <h4>Current ranked list</h4><div className="table-wrap copytrade-roster-modal-table"><table><thead><tr><th>Rank</th><th>Wallet</th><th>GMGN 30d PnL</th><th>Status</th></tr></thead><tbody>{rosterComparison.current.map((wallet) => { const isJoined = rosterComparison.joined.some((entry) => entry.walletAddress === wallet.walletAddress); return <tr key={wallet.walletAddress} className={isJoined ? 'copytrade-roster-new-row' : undefined}><td>#{wallet.rankPosition ?? '—'}</td><td><WalletIcon url={wallet.iconUrl} name={wallet.name || wallet.walletAddress} /><a href={`https://gmgn.ai/sol/address/${wallet.walletAddress}`} target="_blank" rel="noreferrer">{wallet.name?.trim() || shortWalletAddress(wallet.walletAddress)} ↗</a><small title={wallet.walletAddress}>{shortWalletAddress(wallet.walletAddress)}</small></td><td>{wallet.reportedPnl30d ?? '—'}</td><td>{isJoined ? <span className="copytrade-roster-new-badge">NEW TODAY</span> : 'Previously listed'}</td></tr>; })}</tbody></table></div>
+      </div></div>}
+      <div className="copytrade-top-export-row">
+        <button className="secondary" onClick={() => void exportUnifiedTraderCsv()} disabled={exportBusy || sortedUnifiedTraderRows.length === 0}>{exportBusy ? 'Exporting…' : 'Export full table'}</button>
+        <span>{researchWalletAddresses.length} wallets selected for Dune</span>
+      </div>
+      {rosterChange && <div className="copytrade-roster-change" role="status">
+        <strong>{rosterChange.live ? 'GMGN roster source: live request' : 'GMGN roster source: saved snapshot'}</strong>
+        {rosterChange.live
+          ? <span>{rosterChange.joinedWallets.length} joined · {rosterChange.leftWallets.length} left · unchanged wallets remain in the saved history.</span>
+          : <span>No new leaderboard was received, so no membership change was measured.</span>}
+        {(rosterChange.joinedWallets.length > 0 || rosterChange.leftWallets.length > 0) && <details><summary>Show wallet changes</summary><div className="copytrade-roster-change-lists">
+          {rosterChange.joinedWallets.length > 0 && <div><b>Joined</b>{rosterChange.joinedWallets.map((wallet) => <a key={`joined-${wallet}`} href={`https://gmgn.ai/sol/address/${wallet}`} target="_blank" rel="noreferrer" title={wallet}>{shortWalletAddress(wallet)} ↗</a>)}</div>}
+          {rosterChange.leftWallets.length > 0 && <div><b>Left</b>{rosterChange.leftWallets.map((wallet) => <a key={`left-${wallet}`} href={`https://gmgn.ai/sol/address/${wallet}`} target="_blank" rel="noreferrer" title={wallet}>{shortWalletAddress(wallet)} ↗</a>)}</div>}
+        </div></details>}
+      </div>}
+      <div className="copytrade-table-overview">
+        <span>{gmgnStatsFreshRows} / {copyTradeRows.length} summaries fresh · {duneMatchedTargets.toLocaleString()} usable Dune target legs</span>
+      </div>
+      <div className="copytrade-decision-filters">
+        <label className="copytrade-filter-toggle"><input type="checkbox" checked={showDelaySurvivorsOnly} onChange={(event) => setShowDelaySurvivorsOnly(event.target.checked)} /> Show positive copy gains only</label>
+        <span>{walletStatsTableLoading ? 'Loading…' : `${visibleDecisionRows.length} shown`}</span>
+      </div>
+      <div className="table-wrap copytrade-table-wrap copytrade-decision-table-wrap" onClickCapture={(event) => { const target = event.target as HTMLElement; if (target.closest('a,button')) return; const row = target.closest('tr.copytrade-decision-row') as HTMLElement | null; const walletAddress = row?.dataset.walletAddress; if (walletAddress) openStatsDetail(walletAddress); }}><table className="copytrade-table copytrade-decision-table"><thead><tr><th onClick={() => toggleDecisionSort('rank')} className="sortable-header" title="Sort by current GMGN rank">Rank{decisionSortIndicator('rank')}</th><th title="Open this wallet on GMGN">GMGN</th><th onClick={() => toggleDecisionSort('name')} className="sortable-header" title="Sort by trader">Trader{decisionSortIndicator('name')}</th><th onClick={() => toggleDecisionSort('verdict')} className="sortable-header" title="Sort by verdict">Decision{decisionSortIndicator('verdict')}</th><th title="Age of the GMGN stats response this row's verdict was computed from">Data freshness</th><th onClick={() => toggleDecisionSort('gmgnPnl')} className="sortable-header" title="GMGN-reported 30-day realized profit before delay, fees, slippage, or Dune matching">30d GMGN PnL{decisionSortIndicator('gmgnPnl')}</th><th onClick={() => toggleDecisionSort('copyResult')} className="sortable-header" title="Median simulated return per copied trade after delay, fees, and slippage">30d copy median{decisionSortIndicator('copyResult')}</th><th onClick={() => toggleDecisionSort('copyCapital')} className="sortable-header" title="Sort by cash-constrained simulated ending value from $100">$100 after copy{decisionSortIndicator('copyCapital')}</th><th onClick={() => toggleDecisionSort('coverage')} className="sortable-header" title="Sort by Dune coverage">Evidence{decisionSortIndicator('coverage')}</th><th onClick={() => toggleDecisionSort('activity')} className="sortable-header" title="Sort by typical holding time">Typical hold{decisionSortIndicator('activity')}</th><th aria-label="Details" /></tr></thead><tbody>
+        {(walletStatsTableLoading ? [] : visibleDecisionRows).map((entry) =>{
+          const delay = entry.delay;
+          const simulatedMedian = delay?.sim?.simulatedMedianReturnPercent ?? null;
+          const copyLabel = simulatedMedian === null ? delay?.reading ?? 'Not measured' : formatPct(simulatedMedian);
+          const copyCapital = delay?.sim?.portfolio?.endingCapitalUsd ?? null;
+          const evidenceLabel = delay?.sim ? `${delay.sim.copiedTrades.toLocaleString()} / ${delay.sim.roundTripsConsidered.toLocaleString()}` : 'Not measured';
+          const coverageClass = delay?.coverage === null || delay?.coverage === undefined ? 'unknown' : delay.coverage >= 90 ? 'full' : delay.coverage >= 70 ? 'partial' : 'low';
+          const verdictTooltip = entry.verdict === 'Tested candidate'
+            ? 'Over the last 30 days: the typical copied trade was profitable (positive median, not just a positive total), every measured week was positive, and the wallet did not decline between its earlier and recent history — all on Dune coverage and sample size good enough to trust. Descriptive of the past only; not a prediction.'
+            : entry.verdict === 'Watch'
+              ? 'The 30-day GMGN total is positive, but it is not consistent profit: either the delayed-copy test failed, the typical copied trade loses money even though the total is positive, a measured week was negative, or the wallet declined between its earlier and recent history.'
+              : entry.verdict === 'Needs data'
+                ? 'Not a rejection: GMGN history or stats, Dune evidence, coverage, sample size, or cost data is incomplete. Fetch the top 100 again for GMGN data, then fetch Dune details for missing copy evidence.'
+                : entry.verdict === 'Not copyable'
+                  ? 'Typical holding time is shorter than the configured copy delay, so copying may arrive too late.'
+                  : entry.verdict === 'Historical / stale'
+                    ? 'GMGN history is older than 24 hours. Click the Fetch top 100 button to refresh the GMGN roster, history, and 30-day summaries; the verdict will recalculate automatically.'
+                    : entry.verdict === 'Historical screen failed'
+                      ? 'The current 30-day GMGN result is not positive. Fetch newer GMGN data if you want to recheck this period.'
+                      : entry.verdict;
+          const walletNameCandidate = entry.name?.trim() ?? '';
+          const normalizedWalletName = walletNameCandidate.replace(/[.…]+$/g, '').toLowerCase();
+          const walletName = walletNameCandidate && normalizedWalletName !== entry.row.walletAddress.toLowerCase() && !entry.row.walletAddress.toLowerCase().startsWith(normalizedWalletName) ? walletNameCandidate : null;
+          const isWinner = primary30dWinner?.row.walletAddress === entry.row.walletAddress;
+          return <tr key={`decision-${entry.row.walletAddress}`} data-wallet-address={entry.row.walletAddress} className={`copytrade-decision-row verdict-${entry.verdict.toLowerCase().replaceAll(' ', '-').replaceAll('/', '-')}${isWinner ? ' copytrade-decision-winner-row' : ''}`} onClick={() => openStatsDetail(entry.row.walletAddress)} onPointerUp={(event) => { if (!(event.target as HTMLElement).closest('a,button')) openStatsDetail(entry.row.walletAddress); }} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStatsDetail(entry.row.walletAddress); } }}>
+            <td title="Current rank in the selected GMGN roster">{entry.row.rankHistory.currentRank === null ? '—' : `#${entry.row.rankHistory.currentRank}`}</td>
+            <td><a className="copytrade-gmgn-link" href={`https://gmgn.ai/sol/address/${entry.row.walletAddress}`} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="Open this wallet on GMGN">View ↗</a></td>
+            <td title="Trader name and wallet address."><WalletIcon url={entry.row.iconUrl} name={walletName || entry.row.walletAddress} /><span>{walletName ? <><strong>{walletName}</strong><small className="address-compact" title={entry.row.walletAddress}>{shortWalletAddress(entry.row.walletAddress)}</small></> : <strong className="address-compact" title={entry.row.walletAddress}>{shortWalletAddress(entry.row.walletAddress)}</strong>}<CopyAddressButton address={entry.row.walletAddress} /></span></td>
+            <td><span title={verdictTooltip} aria-label={verdictTooltip} className={`copytrade-verdict-badge ${DECISION_STATES[decisionStateFor(entry.verdict)].tone}`}>{DECISION_STATES[decisionStateFor(entry.verdict)].label}</span></td>
+            <td title={`GMGN 30d stats: ${entry.long?.fetchedAt ? formatFetchTime(entry.long.fetchedAt) : 'not available'}. Dune 30d simulation: ${entry.duneEvidenceAt ? formatFetchTime(entry.duneEvidenceAt) : 'not available'}. Both must be current for a candidate verdict.`}><span className={!entry.freshStats || !entry.duneFresh ? 'copytrade-warning-text' : ''}>{entry.long?.fetchedAt ? `GMGN ${freshnessLabel(entry.long.fetchedAt).text}` : 'GMGN 30d missing'} · {entry.duneEvidenceAt ? `Dune ${freshnessLabel(entry.duneEvidenceAt).text}` : 'Dune 30d missing'}</span></td>
+            <td title="GMGN-reported 30-day realized profit before delay, fees, slippage, or Dune matching."><strong className={entry.historical30d === null ? '' : entry.historical30d >= 0 ? 'positive' : 'negative'}>{entry.long?.realizedProfit === null || entry.long?.realizedProfit === undefined ? formatPct(entry.historical30d) : formatUsd(entry.long.realizedProfit)}</strong>{entry.long?.realizedProfit !== null && entry.long?.realizedProfit !== undefined && <small>{formatPct(entry.historical30d)} GMGN return</small>}</td>
+            <td title="Median simulated return per copied trade after the configured copy delay, fees, and slippage. The winner panel's portfolio P&L compounds the full trade path, so it can be much larger."><strong className={entry.verdict === 'Tested candidate' && simulatedMedian !== null ? (simulatedMedian >= 0 ? 'positive' : 'negative') : ''}>{copyLabel}</strong><small>{delay?.edge === null || delay?.edge === undefined ? 'After delay and costs' : `${delay.edge.toFixed(0)}% edge kept`}</small></td>
+            <td title="Cash-constrained simulated ending value from a $100 starting portfolio after delay, fees, slippage, and gas."><strong className={copyCapital !== null ? (copyCapital >= 100 ? 'positive' : 'negative') : ''}>{formatCopyCapital(copyCapital)}</strong></td>
+            <td title={`Dune price matches: copied trades divided by eligible round trips. ${delay?.coverage === null || delay?.coverage === undefined ? 'Coverage percentage is not available.' : `${delay.coverage.toFixed(0)}% usable prices.`}`}><strong><i className={`dune-coverage-dot ${coverageClass}`} /> {evidenceLabel}</strong></td>
+            <td title={`Median time this trader holds a position. Evidence is ${entry.freshStats ? 'fresh' : 'older than 24 hours'}.`}><strong>{formatHoldingTime(delay?.hold ?? null)}</strong></td>
+            <td className="copytrade-decision-chevron"><button type="button" className="copytrade-detail-button" onPointerUp={(event) => { event.stopPropagation(); openStatsDetail(entry.row.walletAddress); }} onClick={(event) => { event.stopPropagation(); openStatsDetail(entry.row.walletAddress); }} title="Open full trader details." aria-label="Open trader details">›</button></td>
+          </tr>;
+        })}
+        {sortedUnifiedTraderRows.length === 0 && <tr><td colSpan={10} className="muted">{walletStatsTableLoading ? <span className="copytrade-loading-inline"><span className="loading-spinner" aria-hidden="true" /> Loading roster and GMGN summaries…</span> : 'Load a roster and fetch GMGN summaries to build the candidate list.'}</td></tr>}
+      </tbody></table></div>
+      <details className="copytrade-maintenance" open={maintenanceOpen || statsDetailWallet !== null} onToggle={(event) => setMaintenanceOpen(event.currentTarget.open)}><summary>Trader evidence</summary>
+      {statsDetailWallet && (() => {
+        const periods = gmgnStatsByWallet.get(statsDetailWallet);
+        const detail7d = periods?.get('7d') ?? null;
+        const detail30d = periods?.get('30d') ?? null;
+        const detail = periods?.get('30d') ?? periods?.get('7d') ?? null;
+        const row = copyTradeRows.find((entry) => entry.walletAddress === statsDetailWallet);
+        const title = row?.name?.trim() || shortAddress(statsDetailWallet);
+        const money = (value: number | null) => value === null ? '—' : formatUsd(value);
+        // Bucket counts are GMGN's own outcome distribution. Rendered as a proportional bar so
+        // the shape is readable at a glance — a wallet whose wins are all 0-2x is a different
+        // animal from one carried by a handful of >5x, even at identical win rates.
+        const b = detail?.buckets;
+        const bucketRows = b ? ([
+          { label: 'Lost over 50%', value: b.lossOver50, tone: 'negative' },
+          { label: 'Lost 0-50%', value: b.loss50to0, tone: 'negative' },
+          { label: 'Gained 0-2x', value: b.gain0to2x, tone: 'positive' },
+          { label: 'Gained 2-5x', value: b.gain2to5x, tone: 'positive' },
+          { label: 'Gained over 5x', value: b.gainOver5x, tone: 'positive' },
+        ]) : [];
+        const bucketTotal = bucketRows.reduce((sum, entry) => sum + (entry.value ?? 0), 0);
+        const historyCutoffSeconds = Math.floor(Date.now() / 1000) - copyTradePeriodDays * 24 * 60 * 60;
+        const allSellHistoryRows = statsDetailTrades?.rows.filter((trade) => trade.eventType.toLowerCase().startsWith('sell')) ?? [];
+        const visibleSellHistoryRows = (showOnlyCurrentHistory ? allSellHistoryRows.filter((trade) => trade.observedTimestamp >= historyCutoffSeconds) : allSellHistoryRows)
+          .sort((left, right) => left.observedTimestamp - right.observedTimestamp || left.id - right.id);
+        const detailDecision = unifiedTraderRows.find((entry) => entry.row.walletAddress === statsDetailWallet);
+        const detailPortfolio = detailDecision?.delay?.sim?.portfolio;
+        const detailTradePath = detailPortfolio?.tradeCapitalPath?.map((point) => ({ day: point.day, label: `Trade ${point.trade}`, tradeId: point.tradeId, capitalUsd: point.capitalUsd })) ?? [];
+        const chartTradeIds = new Set(detailTradePath.map((point) => point.tradeId).filter((tradeId): tradeId is number => tradeId !== undefined));
+        const tableTradeIds = new Set(visibleSellHistoryRows.map((trade) => trade.id));
+        const canReconcileTrades = detailTradePath.length > 0 && detailTradePath.every((point) => point.tradeId !== undefined);
+        const missingFromChart = canReconcileTrades ? visibleSellHistoryRows.filter((trade) => !chartTradeIds.has(trade.id)) : [];
+        const missingFromTable = canReconcileTrades ? detailTradePath.filter((point) => point.tradeId !== undefined && !tableTradeIds.has(point.tradeId)) : [];
+        return <div className="copytrade-modal-backdrop" role="presentation" onClick={() => setStatsDetailWallet(null)}>
+          <div className="copytrade-modal copytrade-stats-modal" role="dialog" aria-modal="true" aria-label={`GMGN saved statistics for ${title}`} onClick={(event) => event.stopPropagation()}>
+            <div className="copytrade-modal-head">
+              <div>
+                <p className="eyebrow">GMGN SAVED RESPONSE</p>
+                <h3>{title}</h3>
+                <small className="address-compact">{statsDetailWallet}<CopyAddressButton address={statsDetailWallet} /></small>
+              </div>
+              <button className="secondary" onClick={() => setStatsDetailWallet(null)}>Close</button>
+            </div>
+            {(() => {
+              const decision = unifiedTraderRows.find((entry) => entry.row.walletAddress === statsDetailWallet);
+              const decisionSimulation = decision?.delay?.sim;
+              return decision ? <div className="copytrade-evidence-summary">
+                <div><span>Decision</span><strong className={`copytrade-verdict-badge ${decision.verdict === 'Tested candidate' ? 'pass' : decision.verdict === 'Not copyable' || decision.verdict === 'Historical screen failed' ? 'fail' : 'pending'}`}>{decision.verdict}</strong></div>
+                <div><span>7-day history</span><strong>{formatPct(decision.historical7d)}</strong></div>
+                <div><span>Delayed copy result</span><strong>{formatPct(decisionSimulation?.simulatedMedianReturnPercent ?? null)}</strong></div>
+                <div><span>Dune evidence</span><strong>{decision.coverage === null ? 'Not measured' : `${decision.coverage.toFixed(0)}% usable`}</strong></div>
+                <p>{decision.verdict === 'Tested candidate' ? 'This row passed the current historical, coverage, freshness, and delayed-copy gates.' : decision.verdict === 'Needs data' ? 'This trader is not rejected; the evidence is incomplete or stale.' : decision.verdict === 'Not copyable' ? 'The typical holding time is shorter than the configured copy delay.' : 'This is a historical or data-quality result, not a final follow recommendation.'}</p>
+              </div> : null;
+            })()}
+            {(() => {
+              if (!detailPortfolio) return null;
+              const path = detailTradePath.length > 0 ? [{ day: 'start', label: 'Start', capitalUsd: detailPortfolio.startingCapitalUsd }, ...detailTradePath] : detailPortfolio.capitalPath;
+              const reconciliationWarning = !canReconcileTrades || missingFromChart.length > 0 || missingFromTable.length > 0;
+              return <div className="copytrade-modal-block copytrade-capital-chart-block">
+                <div className="copytrade-modal-block-head"><p className="compact-info-line"><span>$100 after-copy path</span><InfoTip label="$100 after-copy path" text="The simulated cash balance after each completed copied trade, using the configured delay, fees, slippage, gas, fixed $10 stake, and position limit. Older saved runs may show one point per day until they are recomputed." /></p><strong>{detailTradePath.length > 0 ? `${detailTradePath.length} completed trades` : 'Saved daily path'}</strong><small className="copytrade-chart-zoom-hint">Scroll over chart to zoom</small></div>
+                <div className={`copytrade-trade-reconciliation${reconciliationWarning ? ' warning' : ''}`}><strong>Trade reconciliation</strong><span>Chart: {detailTradePath.length} · Table: {visibleSellHistoryRows.length} sells</span><small>{!canReconcileTrades ? 'This saved chart predates trade IDs, so its points cannot be matched row-by-row.' : missingFromChart.length === 0 && missingFromTable.length === 0 ? 'Every visible sell row has a matching chart point.' : `${missingFromChart.length} table row${missingFromChart.length === 1 ? '' : 's'} missing from chart · ${missingFromTable.length} chart point${missingFromTable.length === 1 ? '' : 's'} missing from table.`} Partial sells split the fixed stake proportionally; open positions remain valued at cost until sold.</small></div>
+                <div className="copytrade-capital-chart-scroll"><CapitalPathChart points={path} activeTradeId={statsDetailTradeId} onTradeHover={(tradeId) => highlightStatsTrade(tradeId, tradeId !== null)} zoomable /></div>
+              </div>;
+            })()}
+            <div className="copytrade-modal-block">
+              <p className="eyebrow">GMGN PERIOD RESULTS</p>
+              <div className="copytrade-modal-period-grid">
+                {[['7-day', detail7d], ['30-day', detail30d]].map(([label, period]) => {
+                  const stats = period as GmgnAggregateStats | null;
+                  return <div className="copytrade-modal-period" key={label as string}><strong>{label as string}</strong>{stats ? <><span>Realized PnL <b>{formatPct(stats.realizedProfitPnlPercent)}</b></span><span>Profit <b>{money(stats.realizedProfit)}</b></span><span>Win rate <b>{formatPct(stats.winRatePercent)}</b></span><span>Buys / sells <b>{formatCount(stats.buyCount)} / {formatCount(stats.sellCount)}</b></span><span>Tokens <b>{formatCount(stats.tokenCount)}</b></span><span>Average hold <b>{formatHoldingTime(stats.averageHoldingPeriodSeconds)}</b></span><small>Fetched {formatTime(stats.fetchedAt)}</small></> : <span className="muted">Not fetched</span>}</div>;
+                })}
+              </div>
+            </div>
+            {!detail ? <p className="muted">No GMGN statistics response has been saved for this trader yet. Run “Fetch missing stats”.</p> : <>
+              <div className="copytrade-modal-meta">
+                <span>Period <b>{detail.period}</b></span>
+                <span>Fetched <b>{formatTime(detail.fetchedAt)}</b></span>
+                {detail.twitterName && <span>Twitter <b>@{detail.twitterName}</b></span>}
+                {detail.walletCreatedAt !== null && <span>Wallet created <b>{formatTime(new Date(detail.walletCreatedAt * 1000).toISOString())}</b></span>}
+              </div>
+              {detail.tags.length > 0 && <div className="copytrade-modal-tags">{detail.tags.map((tag) => <span key={tag} className={`copytrade-tag${tag === 'wash_trader' ? ' risk' : ''}`}>{tag}</span>)}</div>}
+
+              <div className="copytrade-modal-metrics">
+                <div><strong className={(detail.realizedProfit ?? 0) >= 0 ? 'positive' : 'negative'}>{money(detail.realizedProfit)}</strong><span>Realized profit</span></div>
+                <div><strong className={(detail.realizedProfitPnlPercent ?? 0) >= 0 ? 'positive' : 'negative'}>{formatPct(detail.realizedProfitPnlPercent)}</strong><span>Return on cost</span></div>
+                <div><strong>{formatPct(detail.winRatePercent)}</strong><span>Win rate</span></div>
+                <div><strong>{formatHoldingTime(detail.averageHoldingPeriodSeconds)}</strong><span>Avg hold (GMGN)</span></div>
+              </div>
+
+              <div className="copytrade-modal-block copytrade-full-history-block">
+                <div className="copytrade-modal-block-head"><p className="compact-info-line"><span>Stored sell history</span><InfoTip label="Stored sell history" text="Only sell rows are shown here. They are the rows that close positions and provide realized results; the underlying buy rows remain saved in SQLite for matching and audit." /></p><strong>{statsDetailTradesLoading ? 'Loading…' : `${visibleSellHistoryRows.length.toLocaleString()} sells`}</strong></div>
+                <label className="copytrade-filter-toggle"><input type="checkbox" checked={showOnlyCurrentHistory} onChange={(event) => setShowOnlyCurrentHistory(event.target.checked)} /> Only show sells from the current {copyTradePeriodDays}-day window</label>
+                {statsDetailTradesLoading ? <p className="copytrade-history-loading"><span className="loading-dot" /> Loading saved trades…</p> : statsDetailTrades && statsDetailTrades.rows.length > 0 ? (() => {
+                  const holds = holdingSecondsBySellId(statsDetailTrades.rows);
+                  const sellRows = visibleSellHistoryRows;
+                  return sellRows.length > 0 ? <div className="table-wrap copytrade-history-table-wrap"><table className="copytrade-table copytrade-history-table"><thead><tr><th>#</th><th>Sell time</th><th>Token</th><th>Held</th><th>P/L</th><th>Transaction</th></tr></thead><tbody>{sellRows.map((trade, index) => { const pnl = tradeReturnPercent(trade.eventType, trade.costUsd, trade.buyCostUsd); return <tr key={trade.id} data-detail-trade-id={trade.id} className={statsDetailTradeId === trade.id ? 'copytrade-trade-row-active' : ''} onMouseEnter={() => highlightStatsTrade(trade.id)} onMouseLeave={() => highlightStatsTrade(null)}><td>{index + 1}</td><td>{formatTime(new Date(trade.observedTimestamp * 1000).toISOString())}</td><td><strong>{trade.tokenSymbol?.trim() || shortAddress(trade.tokenAddress)}</strong><small className="address-compact">{shortAddress(trade.tokenAddress)}</small></td><td>{formatHoldingTime(holds.get(trade.id) ?? null)}</td><td className={pnl === null ? '' : pnl >= 0 ? 'positive' : 'negative'} title="Realized return using the stored sell proceeds and buy cost basis">{formatSignedPct(pnl)}</td><td><span className="address-compact" title={trade.txHash}>{shortAddress(trade.txHash)}</span><CopyAddressButton address={trade.txHash} /></td></tr>; })}</tbody></table></div> : <p className="muted">No stored sell rows for this wallet.</p>;
+                })() : <p className="muted">No stored trade rows for this wallet.</p>}
+              </div>
+
+              <div className="copytrade-modal-block copytrade-history-notes">
+                <p className="muted">This shows the sell rows available locally. The coverage note below explains if the original provider response was capped or interrupted.</p>
+                <p className="muted">Only stored sell rows are shown because they close a position and provide the realized result. Hold is matched to the earlier stored buy for the same token; “—” means that buy row was not saved.</p>
+                {statsDetailTrades?.coverage && <small className="muted">Fetch record: {statsDetailTrades.coverage.requestsUsed} provider requests · {statsDetailTrades.coverage.truncated ? 'history was truncated' : 'fetch was not marked truncated'}{statsDetailTrades.coverage.stopReason ? ` · ${statsDetailTrades.coverage.stopReason}` : ''} · saved {formatTime(statsDetailTrades.coverage.updatedAt)}</small>}
+              </div>
+
+              {bucketTotal > 0 && <div className="copytrade-modal-block">
+                <p className="compact-info-line"><span>Outcome distribution</span><InfoTip label="Outcome distribution" text="GMGN's own count of positions by result. This is the closest thing the aggregate endpoint gives to a return histogram — it shows whether gains come from many small wins or a few large ones." /></p>
+                {bucketRows.map((entry) => <div className="copytrade-bucket-row" key={entry.label}>
+                  <label>{entry.label}</label>
+                  <div className="copytrade-bucket-track"><i className={entry.tone} style={{ width: `${((entry.value ?? 0) / bucketTotal) * 100}%` }} /></div>
+                  <b>{entry.value === null ? '—' : formatCount(entry.value)}</b>
+                </div>)}
+                <small className="muted">{formatCount(bucketTotal)} positions counted{detail.tokenCount !== null ? ` · ${formatCount(detail.tokenCount)} distinct tokens traded` : ''}</small>
+              </div>}
+
+              <div className="copytrade-modal-block">
+                <p className="compact-info-line"><span>Flow and costs</span><InfoTip label="Flow and costs" text="Gross amounts GMGN reports for this window. Fees are already reflected in realized profit; they are shown separately so their size is visible." /></p>
+                <dl className="copytrade-modal-grid">
+                  <div><dt>Buys</dt><dd>{detail.buyCount === null ? '—' : formatCount(detail.buyCount)}</dd></div>
+                  <div><dt>Sells</dt><dd>{detail.sellCount === null ? '—' : formatCount(detail.sellCount)}</dd></div>
+                  <div><dt>Bought cost</dt><dd>{money(detail.boughtCost)}</dd></div>
+                  <div><dt>Sold income</dt><dd>{money(detail.soldIncome)}</dd></div>
+                  <div><dt>Buy fees</dt><dd>{money(detail.boughtFee)}</dd></div>
+                  <div><dt>Sell fees</dt><dd>{money(detail.soldFee)}</dd></div>
+                  <div><dt>SOL balance</dt><dd>{detail.nativeBalance === null ? '—' : `${detail.nativeBalance.toFixed(2)} SOL`}</dd></div>
+                  <div><dt>Last activity</dt><dd>{detail.lastTimestamp === null ? '—' : formatTime(new Date(detail.lastTimestamp * 1000).toISOString())}</dd></div>
+                </dl>
+              </div>
+              <small className="muted">Every value here is GMGN's own reported figure for this wallet, saved as-is. It describes what the trader did — not what copying them would have returned.</small>
+            </>}
+          </div>
+        </div>;
+      })()}
+      <div className="copytrade-delay-details">
+        <div className="table-wrap copytrade-table-wrap"><table className="copytrade-table copytrade-delay-table copytrade-combined-stats-table"><thead><tr>
+          <th>Trader</th><th>1d PnL</th><th>7d PnL</th><th>30d PnL</th><th>7d win</th><th>30d win</th><th>Trades 7d</th><th>Trades 30d</th><th>Median hold</th><th>{copySimulation?.assumptions.copierDelaySeconds ?? 15}s delay / hold</th><th>30d copy test</th><th>Dune coverage</th><th>Reading</th>
+        </tr></thead><tbody>
+          {visibleCombinedStatsRows.map(({ row, delay: entry }) => { const periods = gmgnStatsByWallet.get(row.walletAddress); const short = periods?.get('7d'); const long = periods?.get('30d'); const leaderboard = gmgnLeaderboardMetrics[row.walletAddress]; const name = row.name?.trim() || shortAddress(row.walletAddress); const simulatedMedian = entry?.sim?.simulatedMedianReturnPercent ?? null; const copyResult = simulatedMedian === null ? entry?.reading ?? 'Not measured' : formatPct(simulatedMedian); const evidencePercent = entry?.sim && entry.sim.roundTripsConsidered > 0 ? entry.sim.copiedTrades / entry.sim.roundTripsConsidered * 100 : entry?.coverage ?? null; const evidenceCoverage: DuneCoverageSummary | undefined = entry?.sim && entry.sim.roundTripsConsidered > 0 ? { matched: entry.sim.copiedTrades, eligible: entry.sim.roundTripsConsidered, percent: evidencePercent } : undefined; return <tr key={`combined-${row.walletAddress}`} className={`${entry?.survivedDelay ? 'copytrade-delay-survivor ' : ''}copytrade-row-clickable`} role="button" tabIndex={0} onClick={(event) => { if ((event.target as HTMLElement).closest('button')) return; setStatsDetailWallet(row.walletAddress); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setStatsDetailWallet(row.walletAddress); }} title="Open saved wallet and trade details"><td><strong>{name}</strong>{entry?.survivedDelay && <span className="copytrade-delay-badge">✓ survived</span>}<small className="address-compact" title={row.walletAddress}>{shortAddress(row.walletAddress)}</small><CopyAddressButton address={row.walletAddress} /></td><td className={leaderboardMetricTone(leaderboard?.pnl1d)}>{formatLeaderboardMetric(leaderboard?.pnl1d)}</td><td className={leaderboardMetricTone(leaderboard?.pnl7d)}>{formatLeaderboardMetric(leaderboard?.pnl7d)}</td><td className={leaderboardMetricTone(leaderboard?.pnl30d)}>{formatLeaderboardMetric(leaderboard?.pnl30d)}</td><td>{formatPct(short?.winRatePercent ?? null)}</td><td>{formatPct(long?.winRatePercent ?? null)}</td><td>{entry?.totalTrades7d == null ? '—' : formatCount(entry.totalTrades7d)}<span className={`dune-coverage-dot ${duneCoverageClass(entry?.coverage7d ?? null)}`} /></td><td>{entry?.totalTrades30d == null ? '—' : formatCount(entry.totalTrades30d)}<span className={`dune-coverage-dot ${duneCoverageClass(entry?.coverage30d ?? null)}`} /></td><td>{formatHoldingTime(entry?.hold ?? null)}</td><td className={entry?.impossible ? 'negative' : entry?.fragile ? 'copytrade-warning-text' : ''}>{entry?.delayShare == null ? '—' : `${entry.delayShare.toFixed(0)}%`}</td><td className={entry?.survivedDelay ? 'positive' : entry?.impossible ? 'negative' : ''}>{copyResult}</td><td title={entry ? duneCoverageLabel(evidenceCoverage, 'copy simulation') : 'No Dune result'}>{evidencePercent == null ? '—' : `${evidencePercent.toFixed(0)}%`}</td><td title={entry?.sim?.coverageStatusReason} className={entry?.impossible ? 'negative' : entry?.fragile ? 'copytrade-warning-text' : entry?.survivedDelay ? 'positive' : ''}>{entry?.reading ?? 'No delay evidence'}</td></tr>; })}
+          {visibleCombinedStatsRows.length === 0 && <tr><td colSpan={13} className="muted">{showDelaySurvivorsOnly ? 'No wallets currently meet the delay-survivor rule.' : 'Load stats first.'}</td></tr>}
+        </tbody></table></div>
+        {selectedCopyDelayEntry && <div className="copytrade-modal-backdrop" role="presentation" onClick={() => setSelectedCopyDelayWallet(null)}>
+          <div className="copytrade-modal copytrade-trade-detail-modal" role="dialog" aria-modal="true" aria-label={`Trade details for ${selectedCopyDelayEntry.name}`} onClick={(event) => event.stopPropagation()}>
+            <div className="copytrade-modal-head"><div><p className="eyebrow">ROUND-TRIP AUDIT</p><h3>{selectedCopyDelayEntry.name}</h3><small className="address-compact">{selectedCopyDelayEntry.row.walletAddress}<CopyAddressButton address={selectedCopyDelayEntry.row.walletAddress} /></small></div><button className="secondary" onClick={() => setSelectedCopyDelayWallet(null)}>Close</button></div>
+            <p className="muted">Each row is one stored buy→sell round trip. Copy result uses the configured {copySimulation?.assumptions.copierDelaySeconds ?? 15}s delay, Dune-matched prices, fees, and slippage. Opening this dialog reads SQLite only.</p>
+            {!selectedCopyDelayEntry.sim ? <p className="muted">No simulation report is stored for this wallet yet. Fetch missing Dune prices first.</p> : <>
+              <div className="copytrade-modal-metrics"><div><strong>{selectedCopyDelayEntry.sim.trades.length.toLocaleString()}</strong><span>round trips stored</span></div><div><strong>{selectedCopyDelayEntry.sim.copiedTrades.toLocaleString()}</strong><span>copy simulations</span></div><div><strong>{selectedCopyDelayEntry.sim.missedTrades.toLocaleString()}</strong><span>missing Dune matches</span></div><div><strong>{formatPct(selectedCopyDelayEntry.sim.coverageRatePercent)}</strong><span>coverage</span></div></div>
+              <div className="table-wrap copytrade-trade-detail-wrap"><table className="copytrade-table copytrade-trade-detail-table"><thead><tr><th>Token</th><th>Held</th><th>Wallet</th><th>Copied</th><th>Edge kept</th><th>Entry / exit lag</th><th>Status</th></tr></thead><tbody>{selectedCopyDelayEntry.sim.trades.map((trade, index) => <tr key={`${trade.tokenAddress}-${trade.buyAt}-${index}`}><td><strong>{trade.tokenSymbol?.trim() || shortAddress(trade.tokenAddress)}</strong><small className="address-compact">{shortAddress(trade.tokenAddress)}</small></td><td title={`${trade.buyAt} → ${trade.sellAt}`}>{formatHoldingTime(trade.holdSeconds)}</td><td className={trade.walletReturnPercent !== null && trade.walletReturnPercent >= 0 ? 'positive' : 'negative'}>{formatPct(trade.walletReturnPercent)}</td><td className={trade.simulatedReturnPercent !== null && trade.simulatedReturnPercent >= 0 ? 'positive' : trade.simulatedReturnPercent !== null ? 'negative' : ''}>{formatPct(trade.simulatedReturnPercent)}</td><td>{trade.edgeKeptPercent == null ? '—' : `${trade.edgeKeptPercent.toFixed(1)}%`}</td><td>{trade.entryGapSeconds === null && trade.exitGapSeconds === null ? '—' : `${trade.entryGapSeconds?.toFixed(1) ?? '—'}s / ${trade.exitGapSeconds?.toFixed(1) ?? '—'}s`}</td><td title={`${trade.entryMatchedAt ?? 'no entry match'} · ${trade.exitMatchedAt ?? 'no exit match'}`}>{trade.status.replaceAll('_', ' ')}</td></tr>)}</tbody></table></div>
+            </>}
+          </div>
+        </div>}
+      </div>
+      </details>
+    </section>}
+    {copyTradeSubTab === 'wallet-stats' && <details className="copytrade-advanced-diagnostics" open={diagnosticsOpen} onToggle={(event) => setDiagnosticsOpen(event.currentTarget.open)}>
+      <summary>Advanced diagnostics</summary>
+      <p className="muted">Research-maintenance tooling, not a recommendation view. Use the canonical table above to decide who to follow; use this to investigate why a wallet reads the way it does.</p>
+      <div id="copytrade-elimination" className="copytrade-temp-panel">
+      <div className="panel-heading"><div><p className="eyebrow">TEMPORARY · PRE-SIMULATION TRIAGE</p><h2>Which wallets can we stop chasing?</h2></div><span className="tag">EXPERIMENTAL</span></div>
+      <p className="muted">
+        Judged over 30 days of history, matching the GMGN 30-day P&amp;L this eliminates on. Eliminates
+        a wallet only when its data is trustworthy — GMGN history complete and not failed, at least
+        50 trades, at least 90% Dune coverage over a real round-trip sample, <em>and</em> a
+        negligible hidden-loss reading — <em>and</em> the visible result is bad. Coverage does not
+        have to be perfect, but what is missing has to be shown not to flatter the wallet: the
+        "does the gap matter?" column checks that per wallet using the wallet's own GMGN outcomes,
+        which exist for every trade whether Dune matched it or not. A wallet whose gap could still
+        be hiding the trades that change the verdict is never eliminated. Silent GMGN
+        omissions (rows GMGN never returned at all) are not modeled here — see <code>progress.md</code>.
+      </p>
+      <button className="secondary" disabled={eliminationLoading} onClick={() => void loadElimination()}>{eliminationLoading ? 'Checking…' : 'Run triage'}</button>
+      {eliminationError && <p className="error">{eliminationError}</p>}
+      {eliminationReport && <>
+        {(() => {
+          // A saved verdict computed before the latest fetch is describing data that no longer
+          // exists. Comparing against the real fetch timestamps makes that visible instead of
+          // relying on the reader to remember whether they re-ran it.
+          const generatedMs = Date.parse(eliminationReport.generatedAt);
+          const newerData = [visibleWalletScreenSummary?.lastFetchedAt, copySimulationRunStatus?.finishedAt]
+            .filter((value): value is string => typeof value === 'string' && value.length > 0)
+            .some((value) => Date.parse(value) > generatedMs);
+          return newerData
+            ? <p className="copytrade-status-warning">Out of date — GMGN or Dune data has been fetched since this triage ran ({formatFetchTime(eliminationReport.generatedAt)}). Run triage again before trusting these verdicts.</p>
+            : <p className="muted">Saved result from {formatFetchTime(eliminationReport.generatedAt)} over {eliminationReport.periodDays ?? 30} days of history — read from your browser, not recomputed.</p>;
+        })()}
+        <div className="copytrade-screening-summary-facts">
+          <span><strong>{eliminationReport.totalWallets}</strong> wallets checked</span>
+          <span><strong>{eliminationReport.eliminated.length}</strong> eliminated</span>
+          <span><strong>{eliminationReport.surviving.length}</strong> surviving</span>
+          <span><strong>{eliminationReport.survivorsNeedingDune.length}</strong> survivors still need Dune coverage</span>
+        </div>
+        <div className="copytrade-primary-winner">
+          <div><p className="eyebrow">ESTIMATED REFETCH TIME FOR SURVIVORS</p>
+            <strong>{formatSeconds(eliminationReport.duneEstimate.estimatedSeconds)}</strong>
+            <small> for {eliminationReport.duneEstimate.targetsNeeded.toLocaleString()} known Dune targets ({eliminationReport.duneEstimate.basis === 'measured' ? `measured from ${eliminationReport.duneEstimate.runsCounted} recent runs` : 'seeded estimate, no completed runs yet'} · {eliminationReport.duneEstimate.secondsPerTarget}s/target)</small>
+            {eliminationReport.survivorsNeverSimulatedCount > 0 && <small className="warning"> Lower bound only — {eliminationReport.survivorsNeverSimulatedCount} survivor(s) have never been simulated at all, so their Dune workload isn't counted above.</small>}
+          </div>
+        </div>
+        <details open>
+          <summary>Surviving wallets ({eliminationReport.surviving.length})</summary>
+          <div className="table-wrap">
+            <table><thead><tr><th>Trader</th><th>Trades</th><th>Dune coverage</th><th>Does the gap matter?</th><th>30d P&amp;L</th><th>Delayed-copy median</th><th>Trustworthy?</th></tr></thead>
+              <tbody>{eliminationReport.surviving.map((entry) => { const gap = entry.coverageGap; const riskLabel = HIDDEN_LOSS_LABELS[gap?.hiddenLossRisk ?? 'unknown']; return <tr key={entry.walletAddress}>
+                <td>{entry.name?.trim() || shortAddress(entry.walletAddress)}</td>
+                <td>{entry.trades.toLocaleString()}</td>
+                <td>{entry.duneCoveragePercent === null ? 'Not yet simulated' : `${entry.duneCoveragePercent.toFixed(0)}%`}</td>
+                <td className={riskLabel.tone} title={gap === null || gap.hiddenLossRisk === 'unknown'
+                  ? 'Not enough measured and unmeasured trades to compare.'
+                  : `Measured trades lose ${gap.shownLossRatePercent ?? '—'}% of the time; including the unmeasured ones the real rate is ${gap.trueLossRatePercent ?? '—'}%. Based on the wallet's own GMGN outcomes, which exist for every trade. Big-win direction (separate signal): ${gap.gapPercentagePoints === null ? 'n/a' : `${gap.gapPercentagePoints > 0 ? '+' : ''}${gap.gapPercentagePoints}pp`}.`}>
+                  {riskLabel.label}
+                  {gap && gap.hiddenLossRisk !== 'unknown' && gap.shownLossRatePercent !== null && gap.trueLossRatePercent !== null
+                    && <small> loses {gap.shownLossRatePercent}% shown → {gap.trueLossRatePercent}% real</small>}
+                </td>
+                <td className={entry.gmgnPnl30dPercent !== null && entry.gmgnPnl30dPercent >= 0 ? 'positive' : entry.gmgnPnl30dPercent !== null ? 'negative' : undefined}>{formatPct(entry.gmgnPnl30dPercent)}</td>
+                <td className={entry.simulatedMedianReturnPercent !== null && entry.simulatedMedianReturnPercent >= 0 ? 'positive' : entry.simulatedMedianReturnPercent !== null ? 'negative' : undefined}>{formatPct(entry.simulatedMedianReturnPercent)}</td>
+                <td>{entry.trustworthy ? 'Yes' : 'Not yet'}</td>
+              </tr>; })}</tbody>
+            </table>
+          </div>
+        </details>
+        <details>
+          <summary>Eliminated wallets ({eliminationReport.eliminated.length})</summary>
+          <div className="table-wrap">
+            <table><thead><tr><th>Trader</th><th>Trades</th><th>Dune coverage</th><th>30d P&amp;L</th><th>Delayed-copy median</th><th>Reason(s)</th></tr></thead>
+              <tbody>{eliminationReport.eliminated.map((entry) => <tr key={entry.walletAddress}>
+                <td>{entry.name?.trim() || shortAddress(entry.walletAddress)}</td>
+                <td>{entry.trades.toLocaleString()}</td>
+                <td>{entry.duneCoveragePercent === null ? '—' : `${entry.duneCoveragePercent.toFixed(0)}%`}</td>
+                <td className={entry.gmgnPnl30dPercent !== null && entry.gmgnPnl30dPercent >= 0 ? 'positive' : entry.gmgnPnl30dPercent !== null ? 'negative' : undefined}>{formatPct(entry.gmgnPnl30dPercent)}</td>
+                <td className={entry.simulatedMedianReturnPercent !== null && entry.simulatedMedianReturnPercent >= 0 ? 'positive' : entry.simulatedMedianReturnPercent !== null ? 'negative' : undefined}>{formatPct(entry.simulatedMedianReturnPercent)}</td>
+                <td>{entry.reasons.map((reason) => ELIMINATION_REASON_LABELS[reason]).join(', ')}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </details>
+      </>}
+      </div>
+    </details>}
+
+    {copyTradeSubTab === 'pattern-discovery' && <section id="copytrade-pattern-discovery" className="menu-section panel copytrade-research-route pattern-discovery-panel">
+      <div className="panel-heading"><div><p className="eyebrow">GMGN COPYTRADE · SHARED ENGINE EXPORT</p><h2>Pattern Discovery</h2></div><span className="tag">100% OUTCOME COVERAGE</span></div>
+      <p className="compact-info-line"><span>Read-only normalized export for wallets with exactly 100% Dune copy-simulation outcome coverage in the selected period.</span></p>
+      <p className="copytrade-outcome-coverage-warning"><strong>Complete outcome set:</strong> every paired round trip for these wallets has a usable delayed-copy result for the selected period.</p>
+      <p className="muted"><strong>Strict feature gate:</strong> the shared run uses only the explicit event-time <code>features</code> object. Return, hold-duration, delay, fee, outcome, and post-event matching fields are rejected as leakage and are never valid discovery features. The current GMGN export may therefore produce insufficient data rather than a valid pattern.</p>
+      <div className="copytrade-coverage-controls"><label>Selected period (days)<input type="number" min={1} max={90} step={1} value={copyTradePeriodDays} onChange={(event) => setCopyTradePeriodDays(Math.min(90, Math.max(1, Number(event.target.value) || 1)))} /></label><button type="button" className="secondary" disabled={patternDiscoveryLoading} onClick={() => void loadPatternDiscoveryExport(copyTradePeriodDays)}>{patternDiscoveryLoading ? 'Reading…' : 'Refresh outcome export'}</button>{patternDiscoveryExport && <button type="button" className="secondary" onClick={() => saveJson(patternDiscoveryExport, `crypto-pattern-discovery-${patternDiscoveryExport.metadata.period_days}d.json`)}>Download normalized export</button>}<button type="button" className="primary" disabled={patternDiscoveryRunLoading || patternDiscoveryLoading || !patternDiscoveryExport?.metadata.exported_rows} onClick={() => void runPatternDiscovery()}>{patternDiscoveryRunLoading ? 'Running shared discovery…' : 'Run shared discovery'}</button></div>
+      {patternDiscoveryError && <p className="error-text">{patternDiscoveryError}</p>}
+      {patternDiscoveryLoading && <div className="copytrade-analysis-status running" role="status"><span className="loading-spinner" aria-hidden="true" /><div><strong>Reading saved copy-simulation outcomes…</strong><small>No GMGN or Dune request is made.</small></div></div>}
+      {patternDiscoveryExport && !patternDiscoveryLoading && <><div className="copytrade-table-overview"><span><strong>{patternDiscoveryExport.metadata.selected_wallet_count}</strong> wallets</span><span><strong>{patternDiscoveryExport.metadata.exported_rows}</strong> normalized events</span><span><strong>{patternDiscoveryExport.metadata.excluded_wallets_not_exactly_100_percent}</strong> excluded below exact coverage</span></div><details className="copytrade-info-panel pattern-discovery-source-data" open={patternDiscoverySourceOpen} onToggle={(event) => setPatternDiscoverySourceOpen(event.currentTarget.open)}><summary>Source data · {patternDiscoveryExport.metadata.exported_rows} events</summary><div className="table-wrap copytrade-table-wrap"><table className="copytrade-table fully-covered-table"><thead><tr><th>Wallet</th><th>Event time</th><th>Token</th><th>Copy outcome</th><th>Coverage</th></tr></thead><tbody>{patternDiscoveryExport.rows.slice(0, 100).map((row) => <tr key={row.event_id}><td><a className="copytrade-gmgn-link" href={`https://gmgn.ai/sol/address/${row.wallet_address}`} target="_blank" rel="noreferrer">{shortWalletAddress(row.wallet_address)} ↗</a><CopyAddressButton address={row.wallet_address} /></td><td>{formatTime(row.event_time)}</td><td title={row.token_address}>{row.entity_id}</td><td className={row.net_return_after_costs >= 0 ? 'positive' : 'negative'}>{row.net_return_after_costs.toFixed(2)}%</td><td>100%</td></tr>)}{patternDiscoveryExport.rows.length === 0 && <tr><td colSpan={5} className="muted">No wallets currently meet exact 100% outcome coverage for this period.</td></tr>}</tbody></table></div><p className="muted">{patternDiscoveryExport.metadata.coverage_semantics}</p></details><details className="copytrade-info-panel"><summary>Configured shared-engine fallback</summary><p>The browser view only exports JSON. From the Vantage workspace, run the JSON-only adapter and then the isolated Python report command:</p><pre className="pattern-discovery-command">python -m shared_pattern_discovery.exporters.gmgn --project crypto --input &lt;downloaded-export.json&gt; --output runs/crypto/gmgn-pattern-discovery.json{`\n`}python -m shared_pattern_discovery.cli --project crypto --input runs/crypto/gmgn-pattern-discovery.json --output runs/crypto/pattern-discovery-report.json --min-n 10</pre><p className="muted">The shared engine reads this normalized JSON only; it never opens the crypto SQLite database.</p></details></>}
+      {!patternDiscoveryLoading && patternDiscoveryExport?.metadata.exported_rows === 0 && <p className="muted">No exact-100% outcome-coverage rows exist for this period, so shared discovery is unavailable until an eligible export exists.</p>}
+      {!patternDiscoveryLoading && patternDiscoveryExport && !patternDiscoveryReport && !patternDiscoveryRunLoading && !patternDiscoveryRunError && <p className="muted">Normalized export loaded. The shared Python engine has not run yet; click “Run shared discovery” to generate the report.</p>}
+      {patternDiscoveryRunError && <p className="error-text">{patternDiscoveryRunError}</p>}
+      {patternDiscoveryRunLoading && <div className="copytrade-analysis-status running" role="status"><span className="loading-spinner" aria-hidden="true" /><div><strong>Running the shared Python discovery engine…</strong><small>The engine receives normalized JSON only; no database or network access is used.</small></div></div>}
+      {patternDiscoveryReport && !patternDiscoveryRunLoading && <div className="copytrade-info-panel pattern-discovery-readable">
+        <div className="pattern-discovery-headline"><div><span className="eyebrow">PLAIN-ENGLISH RESULT</span><h3>What did the finder learn?</h3></div><span className="pattern-discovery-status">{(patternDiscoveryReport.status_counts['validation survivor'] ?? 0) > 0 ? 'Evidence repeated on later trades' : 'No reliable rule yet'}</span></div>
+        <div className="pattern-discovery-cards"><div><strong>{patternDiscoveryReport.status_counts['validation survivor'] ?? 0}</strong><span>rules that survived a second test</span></div><div><strong>{patternDiscoveryReport.split.discovery_rows ?? 0}</strong><span>older trades used to discover rules</span></div><div><strong>{patternDiscoveryReport.split.validation_rows ?? 0}</strong><span>newer trades used to check them</span></div><div><strong>{patternDiscoveryReport.split.untouched_holdout_rows ?? 0}</strong><span>trades kept untouched</span></div></div>
+        <div className="pattern-discovery-flow"><div><b>1</b><span>Look at older trades</span></div><i>→</i><div><b>2</b><span>Find a simple relationship</span></div><i>→</i><div><b>3</b><span>Check it on newer trades</span></div></div>
+        <p className="pattern-discovery-explainer"><strong>Read this as:</strong> a behavior that appeared often enough in the selected data to test again.</p>
+        {patternDiscoveryReport.patterns.filter((pattern) => pattern.validationStatus === 'insufficient data').map((pattern, index) => <p className="copytrade-outcome-coverage-warning" key={`insufficient-${index}`}><strong>Why a rule was not shown:</strong> {pattern.reason ?? 'There was not enough usable data.'}</p>)}
+        <div className="pattern-discovery-results"><div className="pattern-discovery-results-heading"><h4>Rules found</h4><span>{patternDiscoveryReport.status_counts['validation survivor'] ?? 0} repeated</span></div>{patternDiscoveryReport.patterns.filter((pattern) => pattern.validationStatus === 'discovered candidate' || pattern.validationStatus === 'validation survivor').map((pattern, index) => { const effect = pattern.effect ?? null; const status = pattern.validationStatus === 'validation survivor' ? 'repeated' : 'candidate'; const isCorrelation = pattern.kind === 'correlation'; return <article className={`pattern-discovery-rule ${effect !== null && effect >= 0 ? 'positive-rule' : 'negative-rule'}`} key={`${pattern.feature ?? 'pattern'}-${index}`}><div className="pattern-discovery-rule-title"><strong>{patternFeatureLabel(pattern.feature)}</strong><span className={status}>{status === 'repeated' ? 'REPEATS' : 'CANDIDATE'}</span></div><div className="pattern-discovery-rule-main"><div><small>RULE</small><p>{patternConditionText(pattern.feature, pattern.conditions)}</p></div><div className={`pattern-discovery-effect ${effect !== null && effect >= 0 ? 'positive' : 'negative'}`}><small>{isCorrelation ? 'CORRELATION' : 'OUTCOME DIFFERENCE'}</small><b>{effect === null ? '—' : `${effect >= 0 ? '+' : ''}${formatPatternNumber(effect)}${isCorrelation ? '' : ' pts'}`}</b></div></div><div className="pattern-discovery-rule-meta"><span>Older data <b>{pattern.discovery_sample_size ?? 0}</b></span><span>Newer data <b>{pattern.validation?.sample_size ?? 0}</b></span></div></article>; })}{patternDiscoveryReport.patterns.filter((pattern) => pattern.validationStatus === 'discovered candidate' || pattern.validationStatus === 'validation survivor').length === 0 && <p className="muted">No rules found yet.</p>}</div>
+        <details className="pattern-discovery-details"><summary>Technical details</summary><p>Features come from wallet and token history available before each event. The final holdout is reserved for a later check.</p>{patternDiscoveryExecution && <p className="muted">Report file: {patternDiscoveryExecution.outputPath}</p>}</details>
+      </div>}
+    </section>}
 
     <section id="birdeye" className="menu-section panel signal-outcome-panel">
       <div className="panel-heading"><div><p className="eyebrow">SIGNAL OUTCOME TIMELINE</p><h2>Measure a captured GMGN signal</h2></div><span className="tag">PRICE HISTORY</span></div>
@@ -2673,6 +5083,7 @@ function App() {
     </section>
 
     <footer><span>{message}</span><button className="quiet" onClick={() => void refresh()}>Refresh</button><span>V1 capture only · no scoring or returns</span></footer>
+    {showScrollTop && <button type="button" className="scroll-top-button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Scroll to top" title="Scroll to top">↑ <span>Top</span></button>}
   </main>;
 }
 

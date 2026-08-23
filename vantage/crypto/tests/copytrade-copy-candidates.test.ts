@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   computeCopyCandidates, computeScreenPassCandidates, MIN_MEDIAN_HOLD_SECONDS, MAX_FAST_ROUND_TRIP_PERCENT,
-  MAX_CONCENTRATION_PERCENT, type CopyCandidatesReport, type CopySimulationSurvivalInput,
+  MAX_CONCENTRATION_PERCENT, DORMANT_AFTER_DAYS, type CopyCandidatesReport, type CopySimulationSurvivalInput,
 } from '../src/copytrade/copyCandidates.js';
 import type { CopyTradeReport, CopyTradeRow, Verdict } from '../src/copytrade/evaluate.js';
 import type { HistoricalConsistencyReport, HistoricalConsistencyVerdict } from '../src/copytrade/historicalConsistency.js';
@@ -11,7 +11,8 @@ const baseRow = (walletAddress: string, over: Partial<CopyTradeRow> = {}): CopyT
   walletAddress, name: null, trades: 200, winRatePercent: 60, medianReturnPercent: 10,
   averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass' as Verdict,
   riskFlags: [], failedRules: [], excludedNoCostBasis: 0, endingCapitalUsdCompounded: 110,
-  truncated: false, coveredDays: 90, needsDuneBackfill: false, unreliableReason: null,
+  truncated: false, coveredDays: 90, lastTradeAt: null, daysSinceLastTrade: null,
+  needsDuneBackfill: false, unreliableReason: null,
   riskEvidence: { fastRoundTripPercent: 5, noCostBasisPercent: 2, medianHoldSeconds: 3600, fundedByAddress: null, walletAgeDays: 300 },
   riskNotes: [], comparable: true,
   profitConcentration: {
@@ -190,7 +191,86 @@ test('a wallet with a positive simulated median survives and carries its simulat
   assert.equal(result.candidates[0].copySimulationCoverageRatePercent, 64.7);
 });
 
+test('tail metrics are carried onto candidates without changing the median-only survival gate', () => {
+  const result = computeCopyCandidates(
+    report([baseRow('TAIL')]),
+    hcReport([hcRow('TAIL', 'consistent')]),
+    new Map([['TAIL', {
+      simulatedMedianReturnPercent: -4.5,
+      simulatedMeanReturnPercent: 51.4,
+      tradesAbove100Percent: 17,
+      tailShareOfMeanPercent: 95,
+      coverageRatePercent: 84,
+    }]]),
+  );
+  assert.equal(result.candidates.length, 0, 'a positive mean must not bypass the existing positive-median gate');
+  const screened = computeScreenPassCandidates(report([baseRow('TAIL')]), hcReport([hcRow('TAIL', 'consistent')])).candidates[0]!;
+  assert.equal(screened.walletAddress, 'TAIL');
+  const withSurvival = computeCopyCandidates(
+    report([baseRow('TAIL')]), hcReport([hcRow('TAIL', 'consistent')]),
+    new Map([['TAIL', { simulatedMedianReturnPercent: 5, simulatedMeanReturnPercent: 51.4, tradesAbove100Percent: 17, tailShareOfMeanPercent: 95, coverageRatePercent: 84 }]]),
+  ).candidates[0]!;
+  assert.equal(withSurvival.simulatedMeanReturnPercent, 51.4);
+  assert.equal(withSurvival.tradesAbove100Percent, 17);
+  assert.equal(withSurvival.tailShareOfMeanPercent, 95);
+});
+
+test('high-upside candidates are reported separately when mean is positive but median is not', () => {
+  const result = computeCopyCandidates(
+    report([
+      baseRow('TAIL', { medianReturnPercent: -4, averageReturnPercent: 42 }),
+      baseRow('CONSISTENT', { medianReturnPercent: 8, averageReturnPercent: 12 }),
+    ]),
+    hcReport([hcRow('TAIL', 'consistent'), hcRow('CONSISTENT', 'consistent')]),
+    new Map([
+      ['TAIL', { simulatedMedianReturnPercent: -2, simulatedMeanReturnPercent: 38, tradesAbove100Percent: 2, coverageRatePercent: 82 }],
+      ['CONSISTENT', { simulatedMedianReturnPercent: 7, simulatedMeanReturnPercent: 11, tradesAbove100Percent: 0, coverageRatePercent: 90 }],
+    ]),
+  );
+  assert.deepEqual(result.candidates.map((candidate) => candidate.walletAddress), ['CONSISTENT']);
+  assert.deepEqual(result.highUpsideCandidates.map((candidate) => candidate.walletAddress), ['TAIL']);
+  assert.equal(result.highUpsideCandidates[0]?.simulatedMeanReturnPercent, 38);
+});
+
+test('high-upside candidates fail closed without enough copy coverage or a large winning trade', () => {
+  const result = computeCopyCandidates(
+    report([baseRow('TAIL', { medianReturnPercent: -4, averageReturnPercent: 42 })]),
+    hcReport([hcRow('TAIL', 'consistent')]),
+    new Map([['TAIL', { simulatedMedianReturnPercent: -2, simulatedMeanReturnPercent: 38, tradesAbove100Percent: 0, coverageRatePercent: 69 }]]),
+  );
+  assert.equal(result.highUpsideCandidates.length, 0);
+});
+
 test('computeScreenPassCandidates does not require or apply the copy-survival gate at all', () => {
   const result = computeScreenPassCandidates(report([baseRow('W1')]), hcReport([hcRow('W1', 'consistent')]));
   assert.equal(result.candidates.length, 1, 'the pre-gate list exists precisely so copy-simulation knows who to check, before any verdict exists');
+});
+
+test('a wallet that stopped trading is flagged dormant but keeps its real historical numbers', () => {
+  // The real case: this project's own top wallet held a +13.8% median over 398 round trips while
+  // having no activity for over two weeks. Its history is genuine; presenting it as a live,
+  // actionable candidate with nothing marking it dormant is what was misleading.
+  const stale = computeCopyCandidates(
+    report([baseRow('W1', { daysSinceLastTrade: DORMANT_AFTER_DAYS + 1 })]),
+    hcReport([hcRow('W1', 'consistent')]),
+    new Map([['W1', { simulatedMedianReturnPercent: 12.5, coverageRatePercent: 80 }]]),
+  );
+  assert.equal(stale.candidates.length, 1, 'a dormant wallet is still reported, never silently dropped');
+  assert.equal(stale.candidates[0].dormant, true);
+  assert.equal(stale.candidates[0].daysSinceLastTrade, DORMANT_AFTER_DAYS + 1);
+  assert.equal(stale.candidates[0].medianReturnPercent, 10, 'its measured history is untouched by the dormancy flag');
+
+  const active = computeCopyCandidates(
+    report([baseRow('W1', { daysSinceLastTrade: 1 })]),
+    hcReport([hcRow('W1', 'consistent')]),
+    new Map([['W1', { simulatedMedianReturnPercent: 12.5, coverageRatePercent: 80 }]]),
+  );
+  assert.equal(active.candidates[0].dormant, false, 'a recently-active wallet is not flagged');
+
+  const unknown = computeCopyCandidates(
+    report([baseRow('W1', { daysSinceLastTrade: null })]),
+    hcReport([hcRow('W1', 'consistent')]),
+    new Map([['W1', { simulatedMedianReturnPercent: 12.5, coverageRatePercent: 80 }]]),
+  );
+  assert.equal(unknown.candidates[0].dormant, false, 'unknown recency is never asserted as dormant');
 });

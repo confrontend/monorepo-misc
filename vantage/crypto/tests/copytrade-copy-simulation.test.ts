@@ -5,9 +5,10 @@ import { openDatabase } from '../src/db/client.js';
 import { applyMigrations } from '../src/db/schema.js';
 import {
   computeCopySimulationReport, computeLiquidityImpactReport, DEFAULT_COPIER_DELAY_SECONDS, DEFAULT_FEE_BPS,
-  DEFAULT_SLIPPAGE_BPS, MAX_MATCH_GAP_SECONDS, MIN_LIQUIDITY_BAND_SAMPLE,
+  DEFAULT_SLIPPAGE_BPS, MAX_MATCH_GAP_SECONDS, MIN_LIQUIDITY_BAND_SAMPLE, simulateFixedStakePortfolio,
   type CopySimulationReport, type CopySimulationTradeResult,
 } from '../src/copytrade/copySimulation.js';
+import { readAllCopySimulationMatches, rowsToMatches, sqlFor, WIDE_SEARCH_WINDOW_MINUTES } from '../src/copytrade/copySimulationDune.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');
@@ -17,18 +18,46 @@ const setup = (): DatabaseSync => {
 
 let nextTradeId = 1;
 
+test('Dune retries use the same five-minute accuracy window and preserve provenance', () => {
+  const target = { tradeId: 1, tokenAddress: 'Token', delayedTargetAtIso: '2026-08-20T00:00:00.000Z' };
+  assert.match(sqlFor([target]), /INTERVAL '5' MINUTE/);
+  assert.match(sqlFor([target], WIDE_SEARCH_WINDOW_MINUTES), /INTERVAL '5' MINUTE/);
+  const matches = rowsToMatches([target], [{ trade_id: 1, matched_trade_at: '2026-08-20T00:01:00.000Z', price_usd: 1, amount_usd: 4 }], 'wide_window');
+  assert.equal(matches[0]?.matchSource, 'wide_window');
+  assert.equal(matches[0]?.status, 'matched');
+});
+
+test('wide no-match provenance is terminal so the same target is not eligible for endless retries', () => {
+  const database = setup();
+  try {
+    const raw = JSON.stringify({ result: { rows: [] } });
+    database.prepare(
+      `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, completed_at, raw_result, match_source, search_window_minutes)
+       VALUES (?, 'SELECT 1', 'completed', 'now', 'now', ?, ?, ?)`
+    ).run(JSON.stringify([901]), raw, 'precise', 30);
+    database.prepare(
+      `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, completed_at, raw_result, match_source, search_window_minutes)
+       VALUES (?, 'SELECT 1', 'completed', 'now', 'now', ?, ?, ?)`
+    ).run(JSON.stringify([901]), raw, 'wide_window', 120);
+
+    const match = readAllCopySimulationMatches(database).get(901);
+    assert.equal(match?.status, 'no_trade_in_window');
+    assert.equal(match?.matchSource, 'wide_window');
+  } finally { database.close(); }
+});
+
 const insertTradeRow = (
   database: DatabaseSync,
-  over: { walletAddress: string; eventType: 'buy' | 'sell'; tokenAddress: string; observedTimestamp: number; costUsd?: string | null; buyCostUsd?: string | null; priceUsd?: string | null },
+  over: { walletAddress: string; eventType: 'buy' | 'sell'; tokenAddress: string; observedTimestamp: number; tokenAmount?: string | null; costUsd?: string | null; buyCostUsd?: string | null; priceUsd?: string | null },
 ): number => {
   const id = nextTradeId; nextTradeId += 1;
   database.prepare(
     `INSERT INTO copytrade_trades
        (id, wallet_address, chain, tx_hash, event_type, token_address, token_symbol, observed_timestamp,
         token_amount, cost_usd, buy_cost_usd, price_usd, gas_usd, dex_usd, launchpad_platform, raw_payload, fetched_at, dedup_key)
-     VALUES (?, ?, 'sol', ?, ?, ?, 'TKN', ?, '100', ?, ?, ?, '0.01', '0.02', 'Pump.fun', '{}', 'now', ?)`,
+     VALUES (?, ?, 'sol', ?, ?, ?, 'TKN', ?, ?, ?, ?, ?, '0.01', '0.02', 'Pump.fun', '{}', 'now', ?)`,
   ).run(
-    id, over.walletAddress, `TX${id}`, over.eventType, over.tokenAddress, over.observedTimestamp,
+    id, over.walletAddress, `TX${id}`, over.eventType, over.tokenAddress, over.observedTimestamp, over.tokenAmount ?? '100',
     over.costUsd ?? null, over.buyCostUsd ?? null, over.priceUsd ?? null, `DEDUP${id}`,
   );
   return id;
@@ -47,6 +76,49 @@ const seedDuneMatch = (
     JSON.stringify({ result: { rows: [{ trade_id: tradeId, matched_trade_at: matchedTradeAtIso, price_usd: priceUsd, matched_tx_id: `TX_MATCH_${tradeId}`, amount_usd: amountUsd ?? null }] } }),
   );
 };
+
+const seedRoundTrip = (
+  database: DatabaseSync, walletAddress: string, tokenAddress: string, baseTimestamp: number, returnPercent: number,
+): void => {
+  const buyId = insertTradeRow(database, { walletAddress, eventType: 'buy', tokenAddress, observedTimestamp: baseTimestamp, buyCostUsd: '100', priceUsd: '1' });
+  const sellPrice = 1 + returnPercent / 100;
+  const sellId = insertTradeRow(database, { walletAddress, eventType: 'sell', tokenAddress, observedTimestamp: baseTimestamp + 100, costUsd: String(100 * sellPrice), buyCostUsd: '100', priceUsd: String(sellPrice) });
+  seedDuneMatch(database, buyId, new Date((baseTimestamp + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1);
+  seedDuneMatch(database, sellId, new Date((baseTimestamp + 100 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), sellPrice);
+};
+
+test('tail metrics use only simulated trades and expose median/mean divergence plus extreme wins', () => {
+  const database = setup();
+  try {
+    seedRoundTrip(database, 'W1', 'LOSS_A', 1000, -10);
+    seedRoundTrip(database, 'W1', 'LOSS_B', 2000, -5);
+    seedRoundTrip(database, 'W1', 'TAIL', 3000, 2000);
+    // This trade is deliberately not queried; its large wallet return must not enter tail stats.
+    insertTradeRow(database, { walletAddress: 'W1', eventType: 'buy', tokenAddress: 'UNQUERIED', observedTimestamp: 4000, buyCostUsd: '100', priceUsd: '1' });
+    insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'UNQUERIED', observedTimestamp: 4100, costUsd: '10000', buyCostUsd: '100', priceUsd: '100' });
+
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 }).wallets[0]!;
+    assert.ok(Math.abs((wallet.simulatedMedianReturnPercent ?? 0) - (-5)) < 0.01);
+    assert.ok(Math.abs((wallet.simulatedMeanReturnPercent ?? 0) - 661.67) < 0.01);
+    assert.ok(Math.abs((wallet.walletMeanReturnPercent ?? 0) - 661.67) < 0.01);
+    assert.equal(wallet.tradesAbove100Percent, 1);
+    assert.equal(wallet.tradesAbove300Percent, 1);
+    assert.equal(wallet.bestSimulatedReturnPercent, 2000);
+    assert.equal(wallet.tailShareOfMeanPercent, 100.8, 'tail share is not clamped when negative trades make the denominator smaller');
+    assert.equal(wallet.copiedTrades, 3, 'unqueried trade is excluded from every tail metric');
+  } finally { database.close(); }
+});
+
+test('tail share is null when the summed simulated return is not positive', () => {
+  const database = setup();
+  try {
+    seedRoundTrip(database, 'W1', 'LOSS_A', 1000, -200);
+    seedRoundTrip(database, 'W1', 'LOSS_B', 2000, -300);
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 }).wallets[0]!;
+    assert.equal(wallet.simulatedMeanReturnPercent, -250);
+    assert.equal(wallet.tailShareOfMeanPercent, null);
+  } finally { database.close(); }
+});
 
 test('a sell with no preceding buy in stored history is excluded, not treated as a round trip at all', () => {
   const database = setup();
@@ -142,7 +214,27 @@ test('assumptions in the report reflect the actual parameters used, not just the
   const database = setup();
   try {
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'], copierDelaySeconds: 30, feeBps: 20, slippageBps: 10 });
-    assert.deepEqual(report.assumptions, { copierDelaySeconds: 30, feeBps: 20, slippageBps: 10, gasPriorityFeeSolPerTx: report.assumptions.gasPriorityFeeSolPerTx, maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: report.assumptions.maxRoundTripsPerWallet });
+    assert.deepEqual(report.assumptions, { copierDelaySeconds: 30, feeBps: 20, slippageBps: 10, gasPriorityFeeSolPerTx: report.assumptions.gasPriorityFeeSolPerTx, maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: report.assumptions.maxRoundTripsPerWallet, startingCapitalUsd: 100, stakePerTradeUsd: 10, maxOpenPositions: 10 });
+  } finally { database.close(); }
+});
+
+test('period-scoped simulation uses only round trips sold inside the requested window', () => {
+  const database = setup();
+  try {
+    const day = 24 * 60 * 60;
+    const nowSeconds = 20 * day;
+    // The older trade is still in stored history, but its sell is outside the seven-day scope.
+    seedRoundTrip(database, 'W1', 'OLD', nowSeconds - 10 * day, 10);
+    seedRoundTrip(database, 'W1', 'RECENT', nowSeconds - 2 * day, 20);
+
+    const report = computeCopySimulationReport(database, {
+      walletAddresses: ['W1'], periodDays: 7, now: new Date(nowSeconds * 1000), feeBps: 0, slippageBps: 0,
+    });
+    const wallet = report.wallets[0]!;
+    assert.equal(wallet.roundTripsConsidered, 1);
+    assert.equal(wallet.copiedTrades, 1);
+    assert.equal(wallet.trades[0]?.tokenAddress, 'RECENT');
+    assert.equal(report.assumptions.periodDays, 7);
   } finally { database.close(); }
 });
 
@@ -193,6 +285,83 @@ test('gas fee is reported separately in SOL, two transactions per copied round t
   } finally { database.close(); }
 });
 
+test('fixed-stake portfolio never reinvests the full bankroll and caps each loss at its stake', () => {
+  const portfolio = simulateFixedStakePortfolio([
+    { id: 1, entryAt: 1, exitAt: 2, returnRatio: 0.5, gasFeeSol: 0.004 },
+    { id: 2, entryAt: 3, exitAt: 4, returnRatio: -5, gasFeeSol: 0.004 },
+  ]);
+  assert.equal(portfolio.endingCapitalUsd, 95, '$10 gains $5, then the next $10 can lose at most $10');
+  assert.equal(portfolio.realizedPnlUsd, -5);
+  assert.equal(portfolio.copiedTrades, 2);
+  assert.equal(portfolio.maxConcurrentPositions, 1);
+  assert.equal(portfolio.gasFeeSol, 0.008, 'fixed SOL gas is reported, not silently converted with a guessed price');
+});
+
+test('fixed-stake portfolio enforces both cash and concurrent-position limits', () => {
+  const overlapping = Array.from({ length: 11 }, (_, index) => ({
+    id: index + 1, entryAt: 1 + index, exitAt: 100 + index, returnRatio: 0.1, gasFeeSol: 0,
+  }));
+  const portfolio = simulateFixedStakePortfolio(overlapping);
+  assert.equal(portfolio.copiedTrades, 10);
+  assert.equal(portfolio.skippedMaxOpenPositions, 1);
+  assert.equal(portfolio.maxConcurrentPositions, 10);
+  assert.equal(portfolio.endingCapitalUsd, 110);
+
+  const cashLimited = simulateFixedStakePortfolio([
+    { id: 1, entryAt: 1, exitAt: 10, returnRatio: 1, gasFeeSol: 0 },
+    { id: 2, entryAt: 2, exitAt: 9, returnRatio: 1, gasFeeSol: 0 },
+  ], { startingCapitalUsd: 15, stakePerTradeUsd: 10, maxOpenPositions: 10 });
+  assert.equal(cashLimited.copiedTrades, 1);
+  assert.equal(cashLimited.skippedInsufficientCash, 1);
+  assert.equal(cashLimited.endingCapitalUsd, 25);
+});
+
+test('partial sells allocate one copied position proportionally instead of opening duplicate stakes', () => {
+  const database = setup();
+  try {
+    const buyId = insertTradeRow(database, { walletAddress: 'PARTIAL', eventType: 'buy', tokenAddress: 'TOKP', observedTimestamp: 1000, tokenAmount: '100', buyCostUsd: '100', priceUsd: '1' });
+    const sellOneId = insertTradeRow(database, { walletAddress: 'PARTIAL', eventType: 'sell', tokenAddress: 'TOKP', observedTimestamp: 1100, tokenAmount: '40', costUsd: '80', buyCostUsd: '40', priceUsd: '2' });
+    const sellTwoId = insertTradeRow(database, { walletAddress: 'PARTIAL', eventType: 'sell', tokenAddress: 'TOKP', observedTimestamp: 1200, tokenAmount: '60', costUsd: '180', buyCostUsd: '60', priceUsd: '3' });
+    for (const [id, at, price] of [[buyId, 1000, 1], [sellOneId, 1100, 2], [sellTwoId, 1200, 3]] as const) {
+      seedDuneMatch(database, id, new Date((at + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), price);
+    }
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['PARTIAL'], feeBps: 0, slippageBps: 0, gasPriorityFeeSolPerTx: 0 }).wallets[0]!;
+    assert.equal(wallet.roundTripsConsidered, 2);
+    assert.equal(wallet.copiedTrades, 2);
+    assert.equal(wallet.portfolio.maxConcurrentPositions, 1);
+    assert.deepEqual(wallet.trades.map((trade) => trade.copyStakeUsd), [4, 6]);
+    assert.equal(wallet.portfolio.endingCapitalUsd, 115.97, 'one $10 position is split 40/60 and recorded gas is charged once for the buy and once per sell');
+  } finally { database.close(); }
+});
+
+test('open positions are marked at the period cutoff and reported separately from realized PnL', () => {
+  const portfolio = simulateFixedStakePortfolio([{
+    id: -7, positionId: 7, entryAt: 100, exitAt: 200, returnRatio: 0, stakeUsd: 10,
+    gasFeeSol: 0, gasFeeUsd: null, entryGasFeeSol: 0, entryGasFeeUsd: null,
+    cutoffReturnRatio: 0.5, isOpenAtCutoff: true,
+  }]);
+  assert.equal(portfolio.openPositionsMarked, 1);
+  assert.equal(portfolio.openPositionsUnpriced, 0);
+  assert.equal(portfolio.realizedPnlUsd, 0);
+  assert.equal(portfolio.markToMarketPnlUsd, 5);
+  assert.equal(portfolio.endingCapitalUsd, 105);
+  assert.equal(portfolio.copiedTrades, 0);
+});
+
+test('copy simulation exposes the fixed-stake portfolio from the same delayed fee-adjusted prices', () => {
+  const database = setup();
+  try {
+    const buyId = insertTradeRow(database, { walletAddress: 'W1', eventType: 'buy', tokenAddress: 'TOKA', observedTimestamp: 1000, buyCostUsd: '100', priceUsd: '1' });
+    const sellId = insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'TOKA', observedTimestamp: 2000, costUsd: '150', buyCostUsd: '100', priceUsd: '1.5' });
+    seedDuneMatch(database, buyId, new Date((1000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1);
+    seedDuneMatch(database, sellId, new Date((2000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1.5);
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'] }).wallets[0]!;
+    assert.equal(wallet.portfolio.copiedTrades, 1);
+  assert.equal(wallet.portfolio.endingCapitalUsd, 104.54, 'the $10 stake receives the fee/slippage-adjusted return minus recorded gas USD');
+    assert.equal(wallet.portfolio.capitalPath.at(-1)?.capitalUsd, 104.54);
+  } finally { database.close(); }
+});
+
 test('entry/exit trade USD size (the liquidity proxy) is carried through when present, and stays null rather than zero when a leg has no usable match', () => {
   const database = setup();
   try {
@@ -239,14 +408,22 @@ const makeTrade = (over: Partial<CopySimulationTradeResult> & { entryTradeAmount
   exitTradeAmountUsd: null, ...over,
 });
 
+const emptyPortfolio = () => ({
+  startingCapitalUsd: 100, stakePerTradeUsd: 10, maxOpenPositions: 10, endingCapitalUsd: 100,
+  realizedPnlUsd: 0, eligibleTrades: 0, copiedTrades: 0, skippedInsufficientCash: 0,
+  skippedMaxOpenPositions: 0, maxConcurrentPositions: 0, gasFeeSol: 0, capitalPath: [],
+});
+
 const makeReport = (trades: CopySimulationTradeResult[]): CopySimulationReport => ({
   computedAt: new Date().toISOString(),
-  assumptions: { copierDelaySeconds: 15, feeBps: 100, slippageBps: 50, gasPriorityFeeSolPerTx: 0.002, maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: 150 },
+  assumptions: { copierDelaySeconds: 15, feeBps: 100, slippageBps: 50, gasPriorityFeeSolPerTx: 0.002, maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: 150, startingCapitalUsd: 100, stakePerTradeUsd: 10, maxOpenPositions: 10 },
   wallets: [{
     walletAddress: 'W1', roundTripsConsidered: trades.length, copiedTrades: trades.filter((t) => t.status === 'simulated').length,
     missedTrades: trades.filter((t) => t.status !== 'simulated').length, coverageRatePercent: null,
     walletMedianReturnPercent: null, simulatedMedianReturnPercent: null, delayCostPercentagePoints: null,
-    worstSimulatedReturnPercent: null, totalGasFeeSol: null, trades,
+    walletMeanReturnPercent: null, simulatedMeanReturnPercent: null, tradesAbove100Percent: 0,
+    tradesAbove300Percent: 0, bestSimulatedReturnPercent: null, tailShareOfMeanPercent: null,
+    worstSimulatedReturnPercent: null, totalGasFeeSol: null, portfolio: emptyPortfolio(), trades,
   }],
 });
 
@@ -332,12 +509,14 @@ test('liquidity impact: a band only becomes reliable once it reaches MIN_LIQUIDI
 
 const makeReportForWallets = (wallets: Array<{ walletAddress: string; trades: CopySimulationTradeResult[] }>): CopySimulationReport => ({
   computedAt: new Date().toISOString(),
-  assumptions: { copierDelaySeconds: 15, feeBps: 100, slippageBps: 50, gasPriorityFeeSolPerTx: 0.002, maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: 150 },
+  assumptions: { copierDelaySeconds: 15, feeBps: 100, slippageBps: 50, gasPriorityFeeSolPerTx: 0.002, maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: 150, startingCapitalUsd: 100, stakePerTradeUsd: 10, maxOpenPositions: 10 },
   wallets: wallets.map(({ walletAddress, trades }) => ({
     walletAddress, roundTripsConsidered: trades.length, copiedTrades: trades.filter((t) => t.status === 'simulated').length,
     missedTrades: trades.filter((t) => t.status !== 'simulated').length, coverageRatePercent: null,
     walletMedianReturnPercent: null, simulatedMedianReturnPercent: null, delayCostPercentagePoints: null,
-    worstSimulatedReturnPercent: null, totalGasFeeSol: null, trades,
+    walletMeanReturnPercent: null, simulatedMeanReturnPercent: null, tradesAbove100Percent: 0,
+    tradesAbove300Percent: 0, bestSimulatedReturnPercent: null, tailShareOfMeanPercent: null,
+    worstSimulatedReturnPercent: null, totalGasFeeSol: null, portfolio: emptyPortfolio(), trades,
   })),
 });
 

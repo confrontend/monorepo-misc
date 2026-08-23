@@ -12,12 +12,12 @@
     "build:server": "tsc -p tsconfig.json",
     "build:ui": "vite build --config vite.config.ts",
     "dev": "concurrently -k -n api,ui -c green,cyan \"npm run dev:api\" \"npm run dev:ui\"",
-    "dev:api": "tsx watch src/scripts/server.ts",
+    "dev:api": "tsx watch --env-file-if-exists=.env src/scripts/server.ts",
     "dev:ui": "vite --config vite.config.ts --host",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "import-dune": "npm run build --silent && node dist/src/scripts/cli.js import-dune",
     "db-stats": "npm run build:server --silent && node dist/src/scripts/cli.js db-stats",
-    "start": "npm run build && node dist/src/scripts/server.js"
+    "start": "npm run build && node --env-file-if-exists=.env dist/src/scripts/server.js"
   },
   "dependencies": {
     "gmgn-cli": "^1.5.2",

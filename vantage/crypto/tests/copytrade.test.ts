@@ -751,7 +751,7 @@ test('coverage history preserves a truncated event after a later complete run', 
   } finally { database.close(); }
 });
 
-test('coverage history filters by wallet and run and clamps the requested limit', () => {
+test('coverage history filters by wallet and run without clamping the requested limit', () => {
   const database = setup();
   try {
     const run = database.prepare(`INSERT INTO copytrade_fetch_runs (started_at, status) VALUES (?, 'completed')`);
@@ -761,7 +761,7 @@ test('coverage history filters by wallet and run and clamps the requested limit'
       recordCoverage(database, { walletAddress: index === 504 ? 'WALLET_B' : 'WALLET_A', chain: 'sol', runId, requestsUsed: index + 1, truncated: false, periodDays: 30, stopReason: 'no_more_data' });
     }
 
-    assert.equal(listWalletCoverageHistory(database, { limit: 999 }).length, 500);
+    assert.equal(listWalletCoverageHistory(database, { limit: 999 }).length, 505);
     assert.ok(listWalletCoverageHistory(database, { walletAddress: 'WALLET_B' }).every((event) => event.walletAddress === 'WALLET_B'));
     const bEvents = listWalletCoverageHistory(database, { walletAddress: 'WALLET_B' });
     const bEvent = bEvents[0];

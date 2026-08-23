@@ -5,7 +5,7 @@ import { openDatabase } from '../src/db/client.js';
 import { applyMigrations } from '../src/db/schema.js';
 import {
   computeCalloutDedupKey, computeCallerCheckpointBreakdown, computeCallerEvaluationReport, hasActiveCollectionRun,
-  isCallerTracked, listTrackedCallerKeys, MAX_CHECKPOINT_BATCHES_PER_RUN, MIN_CALLER_MEASURED_CALLS, readCallerDetail,
+  isCallerTracked, listTrackedCallerKeys, MAX_CHECKPOINT_BATCHES_PER_RUN, MAX_SINGLE_TOKEN_SHARE_PERCENT, MIN_CALLER_MEASURED_CALLS, readCallerDetail,
   readCollectionRunState, readLeaderboard, startCollectionRun, stopCollectionRuns, trackCaller, untrackCaller,
   LEADERBOARD_CAPTURE_COOLDOWN_MS, msSinceLastCollectionStart,
   type FetchKolTrades, type FetchWalletActivity, type KolTradeRow,
@@ -368,11 +368,13 @@ test('readCollectionRunState reports idle with no run ever attempted', () => {
 
 const seedCallout = (
   database: DatabaseSync, callerKey: string, callTimestamp: number, tokenAddress = 'TOK',
+  side: 'buy' | 'sell' | null = 'buy',
 ): number => {
+  const rawPayload = side === null ? '{}' : JSON.stringify({ side });
   const id = Number(database.prepare(
-    `INSERT INTO top_caller_callouts (caller_key, token_address, call_timestamp, raw_payload, fetched_at, dedup_key)
-     VALUES (?, ?, ?, '{}', ?, ?)`,
-  ).run(callerKey, tokenAddress, callTimestamp, new Date().toISOString(), `fallback:${callerKey}|${tokenAddress}|${callTimestamp}`).lastInsertRowid);
+    `INSERT INTO top_caller_callouts (caller_key, token_address, token_symbol, call_timestamp, raw_payload, fetched_at, dedup_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(callerKey, tokenAddress, tokenAddress, callTimestamp, rawPayload, new Date().toISOString(), `fallback:${callerKey}|${tokenAddress}|${callTimestamp}`).lastInsertRowid);
   return id;
 };
 
@@ -404,6 +406,8 @@ test('caller evaluation: a tracked caller with no callouts reports zeros/nulls, 
       callerKey: 'C1', callCount: 0, measuredCallCount: 0, winRatePercent: null,
       medianReturnPercent: null, reliable: false, waitingCallCount: 0,
       unavailableCallCount: 0, coverageRatePercent: null, coverageSufficient: false,
+      sellCallCount: 0, topTokenSharePercent: null, topTokenSymbol: null,
+      medianReturnPercentByToken: null,
     }]);
   } finally { database.close(); }
 });
@@ -517,6 +521,70 @@ test('computeCallerCheckpointBreakdown: a caller with no callouts at all reports
       assert.equal(row.reliable, false);
       assert.deepEqual(row.reasons, ['no_callouts']);
     }
+  } finally { database.close(); }
+});
+
+test('caller evaluation: sell-side calls are excluded from returns, never scored as wins', () => {
+  // Price rising after a SELL means the caller exited before a rally — the opposite of a win.
+  // Real case that motivated this: wallet 98T65wc… had 52 of 148 calls on the sell side.
+  const database = setup();
+  try {
+    trackCaller(database, 'C1');
+    const baseDay = 1_700_000_000;
+    // 2 buys at a real loss, 2 sells followed by big rises that must NOT be counted as wins.
+    const b1 = seedCallout(database, 'C1', baseDay, 'TOKA', 'buy'); seedOutcome(database, b1, '1h', 'measured', -10);
+    const b2 = seedCallout(database, 'C1', baseDay + 86_400, 'TOKB', 'buy'); seedOutcome(database, b2, '1h', 'measured', -20);
+    const s1 = seedCallout(database, 'C1', baseDay + 172_800, 'TOKC', 'sell'); seedOutcome(database, s1, '1h', 'measured', 500);
+    const s2 = seedCallout(database, 'C1', baseDay + 259_200, 'TOKD', 'sell'); seedOutcome(database, s2, '1h', 'measured', 500);
+
+    const row = computeCallerEvaluationReport(database, '1h').rows[0]!;
+    assert.equal(row.sellCallCount, 2, 'both sells are counted and reported, not silently dropped');
+    assert.equal(row.measuredCallCount, 2, 'only the two buys are scored');
+    assert.equal(row.medianReturnPercent, -15, 'median of the two buys (-10, -20); the +500% sells must not rescue it');
+    assert.equal(row.winRatePercent, 0, 'a sell followed by a rally is not a win');
+  } finally { database.close(); }
+});
+
+test('caller evaluation: one heavily-repeated token cannot make a caller reliable', () => {
+  // The exact shape found live on 98T65wc…: many buys of one token carrying the median, while
+  // the same caller's other tokens are negative.
+  const database = setup();
+  try {
+    trackCaller(database, 'C1');
+    const baseDay = 1_700_000_000;
+    // 30 buys of the SAME token, all strongly positive.
+    for (let i = 0; i < 30; i += 1) {
+      const c = seedCallout(database, 'C1', baseDay + i * 3_600, 'HOTTOKEN', 'buy');
+      seedOutcome(database, c, '1h', 'measured', 65);
+    }
+    // 10 buys across other tokens, negative — spread over more days to clear the date gate.
+    for (let i = 0; i < 10; i += 1) {
+      const c = seedCallout(database, 'C1', baseDay + 86_400 * (i + 1), `OTHER${i}`, 'buy');
+      seedOutcome(database, c, '1h', 'measured', -5);
+    }
+
+    const row = computeCallerEvaluationReport(database, '1h').rows[0]!;
+    assert.equal(row.topTokenSymbol, 'HOTTOKEN');
+    assert.ok(row.topTokenSharePercent !== null && row.topTokenSharePercent > MAX_SINGLE_TOKEN_SHARE_PERCENT, 'one token dominates the measured buys');
+    assert.equal(row.reliable, false, 'a one-token result is never reliable, however large the sample');
+    // Pooled median is flattered by the repeated token; per-token median exposes the truth.
+    assert.equal(row.medianReturnPercent, 65, 'pooled median is dominated by the 30 repeats');
+    assert.equal(row.medianReturnPercentByToken, -5, 'counting each token once, the caller is actually negative');
+  } finally { database.close(); }
+});
+
+test('caller checkpoint breakdown: single-token concentration surfaces as its own explicit reason', () => {
+  const database = setup();
+  try {
+    trackCaller(database, 'C1');
+    const baseDay = 1_700_000_000;
+    for (let i = 0; i < 30; i += 1) {
+      const c = seedCallout(database, 'C1', baseDay + 86_400 * (i % 5) + i, 'HOTTOKEN', 'buy');
+      seedOutcome(database, c, '1h', 'measured', 40);
+    }
+    const row = computeCallerCheckpointBreakdown(database, 'C1').find((r) => r.checkpoint === '1h')!;
+    assert.equal(row.reliable, false);
+    assert.ok(row.reasons.includes('single_token_concentration'), 'the UI must be able to say WHY, not just "unreliable"');
   } finally { database.close(); }
 });
 

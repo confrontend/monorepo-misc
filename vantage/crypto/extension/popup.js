@@ -12,6 +12,11 @@ const exportInvestigationBtn = document.getElementById('exportInvestigation');
 const clearInvestigationBtn = document.getElementById('clearInvestigation');
 const captureStatsEl = document.getElementById('capture-stats');
 const investigationStatsEl = document.getElementById('investigation-stats');
+const riskAutoBtn = document.getElementById('riskAuto');
+const exportRiskBtn = document.getElementById('exportRisk');
+const copyCookieBtn = document.getElementById('copyCookie');
+const clearRiskBtn = document.getElementById('clearRisk');
+const riskStatsEl = document.getElementById('risk-stats');
 
 // The extension can be reloaded (e.g. picking up a new version) while this popup is still
 // open from before the reload; every chrome.* call after that throws "Extension context
@@ -36,6 +41,9 @@ async function refresh() {
   investigationBtn.classList.toggle('active', state.investigationActive);
   captureStatsEl.textContent = `${state.count} event batch(es) · ${state.coverageWindowCount} coverage window(s)`;
   investigationStatsEl.textContent = `${state.investigationCount} unique endpoint(s) · ${state.investigationHitCount} sampled hit(s)`;
+  riskAutoBtn.textContent = state.riskAutoActive ? 'Disable 30d risk capture' : 'Enable 30d risk capture';
+  riskAutoBtn.classList.toggle('active', state.riskAutoActive);
+  riskStatsEl.textContent = `${state.riskCaptureCount} wallet risk response(s) · 30d only`;
 }
 
 toggleBtn.addEventListener('click', async () => {
@@ -49,6 +57,13 @@ investigationBtn.addEventListener('click', async () => {
   const state = await safeSendMessage({ type: 'GET_STATE' });
   if (!state) { refresh(); return; }
   await safeSendMessage({ type: 'SET_INVESTIGATION', active: !state.investigationActive });
+  refresh();
+});
+
+riskAutoBtn.addEventListener('click', async () => {
+  const state = await safeSendMessage({ type: 'GET_STATE' });
+  if (!state) { refresh(); return; }
+  await safeSendMessage({ type: 'SET_RISK_AUTO', active: !state.riskAutoActive });
   refresh();
 });
 
@@ -83,6 +98,40 @@ clearBtn.addEventListener('click', async () => {
 
 clearInvestigationBtn.addEventListener('click', async () => {
   await safeSendMessage({ type: 'CLEAR_INVESTIGATION' });
+  refresh();
+});
+
+exportRiskBtn.addEventListener('click', async () => {
+  const payload = await safeSendMessage({ type: 'EXPORT_RISK' });
+  if (!payload) return;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `gmgn-risk-30d-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+});
+
+copyCookieBtn.addEventListener('click', async () => {
+  const headers = await safeSendMessage({ type: 'GET_LAST_RISK_HEADERS' });
+  if (!headers?.cookie) {
+    copyCookieBtn.textContent = 'No risk request captured yet';
+    setTimeout(() => { copyCookieBtn.textContent = 'Copy latest GMGN Cookie header'; }, 1800);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(headers.cookie);
+    copyCookieBtn.textContent = 'Cookie copied';
+    setTimeout(() => { copyCookieBtn.textContent = 'Copy latest GMGN Cookie header'; }, 1500);
+  } catch {
+    copyCookieBtn.textContent = 'Clipboard unavailable';
+    setTimeout(() => { copyCookieBtn.textContent = 'Copy latest GMGN Cookie header'; }, 1500);
+  }
+});
+
+clearRiskBtn.addEventListener('click', async () => {
+  await safeSendMessage({ type: 'CLEAR_RISK' });
   refresh();
 });
 

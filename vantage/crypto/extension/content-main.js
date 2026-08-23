@@ -16,10 +16,14 @@
     '/vas/api/v1/twitter/messages', // KOL/influencer Twitter activity feed
   ];
   const MARKER = '__gmgn_capture__';
+  const RISK_MARKER = '__gmgn_risk_capture__';
+  const RISK_STATE_MARKER = '__gmgn_risk_auto_state__';
   const INVESTIGATION_MARKER = '__gmgn_investigation__';
   const INVESTIGATION_STATE_MARKER = '__gmgn_investigation_state__';
   const MAX_PAYLOAD_CHARS = 50000;
   let investigationActive = false;
+  let riskAutoActive = false;
+  const riskObservedWallets = new Set();
 
   const matchesTarget = (url) => TARGET_PATHS.some((target) => url.includes(target));
 
@@ -59,8 +63,43 @@
     window.postMessage({ source: INVESTIGATION_MARKER, sample: { ...sample, observedAt: new Date().toISOString(), pageUrl: location.href } }, '*');
   };
 
+  const walletFromLocation = () => {
+    const match = location.pathname.match(/^\/sol\/address\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
+    return match ? match[1] : null;
+  };
+
+  const isRiskUrl = (url) => /\/pf\/api\/v1\/wallet\/sol\/[1-9A-HJ-NP-Za-km-z]{32,44}\/profit_stat\/30d(?:[/?]|$)/.test(String(url));
+
+  const emitRisk = (url, status, bodyText) => {
+    if (!riskAutoActive || !isRiskUrl(url)) return;
+    try {
+      const parsed = JSON.parse(bodyText);
+      const match = String(url).match(/\/wallet\/sol\/([1-9A-HJ-NP-Za-km-z]{32,44})\/profit_stat\/30d/);
+      if (!match) return;
+      riskObservedWallets.add(match[1]);
+      const parsedUrl = new URL(url, location.href);
+      window.postMessage({ source: RISK_MARKER, capture: { capturedAt: new Date().toISOString(), walletAddress: match[1], period: '30d', status, url: `${parsedUrl.origin}${parsedUrl.pathname}`, responseBody: parsed } }, '*');
+    } catch {
+      // The background record should only contain the structured GMGN response.
+    }
+  };
+
+  const scheduleRiskFetch = () => {
+    const wallet = walletFromLocation();
+    if (!riskAutoActive || !wallet) return;
+    setTimeout(() => {
+      if (!riskAutoActive || riskObservedWallets.has(wallet) || walletFromLocation() !== wallet) return;
+      const endpoint = `/pf/api/v1/wallet/sol/${wallet}/profit_stat/30d`;
+      fetch(endpoint, { credentials: 'include', headers: { accept: 'application/json' } }).catch(() => {});
+    }, 1500);
+  };
+
   window.addEventListener('message', (event) => {
     if (event.source === window && event.data?.source === INVESTIGATION_STATE_MARKER) investigationActive = event.data.active === true;
+    if (event.source === window && event.data?.source === RISK_STATE_MARKER) {
+      riskAutoActive = event.data.active === true;
+      scheduleRiskFetch();
+    }
   });
 
   const emitOne = (path, status, parsed, query) => {
@@ -98,9 +137,10 @@
     try {
       const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
       const request = args[1] || (args[0] && typeof args[0] === 'object' ? args[0] : null);
-      if (matchesTarget(url) || investigationActive) {
+      if (matchesTarget(url) || isRiskUrl(url) || investigationActive) {
         response.clone().text().then((text) => {
           if (matchesTarget(url)) emit(url, response.status, text);
+          emitRisk(url, response.status, text);
           emitInvestigation({ transport: 'fetch', method: request?.method || 'GET', url: safeUrl(url), status: response.status, requestPayload: payloadText(request?.body), responsePayload: payloadText(text) });
         }).catch(() => {});
       }
@@ -128,8 +168,9 @@
       return originalSend.call(xhr, body);
     };
     xhr.addEventListener('load', () => {
-      if (matchesTarget(capturedUrl) || investigationActive) {
+      if (matchesTarget(capturedUrl) || isRiskUrl(capturedUrl) || investigationActive) {
         if (matchesTarget(capturedUrl)) emit(capturedUrl, xhr.status, xhr.responseText);
+        emitRisk(capturedUrl, xhr.status, xhr.responseText);
         emitInvestigation({ transport: 'xhr', method: capturedMethod, url: safeUrl(capturedUrl), status: xhr.status, requestPayload: capturedRequestBody, responsePayload: payloadText(xhr.responseText || '') });
       }
     });
@@ -196,4 +237,20 @@
   PatchedWebSocket.CLOSING = OriginalWebSocket.CLOSING;
   PatchedWebSocket.CLOSED = OriginalWebSocket.CLOSED;
   window.WebSocket = PatchedWebSocket;
+
+  const originalPushState = history.pushState;
+  history.pushState = function (...args) {
+    const result = originalPushState.apply(this, args);
+    scheduleRiskFetch();
+    return result;
+  };
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function (...args) {
+    const result = originalReplaceState.apply(this, args);
+    scheduleRiskFetch();
+    return result;
+  };
+  window.addEventListener('popstate', scheduleRiskFetch);
+  window.addEventListener('hashchange', scheduleRiskFetch);
+  scheduleRiskFetch();
 })();

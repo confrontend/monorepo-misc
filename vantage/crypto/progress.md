@@ -762,6 +762,9 @@ Test result: `npx tsc -p tsconfig.ui.json --noEmit` and `npx tsc -b --noEmit` bo
 2026-08-17 - Audited collection code for the same premature-stop/opaque-backlog pattern. No code changed. Findings: Top Caller Dune checkpoints stop at `MAX_CHECKPOINT_BATCHES_PER_RUN=15` × 300 targets and require another click; Copy Simulation has the same 15-batch cap and explicitly returns `exhausted`; ordinary signal Dune capture also has a deliberate 25-ID request size and a 500-ID prescreen pass budget; CopyTrade GMGN history has an explicit per-wallet request cap with truncation metadata. Also found a live-progress off-by-one in Top Caller checkpoint runs (`requests_made = batches + 1` while the loop is active), so the UI can report one extra batch. Main design recommendation: keep per-query safety limits, but make the click create/resume a durable background drain job with remaining-queue counts, automatic rate-limit scheduling, Stop, and a terminal “queue empty” state; do not use repeated manual clicks as normal operation. Next: review/approve a unified queue-drain design before implementation.
 2026-08-17 - Documented the collection-limit audit in `docs/COLLECTION_LIMITS_AND_QUEUE_DRAIN_REVIEW.md`. No production code changed. The report distinguishes intentional safety controls (GMGN five-second spacing/cooldowns, per-wallet caps, Dune request sizes, 500-signal prescreen, 24-hour maturity buffer, and Copy Simulation sample limits) from the problematic Top Caller 15-batch user-visible stop and its progress off-by-one. It proposes a rate-aware durable queue-drain worker with Stop, resume, exact remaining counts, and queue-empty completion. Next: review and approve the design before implementation.
 2026-08-17 - Added sortable columns to the Top Caller “Best measured wallet × checkpoint” table. Files changed: `ui/main.tsx` (sort state, clickable Wallet/Checkpoint/Median/Win/Measured/Coverage/Status headers, direction indicators, stable tie-breakers; default reliable-first ranking preserved) and `ui/styles.css` was unchanged because the existing sortable-header styling applies. Verification: `npx tsc -p tsconfig.ui.json --noEmit` and `npm test -- --test-name-pattern="top-callers"` passed; build ran successfully and 295 matching tests passed. Errors/unresolved: none. Next: reload Top Callers and click a column header to sort; pagination resets to page 1.
+2026-08-17 - Made the Top Caller `$100` estimated-value column sortable. Files changed: `ui/main.tsx` (added `estimatedValue` sort key; `$100` header now toggles ascending/descending using the same monotonic value derived from median return). Verification: `npx tsc -p tsconfig.ui.json --noEmit` and `npm run build:ui` passed. Errors/unresolved: none. Next: reload Top Callers and click `$100`.
+2026-08-17 - Reviewed current live Top Caller outcomes via `/api/top-callers/callers` for 5m–24h. No code changed. Evidence: 12 reliable callers at 5m–1h and 14 at 6h; none meet the reliability gates at 24h. The median of caller medians is negative at every populated horizon: −5.26% (5m), −8.03% (10m), −12.95% (15m), −19.12% (30m), −21.42% (45m), −24.21% (1h), and −37.77% (6h). Only 4/12, 3/12, 2/12, 2/12, 0/12, 2/12, and 1/14 reliable callers respectively have positive medians. Conclusion: a few short-term positive callers exist, but the current Top Caller set does not show a broad or durable positive edge; 24h evidence is not yet reliable. Next: collect/measure the remaining mature checkpoints and evaluate winners across dates before treating any caller as successful.
+2026-08-17 - Joined winner wallet `7JFSAQbodH8otbLx1K6hzjT3CU7k71VmpReLu4mMNYrV` against the current Top Caller tables in memory. No code changed. Evidence: CopyTrade data exists (833 trades, 90-day coverage not truncated, two roster rows with ranks 12/23), but the wallet has 0 `top_caller_callouts`, 0 Top Caller outcomes, and 0 Top Caller leaderboard rows. Conclusion: the current database cannot test a trader/caller relationship for this wallet; the join is empty, so implementing a combined report now would add an empty view rather than evidence. Next: capture this wallet as a caller or capture a common GMGN leaderboard before building the join.
 2026-08-17 - Diagnosed the 4YZ Top Caller reliability difference from the live SQLite database and `/api/top-callers/callers?checkpoint=10m`. No production code changed. Evidence: 4YZ has 64/67 measured (95.5%), 3 unavailable, 0 waiting, and 3 capture dates, so it clears the 30-measured/70%-coverage/3-date reliability gates; comparison wallet 4uCT has 217/277 measured (78.3%) but all callouts are from 1 capture date, so it fails the date-diversity gate, while PMJA has 0 measured and 248 waiting. Temporary query was deleted after use. Next: explain that the reliable label currently means complete, diverse measurement coverage—not that the wallet is inherently better.
 2026-08-17 - Implemented both fixes from an external review of the coverage-gate work (2026-08-17, MIN_CALLER_MEASURED_CALLS/MIN_CALLER_COVERAGE_PERCENT entry): (1) expose *why* a checkpoint isn't reliable instead of one collapsed boolean, and (2) resolve a real ambiguity in "keep retrying incomplete rows" before it could be misimplemented. Verified the review's own worked example directly against the live database first: the "4YZ is reliable" claim is real but only true at 5m–1h (64/67, 95.5% coverage); at the actual default evaluation checkpoint (24h) the same wallet is 14/67 (20.9%), still mostly `awaiting_dune_fetch` — confirms reliability must be read per-checkpoint, never as one caller-wide verdict, exactly as the review's own proposed table (correctly) implied but its prose did not state.
 
@@ -778,3 +781,2007 @@ Tests: updated the existing batch-count/message-wording assertions for the new "
 Files changed: `src/copytrade/topCallerCheckpoints.ts` — added `DUNE_REQUEST_TIMEOUT_MS = 20_000` and applied `signal: AbortSignal.timeout(...)` to all three Dune fetch calls; the status-poll loop additionally now treats a single poll attempt's timeout/network error as transient (falls through and retries on the next 1s tick, up to the existing 60-attempt cap) rather than failing the whole batch immediately — a real Dune blip on attempt 40 of 60 shouldn't discard however many batches this run had already drained, forcing a fresh click; only Dune's own reported `QUERY_STATE_FAILED`/`CANCELLED` is treated as fatal, tracked via an explicit `fatalError` variable rather than error-message string-matching (an earlier draft of this fix used substring matching on the error text, which is fragile against arbitrary Dune error strings — caught and corrected before landing). `src/copytrade/topCallers.ts` — new `reconcileOrphanedCollectionRuns(database)`, mirroring `reconcileStaleFetchRuns` in `fetch.ts` exactly: any `top_caller_collection_runs` row still `'running'` at process startup is marked `'failed'` with an honest "interrupted" message, since a run only ever executes inside the process that started it — this closes a second real gap the incident exposed, that an orphaned `'running'` row (from a restart, or exactly this kind of hang) would otherwise block `hasActiveCollectionRun` from ever allowing that kind to run again. `src/scripts/server.ts` — wired the new reconciliation into startup alongside the existing `reconcileStaleFetchRuns`/`rearmPausedCollectionRuns` calls.
 
 The already-running dev server process still has the old, unpatched code in memory — a code fix cannot retroactively unstick an `await` already blocked inside it, and the new startup reconciliation only runs on the next actual restart. Rather than restart the user's dev server unprompted, directly corrected the one stuck row (id 91) to `status = 'failed'` with an explicit, honest message, confirmed via the real status endpoint that `hasActiveCollectionRun` is unblocked (`running: false`) — the 9,600 targets it had already measured before hanging are untouched and kept, since each batch commits immediately. Test result: `npx tsc -b --noEmit` clean, `npm test` 295/295 passing (no test changes needed — this is network-layer timeout behavior, consistent with this codebase's existing convention of not unit-testing raw network timeouts). Agent: Claude Sonnet 5. Errors/unresolved: the timeout fix itself is not yet loaded in the currently-running dev server process — it will take effect on the next server restart (or the next deploy), and only then will a future hang of this kind fail cleanly within ~20s instead of hanging indefinitely. Next: restart the server when convenient to load the fix, then start a fresh "Measure Dune checkpoints" run to continue draining the remaining ~35k backlog.
+2026-08-17 - Joined CopyTrade wallets to Top Caller callouts in live SQLite to find a concrete cross-source example. No production code changed. Evidence: 14 wallet addresses overlap; strongest balanced example is `FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke` with 10,000 CopyTrade trades, 289 caller calls measured at 1h, and caller medians +19.99% (5m), +29.03% (30m), +22.63% (1h), then -1.46% (6h); 24h has no measured rows. Decision: useful short-horizon overlap example, not a durable winner; combined reporting should show both datasets and require longer-horizon coverage. Verification: read-only SQLite query; temporary script deleted; no tests needed. Errors/unresolved: overlap is historical and 24h caller coverage is absent. Next: use this wallet as a joint-analysis fixture if the combined view is implemented.
+2026-08-17 - Merged Historical Consistency into the main CopyTrade research table. Files changed: `ui/main.tsx` (removed the visible Historical consistency subtab and standalone panel; research route now loads the existing consistency endpoint and adds a Consistency column showing verdict, history depth, and early-vs-recent medians; direct legacy historical-consistency routes fall back to research), `ui/styles.css` unchanged after removing unused temporary panel styling. Decision: keep Forward Validation separate because it measures post-selection performance, while historical consistency is now one evidence column beside wallet performance, concentration, and rank history. Verification: `npx tsc -p tsconfig.ui.json --noEmit` and `npm run build:ui` passed. Errors/unresolved: none known. Next: reload CopyTrade → Top-trader copy research and review the new Consistency column.
+2026-08-17 - Merged Winners into the top of the main CopyTrade research page. Files changed: `ui/main.tsx` (removed the Winners subtab and route, made the existing winner fetch/screen-pass/copy-simulation sections render on the research route; direct legacy winners routes now fall back to research), `ui/styles.css` (ordered the winner section before fetch controls and historical wallet performance inside the CopyTrade panel). Decision: the user now sees the decision output first—screen-pass winners and copy simulation—then the controls and full evidence table; Forward Validation and Top Callers remain separate workflows. Verification: `npx tsc -p tsconfig.ui.json --noEmit` and `npm run build:ui` passed. Errors/unresolved: none known. Next: reload `#copytrade/research` and confirm winners appear above the fetch controls.
+2026-08-17 - Added reusable copy icons beside wallet addresses in the raw smart-money table, Top Caller leaderboard/checkpoint tables, Forward Validation roster, and CopyTrade historical performance table. Files changed: `ui/main.tsx` (new `CopyAddressButton` helper stops row-click propagation and copies the full address while displaying the compact address). Decision: full wallet addresses remain available via title/copy action without widening tables. Verification: `npx tsc -p tsconfig.ui.json --noEmit` and `npm run build:ui` passed. Errors/unresolved: none known. Next: reload the affected tables and verify clipboard behavior.
+2026-08-17 - Added JSON row-download controls beside wallet copy icons in the raw smart-money, Top Caller leaderboard/checkpoint, Forward Validation, and CopyTrade wallet tables. Files changed: `ui/main.tsx` (new `saveJson` and `SaveRowButton` helpers serialize the exact row object to a browser download without changing stored data). Decision: row exports are local JSON files with descriptive filenames; row clicks remain unaffected. Verification: `npx tsc -p tsconfig.ui.json --noEmit` and `npm run build:ui` passed. Errors/unresolved: none known. Next: reload a table and click the download arrow to save a row JSON file.
+2026-08-17 - Reassessed the live stored evidence against the product goal of finding actionable winners. No code changed. Files inspected: `CLAUDE.md`, recent `progress.md`, CopyTrade winner/simulation/consistency code, and live local APIs. Evidence: the full CopyTrade gate currently yields one winner, `7JFSAQbodH8otbLx1K6hzjT3CU7k71VmpReLu4mMNYrV` (385 historical trades, 62.1% win rate, 14.87% historical median, consistent early/recent history, 127/150 simulated round trips, 84.7% simulation coverage, +52.6% simulated median under the current 15s/fees/slippage assumptions); true historical liquidity is still unavailable for this wallet. Top Caller evidence is a separate strategy: `4YzpSZpxDdjNf3unjkCtdWEsz2FL5mok7e5XQaDNqry8` has the strongest reliable short-horizon rows (+10.56% at 5m, +14.46% at 10m, +8.5% at 30m, +7.77% at 1h, 32 measured of 67 calls), while no caller is reliable at 24h. Decision: use the current data to operate two explicit shadow-follow lanes—wallet trade copying for 7JF and fixed-horizon call following for 4Yz—rather than merging them into one score. Test result: read-only local API checks succeeded. Errors/unresolved: simulation lacks true liquidity/failed-order evidence and both candidate selections remain based on current historical samples. Next: build an actionable watchlist/shadow ledger that records future observed actions, assumed entry/exit, and realized net result per lane.
+2026-08-17 - Assessed whether the proposed Actionable Watchlist is feasible with existing integrations. No code changed. Files inspected: `src/copytrade/fetch.ts`, `src/copytrade/topCallers.ts`, `src/copytrade/topCallerCheckpoints.ts`, `src/copytrade/copySimulation.ts`, `src/gmgn/rateLimit.ts`, `src/gmgn/watch.ts`, and server routes. Decision: a shadow Watchlist is feasible now using GMGN `wallet_activity` polling for selected wallets, local SQLite ledger/account calculations, and delayed Dune checkpoint verification; the universal GMGN 5-second spacing makes one or a few selected wallets practical, and 7JF's ~34-minute median hold is compatible with that polling latency. Current code is one-shot rather than a durable CopyTrade watcher; GMGN signal Watch Mode remains disabled. Live liquidity can only be captured prospectively from GMGN token-info data, not reconstructed historically. Automatic real-money execution is not supported by the current app and would require a separate trading/signing integration. Test result: read-only code inspection completed. Errors/unresolved: no official streaming source is integrated, social/message callouts are not the same as the current wallet-activity-derived Top Caller rows, and Dune should remain an after-the-fact validator rather than the live trigger. Next: implement a rate-aware selected-wallet poller and append-only shadow ledger before any execution integration.
+2026-08-17 - Decided how the Actionable Watchlist should relate to Forward Validation. No code changed. Decision: replace the visible Forward Validation tab with a Watchlist/Live Validation experience, but retain the existing frozen-roster experiment records and future-only calculations as the Watchlist's append-only validation history. Adding a winner to the Watchlist should automatically freeze its selection time and methodology; live GMGN observations feed the shadow ledger, while 1d/7d/30d outcomes continue to mature in the background. This reduces duplicate UI without discarding the anti-hindsight research control. Test result: not applicable (design decision only). Errors/unresolved: implementation still required. Next: redesign the tab around candidates, open/closed shadow positions, account results, and a collapsed Validation history section.
+2026-08-17 - Verified the user's report that the current CopyTrade winner is stale. No code changed. Files inspected: live `/api/copytrade/historical-consistency`, `src/copytrade/copyCandidates.ts`, `src/copytrade/evaluate.ts`, and the current working diff. Evidence: winner wallet `7JFSAQbodH8otbLx1K6hzjT3CU7k71VmpReLu4mMNYrV` has a latest stored completed trade at `2026-08-01T19:37:12Z`, roughly 16 days before the current evaluation, yet remains `consistent` because historical consistency compares early/recent slices of its own stored history and the winner gate has no calendar-recency requirement. Decision: distinguish historical winners from active follow candidates; dormant wallets must remain preserved but must not be presented as actionable until current GMGN activity confirms they resumed. Test result: read-only API/code inspection succeeded. Errors/unresolved: the currently running `/api/copytrade/winners` process returned `nowSeconds is not defined`; current source defines `nowSeconds`, indicating the server needs a restart to load the working version. Next: add a preregistered activity-freshness gate based on latest source trade and expose active/dormant status in the Watchlist.
+2026-08-17 - Clarified the product goal after the only full CopyTrade winner proved dormant. No code changed. Decision: do not abandon winner discovery; replace the permanent-winner concept with a lifecycle of discovered → historically qualified → currently active → shadow-copy profitable → followable, with automatic retirement when activity or observed edge deteriorates. Current evidence supports this direction because the existing gates already eliminate most false positives, while 7JF remains useful historical evidence and 4Yz remains a short-horizon caller hypothesis rather than a permanent winner. Test result: not applicable. Errors/unresolved: freshness and ongoing shadow-performance gates are not yet implemented. Next: implement the active-candidate lifecycle in the Watchlist and require recent GMGN activity before promotion.
+2026-08-17 - Diagnosed why an individually fetched CopyTrade wallet was absent from the research table. No production code changed. Evidence: wallet `9A4h17UgLGaVws6T1mBxzH5gkG35CUSrTfNgNK5Uj4Rp` has 3,350 stored `copytrade_trades` rows in the live SQLite database, but zero `copytrade_wallets` rows and zero membership in selected roster snapshot `#140`; `computeCopyTradeReport` intentionally skips every wallet outside the selected frozen roster. The UI's “26 traders stored” card counts all distinct fetched wallets while the report table is scoped to the selected roster, so the mixed scopes make a successful individual fetch look missing. Decision: do not silently add ad-hoc wallets to a frozen leaderboard roster because that would corrupt roster provenance; the UI should expose individually fetched wallets in a separate explicit scope/result view and label the stored-vs-roster counts clearly. Verification: read-only SQLite queries plus source inspection of `src/copytrade/evaluate.ts`, `src/copytrade/roster.ts`, `src/scripts/server.ts`, and `ui/main.tsx`. Errors/unresolved: no endpoint/table currently renders an ad-hoc fetched wallet outside a roster. Next: add a single-wallet results route/view or an “All stored / selected roster” scope without mutating snapshot `#140`.
+2026-08-17 - Implemented tail-aware CopyTrade simulation metrics alongside the existing median gates. Files changed: `src/copytrade/copySimulation.ts` (same simulated population now reports wallet/copier means, >+100% and >+300% counts, best copied return, and positive-total tail concentration; named thresholds), `src/copytrade/copyCandidates.ts` and `src/scripts/server.ts` (plumbed mean/count/tail fields into candidate survival inputs without changing the median-only pass/fail rule), `ui/main.tsx` (winner cards show wallet/copier median and mean, big wins, best/worst trade, and tail concentration with an explanation tooltip), and matching tests. Decision: expose equal-size copier economics without replacing the typical-trade median or allowing a positive mean to create a Winner. Verification: `npx tsc -b --noEmit`, UI typecheck, `npm test` 302/302, and production UI build passed. Live SQLite check: `DxM…` 97 simulated, median −4.535%, mean +51.35%, 17 >+100%, 7 >+300%, best +1137.24%, tail share 131.3%; `7JF…` 127 simulated, median +52.60%, mean +88.65%, 55 >+100%, 10 >+300%, best +554.39%, tail share 106.2%. Errors/unresolved: tail concentration can exceed 100% when losing trades reduce the positive denominator; this is intentional and documented rather than clamped. Next: review the new metrics before deciding whether any mean/tail rule should ever affect winner selection.
+2026-08-18 - Checked the live CopyTrade roster fetch without starting or changing it. Run `#36` is still `running` (`0/100` wallets completed, `0` new trades, `59` requests attempted), with `859` duplicates and `1,991` rows skipped by the daily sample cap; no GMGN rate-limit cooldown or error is recorded. The counters are advancing (daily-cap count rose from 1,041 to 1,991 during the check), so the worker is active rather than frozen, but it has not completed the first wallet and the current estimate remains ~3h49m. Latest stored trade remains from the prior completed run at `2026-08-18T05:56:30Z`; no new trades have been committed by run #36 yet. Decision: do not start a second run; allow the current run to finish or explicitly stop it if this duration is unacceptable. Errors/unresolved: the first-wallet walk is slow and has no completed-wallet pace yet, so the estimate is advisory. Next: monitor until wallet 1 completes; if it remains at 0/100 while requests continue, inspect that wallet's pagination/cap behavior before changing limits.
+2026-08-18 - Implemented a deterministic local representative-sample layer for CopyTrade analysis. Files changed: `src/copytrade/representativeSample.ts` (UTC-day-stratified systematic selection, max 1,000 sells per wallet, nearest prior buy retained for hold-time evidence), `src/copytrade/evaluate.ts` (analysis samples existing SQLite rows without adding GMGN/Dune calls; raw history remains untouched; report exposes population/selected counts and method), `ui/main.tsx` (transparent sampling info line), and `tests/copytrade-representative-sample.test.ts` (determinism, boundedness, per-wallet independence, nearest-buy retention). Live read-only report for the current 25-wallet roster: 35,473 stored sells considered, 11,621 selected, 10 wallets sampled. Verification: `npm test` passed 306/306 including server/UI builds; live report read succeeded. Decision: sampling is an analysis boundary only; collection behavior and the 500-per-day storage cap are unchanged. Errors/unresolved: high-volume wallets with missing-cost-basis sells can show fewer completed usable trades than selected sells; this is preserved as missingness rather than imputed. Next: review whether 1,000 sells and UTC-day proportional allocation should be preregistered before using the sampled report for winner decisions.
+2026-08-18 - Added visible CopyTrade analysis status feedback in `ui/main.tsx` and `ui/styles.css`. The research page now shows a spinner while the saved SQLite report is being built, then a completed state with selected-vs-population sell counts and an explicit “no GMGN request” explanation. Verification: `npm run build` passed (server typecheck and Vite UI build). Errors/unresolved: report computation remains a single request, so the spinner communicates activity but does not expose percentage progress inside the synchronous API call. Next: if report generation becomes slow at larger roster sizes, add a server-side job/progress endpoint rather than client-side polling of the synchronous route.
+2026-08-18 - Improved live CopyTrade fetch visibility. `src/copytrade/fetch.ts` now exposes persisted `requestsMade` in `/api/copytrade/fetch/status`; `ui/main.tsx` progress panels now show new trades, total processed rows (new + duplicate + daily-capped), GMGN request count, wallet progress, and the existing estimate. This distinguishes active GMGN network work from fast local SQLite checks and prevents `0 trades` from looking like no activity. Verification: server typecheck and Vite UI build passed. Errors/unresolved: the running server must reload the updated code before the new request counter appears. Next: restart the local app, then monitor that `processed` or `GMGN requests` increases between refreshes.
+2026-08-18 - Audited recent CopyTrade ingestion from SQLite without starting a fetch. Correct Unix-time query shows 20,825 new trade rows inserted in the last six hours across 8 wallets (17,280 at 10:xx UTC, 3,500 at 11:xx UTC, and 45 from the current run at 16:xx UTC). Overnight roster run `#38` inserted 57,856 new rows across 25/100 wallets before failing at 15:07 UTC because `openapi.gmgn.ai` DNS lookup failed; it was not a rate-limit failure. Current run `#39` is active and has 45 new rows so far, 7 duplicates, 648 daily-cap skips, and 16 GMGN requests. Decision: overnight fetching worked substantially but did not finish the roster; current run is continuing. Errors/unresolved: the earlier six-hour query used SQLite text comparison against mixed timestamp formats and was corrected to Unix-time comparison. Next: monitor run #39 and retry the remaining wallets after the DNS/network failure is resolved.
+2026-08-18 - Diagnosed why a CopyTrade fetch selected with `trader_limit = 250` reports `Fetching wallet 1 of 100`. The active runs store the requested limit as 250, but the newest GMGN leaderboard snapshot (snapshot 140) contains only 100 rank rows, so roster sync/listing can only produce 100 actual wallets; no application cap is reducing 250 to 100. Decision: explain that the dropdown is the requested maximum, while the progress total is the actual wallet count available in the selected snapshot. Errors/unresolved: obtaining 250 requires a leaderboard capture/API response with at least 250 rows (likely pagination), not another trade-history retry. Next: capture/import a larger ranked snapshot, then start a new run; an active run cannot be resized.
+2026-08-18 - Added two separate CopyTrade winner classifications. Files changed: `src/copytrade/copyCandidates.ts` (high-upside candidate path: positive mean but non-positive median, same history/consistency/copyability gates, simulated mean positive, >=70% simulation coverage, at least one trade above +100%; existing median winners unchanged), `src/scripts/server.ts` (simulation map now includes both populations), `ui/main.tsx` and `ui/styles.css` (separate High-upside candidates section), and `tests/copytrade-copy-candidates.test.ts` (tail candidate and fail-closed coverage/big-win tests). Decision: median winners remain the consistent group; tail candidates are explicitly labeled and never mixed into that ranking. Verification: `npm test` passed 308/308; live `/api/copytrade/winners` currently reports 1 median winner and 0 high-upside candidates. Errors/unresolved: high-upside is intentionally empty until stored data and simulation meet its gates. Next: reload the CopyTrade research page after the dev server picks up the build and review the separate section.
+2026-08-18 - Rebuilt the UI after final winner-section copy casing adjustment. Verification: `npm run build:ui` passed. Errors/unresolved: none.
+2026-08-18 - Added a compact observed-history $100 path to CopyTrade winner cards and reduced research-page noise with collapsible evidence sections. Files changed: `src/copytrade/copyCandidates.ts` (winner payloads now carry `analysisPeriodDays`, `coveredDays`, and the existing sequentially compounded `endingCapitalUsdCompounded`), `ui/main.tsx` (winner and high-upside cards show the compounded result from $100 over the requested analysis window plus the actual number of active days observed; dormant wallets retain their historical result and show inactivity; Copy Simulation, Liquidity Impact, and gate-comparison evidence are collapsible), `ui/styles.css` (summary affordances and capital-path styling). Decision: the display uses stored completed-trade history only; `coveredDays` reports the first-to-last observed trade span, so a trader that stopped after 30 days is shown as 30 active days inside the 90-day window rather than being presented as a full 90-day run. No fetches or schema changes. Verification: `npm test` passed 308/308, including server and UI builds. Errors/unresolved: the compounded path is a sequential trade-history illustration and does not model idle cash between trades; this is stated by the observed-days label. Next: reload CopyTrade → Top-trader copy research to see the compact winner summary and expand evidence only when needed.
+2026-08-18 - Clarified the winner capital-path label to say it is compounded across observed trades, not a continuous idle-cash account. Verification: `npm run build:ui` passed. Next: reload the UI.
+2026-08-18 - Added an all-trader `$100 path for every selected trader` table to CopyTrade research. Files changed: `ui/main.tsx` (expanded the existing CopyTrade row type with persisted compounded-capital and observed-span fields; added an open, compact table showing trader, requested window, active observed days, compounded `$100` result, and whether the recorded span is shorter than the window; wallet addresses retain copy controls). No new fetches, schema, or scoring rules. Verification: `npm run build` passed (server typecheck and UI build). Next: reload CopyTrade → Top-trader copy research; the table appears beneath the historical wallet-performance description.
+2026-08-18 - Replaced the static all-trader `$100` view with a compact daily line chart per trader. `src/copytrade/evaluate.ts` now derives a deterministic UTC-day compounded capital path from the same stored completed trades (baseline `$100`, one point per trading day, no new API calls); `ui/main.tsx` renders the path inline beside each trader and keeps the final capital/active-day columns; `ui/styles.css` styles positive/negative paths and the $100 baseline. Existing fixture rows may omit the optional path and render an em dash. Verification: `npm test` passed 308/308 including server/UI builds. Next: reload CopyTrade → Top-trader copy research and inspect the Path column; hover a line for its start/end dates and final value.
+2026-08-18 - Improved the all-trader capital charts after UI review. `ui/main.tsx` now renders an explicit “No path” state instead of a blank cell, supports one-day paths with a visible point, and adds chart axes, min/max value labels, date labels, and a dashed `$100` baseline. `ui/styles.css` enlarges the chart to 320×118 and styles axes, labels, and endpoint markers. No collection or calculation source changed. Verification: `npm test` passed 308/308. Next: reload the research page; rows without a path are incomplete/truncated or have no completed multi-day history, while charted rows show dates and values directly.
+2026-08-18 - Made the capital path the dominant table visualization. `ui/main.tsx` now uses two-decimal chart value labels (compact `$k`/`$m` notation for very large values) and renders a hoverable point for every daily observation with an exact date/value tooltip. `ui/styles.css` enlarges the plot to 460×170, gives the chart column most of the table width, and makes points visibly interactive. Verification: `npm run build` passed. Next: reload the page and hover individual points to inspect exact compounded values.
+2026-08-18 - Corrected number formatting in the capital-path view. `ui/main.tsx` now guarantees two decimal places for ordinary USD values and uses a two-decimal scientific notation only when JavaScript cannot represent a huge value with fixed notation; active-day spans now render to two decimals instead of raw precision. Verification: `npm run build:ui` passed. Next: reload the UI to clear the previous long-number bundle.
+2026-08-18 - Replaced unreadable `e+` money strings with explicit scientific notation (`$1.47 × 10^59`) for extreme compounded paths while preserving two-decimal mantissas. Verification: `npm run build:ui` passed. Next: reload the page.
+2026-08-18 - Audited the newly-added `$100` capital-path feature without changing production code. Files inspected: `src/copytrade/evaluate.ts`, `src/copytrade/representativeSample.ts`, `ui/main.tsx`, `tests/copytrade.test.ts`, live `/api/copytrade/results`, and read-only SQLite return distributions. Finding: the new chart promotes `endingCapitalUsdCompounded`, although `evaluate.ts` explicitly documents sequential full-bankroll compounding as “the wrong model” and says equal-weight `endingCapitalUsd` is the headline. It applies every selected sell's ROI to 100% of capital, ignores overlapping positions/position size, and for sampled wallets compounds only a deterministic subset while the UI says “each stored completed trade.” Live impact: 14 of 16 non-null paths exceed $1 trillion; maximum is about 1e303, while the maximum existing equal-weight result is $674.45. `coveredDays` is elapsed first-to-last usable trade span, not a count of active days. No tests exercise `capitalPathByDay` or prevent the known-wrong compounded metric from becoming primary UI. Decision: current chart is mathematically consistent with its formula but materially misleading as a copy-performance result; it should be removed from the primary view and replaced with a bounded equal-weight cumulative path immediately, then later with a position-size/concurrency-aware copy simulation. Tests: no writes and no test run required for this read-only review; existing tests themselves confirm the compounded model can explode and identify equal-weight as headline. Agent/model: Codex GPT-5. Errors/unresolved: exact real capital path cannot be inferred without a preregistered sizing and overlapping-position policy. Next: implement the corrected bounded path and relabel `coveredDays` as observed span after user approval.
+2026-08-18 12:18:07 -07:00 - Replaced the misleading whole-bankroll CopyTrade compounding display with two explicitly separate models. Files changed: src/copytrade/evaluate.ts (historical chart now uses the existing equal-weight $100 result and ends at endingCapitalUsd), src/copytrade/copySimulation.ts (new deterministic fixed-stake portfolio: $100 starting cash, $10 entries, maximum 10 simultaneous positions, no borrowing, loss capped at stake, chronological overlapping positions, delayed Dune prices with the existing GMGN fee/slippage assumptions, fixed SOL gas reported separately), ui/main.tsx (winner and copy-simulation cards show the cash-constrained result/path; historical table is relabelled equal-weight/observed span; astronomical compounded figures removed from primary UI), tests/copytrade-copy-simulation.test.ts (cash, concurrency, loss cap, fee-adjusted integration, and gas tests). Decision: preserve legacy compounded fields for API/snapshot compatibility but stop presenting them as actionable money; do not invent SOL/USD gas conversion or intermediate mark-to-market prices. Agent/model: Codex GPT-5. Tests: server/UI typechecks clean; npm test and production build passed 311/311. Real SQLite verification for 7JFSAQ...: 127 delayed-price-eligible round trips, 123 placed, 4 skipped at the 10-position cap, $100 -> $1,146.48, 0.492 SOL gas reported separately; this replaces the prior nonsensical ~1e44 display. Errors/unresolved: portfolio covers the latest 150 round trips by the existing simulation scope; fixed gas is not deducted from USD until a timestamped SOL/USD source is deliberately added. Next step: reload CopyTrade research and expand Copy simulation to inspect the new path and capacity counts.
+
+2026-08-18 15:31:57 -07:00 - Added CSV export for the historical equal-weight  CopyTrade table. Files changed: ui/main.tsx (CSV escaping/download helper; export includes one row per trader with model, period, wallet, trade/return metrics, observed span, bounded equal-weight ending value, verdict, sampling metadata, and daily capital-path JSON; inline context states this is saved SQLite historical data only and is not delayed copy performance), ui/styles.css (action-button grouping). No GMGN/Dune request, schema change, or scoring change. Verification: npx tsc -p tsconfig.ui.json --noEmit and npm run build:ui passed. Errors/unresolved: CSV intentionally preserves the full path as JSON in one column for downstream analysis; copied simulation remains a separate report. Next: reload CopyTrade research and click Export historical CSV above the table.
+
+2026-08-18 15:47:28 -07:00 - Ran a read-only GMGN portfolio stats test for winner wallet 7JFSAQ... using the existing local API key; no UI/database schema changes. Raw response preserved at .data/gmgn-stats-test.json. Endpoint returned aggregate fields: native_balance, realized_profit, realized_profit_pnl, buy/sell counts, bought/sold amounts and fees, total_cost, last_timestamp, plus pnl_stat token count/winrate/holding period. Verification: request succeeded with network approval. Decision: GMGN exposes useful aggregate wallet stats, but this single 30d response is not a day-by-day equity curve; daily snapshots would be needed for that. Errors/unresolved: endpoint output does not itself provide a historical balance series. Next: if approved, add append-only daily stats snapshots and a compact chart/UI.
+
+2026-08-18 15:56:01 -07:00 - Replaced the old trade-by-trade equal-weight  table in CopyTrade research with a GMGN aggregate wallet-statistics table. Files changed: src/copytrade/evaluate.ts (parse preserved 30d GMGN raw stats into optional per-wallet aggregate fields; fallback to existing stats periods for prior risk context), src/copytrade/fetch.ts (wallet stats fetch now requests the official 30d period so the selected roster can populate the aggregate table), ui/main.tsx (aggregate PnL,  equivalent, win rate, buys/sells, token count, fetch time, GMGN CSV export, and inline source context). The trade-level historical performance table and delayed copy simulation remain separate. No new schema migration: raw stats stay in copytrade_wallet_stats.raw_payload. Verification: npm test passed 311/311; server/UI typechecks and UI build passed. Errors/unresolved: existing wallets have no 30d stats until the next Fetch trades run; the UI shows Not fetched rather than using 7d as a false 30d result. Next: reload CopyTrade, run Fetch trades for the selected roster, then review the GMGN-reported aggregate table.
+2026-08-18 - Added a separate CopyTrade → GMGN wallet stats submenu. Files changed: src/copytrade/statsFetch.ts (stats-only roster run for 7d/30d, 24-hour fresh-row skip, universal GMGN limiter via existing fetch helper, stop/status state), src/copytrade/fetch.ts (exported the existing credential reader), src/scripts/server.ts (stats fetch/status/stop/data routes), ui/main.tsx (new submenu, progress/stop controls, 7d vs 30d table, explicit 1d endpoint limitation). Decision: aggregate stats are fetched independently from trade-history paging; existing research workflow remains available. No schema change; raw responses remain in copytrade_wallet_stats.raw_payload. Verification: npm test passed 311/311; npm run build passed. Errors/unresolved: current official gmgn-cli portfolio stats endpoint supports 7d and 30d, not a separate 1d aggregate; 1d is intentionally not fabricated. Next: open #copytrade/wallet-stats and run Fetch 7d + 30d stats.
+2026-08-18 - Fixed the new GMGN wallet-stats UI runtime failure and React nesting warnings. Files changed: ui/main.tsx (moved aggregate parser before render-time use; changed InfoTip to a valid inline note element instead of details/summary nested inside paragraphs). Verification: npm run build:ui passed. Errors/unresolved: none.
+2026-08-18 - Fixed stale InfoTip CSS that rendered every explanation as a large floating panel after the markup changed to inline spans. Files changed: ui/styles.css (compact hoverable info icon; removed absolute-positioned inner text). Verification: npm run build:ui passed. Errors/unresolved: none.
+2026-08-18 - Fixed the GMGN wallet-stats submenu being hidden by routed-view CSS. Files changed: ui/main.tsx (added route id), ui/styles.css (allowlisted the route in focused/routed CopyTrade views). Verification: npm run build:ui passed. Errors/unresolved: none.
+2026-08-18 - Implemented append-only GMGN wallet-stat history and leaderboard-derived periods. Files changed: src/db/schema.ts (new copytrade_wallet_stats_events table and index), src/copytrade/fetch.ts (every successful 7d/30d stats response is stored with one shared UTC fetched_at timestamp while copytrade_wallet_stats remains the latest-value cache), src/scripts/server.ts (stats route reads pnl_1d/pnl_7d/pnl_30d/daily_profit_7d from the selected stored leaderboard payload), ui/main.tsx (wallet-stats table now shows those preserved leaderboard fields and corrected source-period explanation), tests/schema.test.ts (append-only snapshot retention test and schema expectation). Decision: 1d is sourced only when GMGN included it in a captured leaderboard payload; it is never fabricated from the 7d/30d stats endpoint. Verification: npm test passed 312/312; production server/UI build passed. Errors/unresolved: existing historical stats rows have no backfilled events because the original responses were overwritten before this migration; new fetches will accumulate events. Next: open `http://localhost:5173/#copytrade/wallet-stats` and run the stats fetch; repeated fetches will preserve each raw response in the events table.
+2026-08-18 - Strengthened the wallet-stats history test to verify both sides of the design: prior event rows remain after the latest cache is updated, while the cache resolves to the newest payload. Verification: `npm run build` and `node --test dist/tests/schema.test.js` passed (2/2).
+2026-08-18 - Diagnosed and fixed the blank 500 from the wallet-stats UI. The API process was crashing during SQLite startup at migration 29 because `retry_count` had already been added to `top_caller_collection_runs` while `PRAGMA user_version` was still 28 (a partially applied multi-column migration). `src/db/schema.ts` now checks the actual columns and adds only missing ones, allowing recovery on restart. Verification: `npm run build:server` passed; API restarted, advanced the database to schema version 29, and `/api/copytrade/stats/status` plus `/api/copytrade/stats` returned 200. Errors/unresolved: the failed API process must be restarted/reloaded in any separate local terminal; the dev watcher picked up the fix here. Next: retry the GMGN wallet-stats fetch from the UI.
+## 2026-08-18 — GMGN wallet stats workflow/UI cleanup
+
+- Files: `ui/main.tsx`, `ui/styles.css`, `src/scripts/server.ts`.
+- Decision: make the wallet-stats screen a clear two-step workflow: sync the newest leaderboard already captured locally, then fetch only missing/stale aggregate stats. Existing rows fetched within 24 hours are reused; successful responses remain append-only history with a latest cache. The sync action is explicitly local and does not pretend to call GMGN.
+- UI: replaced the raw JSON-heavy stats table with compact PnL, win-rate, daily-profit summary, cache/update columns, positive/negative styling, and a responsive fixed-layout table. Added explanatory workflow/status text and a stop action while stats fetch is running.
+- Safety: stats requests continue through the process-wide sequential 5-second GMGN limiter; no new parallel request path was introduced.
+- Tests: `npm run build` passed; `npm test -- --runInBand` passed (312/312).
+- Errors/unresolved: a new leaderboard list still requires a fresh capture/import before the local sync button can see it; the sync button intentionally does not fetch the leaderboard endpoint itself.
+- Next: capture/import a new GMGN leaderboard snapshot, click **Sync wallet list**, then click **Fetch missing stats**. Verify the new wallet appears and only its missing/stale periods generate requests.
+
+Follow-up: fixed missing PnL cells so em dashes are neutral instead of being styled as losses; UI build passed after the adjustment.
+
+## 2026-08-18 — Wallet-stats sorting, explanations, and evidence status
+
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- UI: added sortable headers for every GMGN stats column, with neutral missing-value ordering and visible direction arrows.
+- UI: added hover help for PnL, daily-profit, win-rate, `$100` equivalent, and update timestamp. The 7-day daily field is now explained as a dollar sum of GMGN-provided daily points, not a percentage or trade count.
+- UI: added a compact evidence-status banner distinguishing no saved data, current saved data, and mixed-age cached data. It explicitly says this is a data-status verdict, not a profitability verdict.
+- Refresh behavior: page refresh rereads SQLite/cache and does not call GMGN; network fetches occur only from the explicit sync/fetch controls.
+- Test result: `npm run build` passed.
+
+Follow-up: exposed the already-stored GMGN buy/sell counts and average holding time as a sortable **Activity** column. No new provider request is required; rows without a saved summary remain blank. The activity text is descriptive only and is not a fabricated copyability score. `npm run build` passed.
+
+Follow-up: added a collapsed **Copy-delay feasibility** table below GMGN stats. It combines stored average holding time with the configured simulation delay, coverage, and simulated-vs-wallet median edge when available. It flags when the delay exceeds or materially consumes the average hold; it does not invent results or issue a trading verdict. `npm run build` passed.
+
+Follow-up: highlighted the core interpretation rule in a visible callout above the stats table: historical shortlist performance is not enough; positive delayed-copy performance, costs, and coverage are required before treating a wallet as realistically followable.
+
+## 2026-08-18 — Highlight delayed-copy survivors
+- Step: highlighted rows in the Copy-delay feasibility table only when the stored simulation has a positive median after configured delay/costs and at least 70% coverage; added an explicit badge and reading.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: do not highlight from GMGN historical PnL alone; unsimulated or low-coverage rows remain unhighlighted.
+- Agent/model: Codex luna medium.
+- Test: `npm run build` passed (TypeScript and Vite).
+- Errors/unresolved: none; rows without simulation still show `Not simulated`.
+- Next: review the highlighted survivor rows in the browser with the current simulation data.
+
+## 2026-08-18 — Add missing Dune simulation fetch control
+- Step: added a visible `Fetch missing Dune data` button above the Copy-delay feasibility table.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: reuse the existing deduplicated copy-simulation route; it targets wallets that pass earlier gates and skips already-covered Dune targets instead of issuing broad duplicate queries.
+- Agent/model: Codex luna medium.
+- Test: `npm run build` passed (server TypeScript and Vite UI build).
+- Errors/unresolved: the table still labels both never-queried and no-match rows as `Not simulated`; the underlying per-trade statuses distinguish them.
+- Next: use the button and review the refreshed coverage/status values.
+
+## 2026-08-18 — Add cooperative simulation progress and stop
+- Step: added live target/batch progress plus Stop controls for copy-simulation runs.
+- Files: `src/copytrade/copySimulation.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: Stop is cooperative: it prevents the next Dune batch from starting and lets the currently submitted batch finish, preserving all completed data.
+- Agent/model: Codex luna medium.
+- Test: `npm run build` passed.
+- Errors/unresolved: an already-submitted Dune query cannot be cancelled through this local control; the UI states “Stop after current batch.”
+- Next: restart the dev server to load the new status/stop routes, then test a multi-batch simulation.
+
+## 2026-08-18 — Lightweight GMGN wallet-stats mode
+- Step: hid all other application/workflow tabs and forced the UI route to `#copytrade/wallet-stats` while retaining all hidden routes and code.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: disabled unrelated initial/background loaders (full signal refresh, winners, copy simulation, liquidity, and CopyTrade fetch status) in this mode; wallet stats still reads the selected roster and SQLite-backed stats explicitly.
+- Agent/model: Codex luna medium.
+- Test: `npm run build` passed.
+- Errors/unresolved: existing server jobs are not cancelled by hiding the UI; stop them from their existing controls or restart the local server if a job is already running.
+- Next: reload the app and confirm only GMGN wallet stats is visible and Network shows only the stats/roster reads.
+
+## 2026-08-19 — Investigate stopped copy simulation
+- Step: inspected the SQLite run records and diagnostic logs after the simulation stopped with no new results.
+- Files/data: `.data/crypto-research.sqlite`, `src/copytrade/copySimulationDune.ts`, `src/scripts/server.ts`.
+- Finding: runs 9 and 10 each submitted 300 targets to Dune, received execution IDs, then timed out at the local 60-second polling limit. Neither run has `raw_result`, archive metadata, or completed timestamp, so zero new simulation matches could be stored. Diagnostic logs show HTTP 502 for both simulation requests (about 74–78 seconds), consistent with the timeout being returned through the API.
+- Decision: no data was overwritten or deleted; previous completed run 8 remains archived. Immediate duplicate retries are intentionally protected by the timed-out run records.
+- Test: read-only database inspection only; no code or data mutation.
+- Errors/unresolved: Dune execution may still complete remotely after the local timeout, but this code does not reconcile timed-out executions; a future retry/reconciliation improvement would be needed to recover late results.
+- Next: wait for the duplicate-protection window or add a reconciliation path before retrying; do not repeatedly click Run while run 10 is protected.
+
+## 2026-08-19 — Make copy-simulation progress readable
+- Step: added a planning callback and batch-start status so the UI knows the target count before Dune begins and distinguishes planning, an active Dune query, and a completed batch. Shortened the visible simulation status to a compact progress line with an animated activity dot; detailed failure text remains in diagnostics.
+- Files: `src/copytrade/copySimulation.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: targets processed remains zero until a Dune batch actually returns and is stored; the status now reports the active query/batch rather than implying progress that has not happened.
+- Test: `npm run build` passed.
+- Errors/unresolved: a single Dune request cannot provide row-level progress; an in-flight batch will therefore show `0 / N` with `Dune query 1 of N` until it completes or times out.
+- Next: restart/reload the local app before testing the updated status endpoint and UI.
+
+## 2026-08-19 — Review hold-time and wallet-stats findings
+- Step: compared the reported defects with the delay-table calculation, trade-evaluation code, SQLite contents, and schema version.
+- Finding: the delay table currently reads GMGN `averageHoldingPeriodSeconds` (`ui/main.tsx`), while the trade evaluator already computes per-wallet median hold (`src/copytrade/evaluate.ts`). Stored data confirms the distortion: FAicXNV5 has 172120.79 seconds average (~2869 minutes), while 7JFSAQbo's cached GMGN average is `0`; these are not suitable copyability estimates.
+- Finding: the edge display divides simulated median by wallet median without a finite/sign guard, so negative baselines can produce misleading positive percentages and non-finite values can render as `Infinity`.
+- Finding: the current survivor highlight is explicitly median-based (`simulatedMedianReturnPercent > 0` plus coverage), so rejecting a positive-mean/negative-median wallet is a policy choice, not an arithmetic bug; the UI should label it median-survived or add a separate tail-survived view if both are needed.
+- Finding: the live database has 113 `7d` stats rows and 1 `30d` row; it has no `copytrade_wallet_stats_events` table despite the source schema containing that table definition. The database `user_version` is already at 29, so editing an old migration cannot create it; a new migration is required. The latest recorded stats fetch was HTTP 200, so the claimed server crash is not reproduced by the current diagnostics.
+- Decision: review findings are substantially correct; fix median hold source, finite/signed edge presentation, and add a new append-only stats-events migration before relying on the stats fetch history. Do not silently redefine “survived delay” without choosing median versus mean/tail semantics.
+- Test: read-only database inspection and source review; no mutations.
+- Next: implement the three fixes only after confirming the desired survivor definition.
+
+## 2026-08-19 — Fix hold-time, edge display, and stats migration
+- Step: switched the CopyTrade delay table to the existing per-wallet median hold evidence, guarded edge percentages against negative/non-finite baselines, labeled the survivor badge as median-based, and added a new idempotent migration that creates `copytrade_wallet_stats_events` for upgraded databases.
+- Files: `ui/main.tsx`, `src/db/schema.ts`.
+- Decision: retain median as the primary delay-survival criterion; mean/tail remains a separate metric and is not silently mixed into the gate.
+- Test: `npm test` passed, 312 tests; build passed as part of the test command.
+- Errors/unresolved: attempting to apply the new migration directly to the live 1.8GB database returned SQLite `disk I/O error`, likely because another local process currently has the database open. The migration will run on a clean server restart; do not force-kill unrelated Node processes.
+- Next: stop/restart the single project server during a safe window, then verify `PRAGMA user_version = 30` and the events table before fetching stats again.
+
+## 2026-08-19 — Add live-data copyability explainer
+- Step: added a collapsed-by-default explainer above the copy-delay table with plain-language definitions for median hold, delay/hold, wallet age, copy coverage, edge kept, and the reading column. It renders a live example from the first current row with usable median-hold data.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: explain the current median-based table without inventing values; the example is derived from the loaded row and configured delay.
+- Test: `npm run build` passed.
+- Errors/unresolved: the example is absent until trade-report data and at least one median hold are loaded.
+- Next: reload the wallet-stats page and expand “How to read copyability.”
+
+## 2026-08-19 — Clarify wallet-age source
+- Step: corrected the explainer wording so wallet age is identified as GMGN’s reported creation-time age, not an inferred trade-history age.
+- Files: `ui/main.tsx`.
+- Decision: keep the live example tied to the same row while naming the source accurately.
+- Test: covered by the preceding successful build; no code-path change.
+- Errors/unresolved: none.
+- Next: reload the UI to see the updated wording.
+
+## 2026-08-19 — Make live example interpret values
+- Step: changed the live example from a one-line list of numbers to an applied explanation: typical open-to-close time, how much of that window the delay consumes, whether the copy may arrive too late, and the reported wallet age.
+- Files: `ui/main.tsx`.
+- Decision: keep the example data-driven while explaining the practical meaning in plain language.
+- Test: UI-only wording change; previous build passed, no backend logic changed.
+- Errors/unresolved: none.
+- Next: reload and expand “How to read copyability.”
+
+## 2026-08-19 — Repair interrupted main.tsx progress-state change
+- Step: inspected the current progress log and UI source after the other agent stopped; found copy-simulation progress initialization still used the older partial status shape while the current `CopySimulationRunStatus` type requires batch details, timestamps, counters, and an outcome.
+- Files: `ui/main.tsx` changed; `progress.md` appended.
+- Decision: initialize the full status object at run start so the loading/progress panel can render safely before the backend responds; no fetch or storage behavior changed.
+- Test: `npx tsc -p tsconfig.ui.json --noEmit` passed; `npm run build:ui` passed.
+- Errors/unresolved: repository-wide `git status` is obstructed by an unrelated Git LFS clean-filter access error outside this change; no remaining TypeScript errors in `main.tsx`.
+- Next: reload the app and exercise “Fetch missing Dune data”; if another runtime error appears, capture its browser-console stack.
+
+## 2026-08-19 — Verify repaired UI state across full suite
+- Step: ran the complete project build and test suite after the `main.tsx` repair.
+- Files: no additional code changes.
+- Decision: repair is ready for browser verification; no backend/fetch behavior was altered.
+- Test: `npm test -- --runInBand` passed, 312/312 tests; server and UI builds passed; UI TypeScript check passed.
+- Errors/unresolved: repository-wide Git status still reports an unrelated Git LFS access/clean-filter error; this does not affect the repaired source or test run.
+- Next: reload the app, then start the affected progress action once to verify the visible status panel transitions from Planning to Running/Complete.
+
+## 2026-08-19 — Diagnose zero-target “Fetch missing Dune data” state
+- Step: traced the UI action through `/api/copytrade/copy-simulation/run`, the candidate-scope planner, duplicate protection, and live simulation results.
+- Files/data: `ui/main.tsx`, `src/scripts/server.ts`, `src/copytrade/copySimulationDune.ts`, live `/api/copytrade/copy-simulation` and `/api/copytrade/winners` responses.
+- Finding: the zero-target result is genuine for the default scope: all current screen-pass/high-upside candidates already have Dune run coverage. It does not mean every displayed trade has a matched price; completed runs still contain missing entry/exit matches (queried-but-no-usable-trade), which duplicate protection correctly does not immediately re-submit.
+- Decision: no fetch logic changed during this diagnosis. The visible copy should distinguish “no unqueried targets” from “queried targets with missing matches”; broadening retries would require an explicit re-query policy to avoid duplicate Dune spend.
+- Test: read-only API/source inspection; no database or network mutations.
+- Errors/unresolved: current UI does not expose the missing-match counts next to the zero-target message, and the button scope excludes non-screen-pass simulation rows by design.
+- Next: if desired, add a separate, rate-limited “retry unresolved matches” path and make the UI show unqueried versus queried-without-match counts separately.
+
+## 2026-08-19 — Make Dune match status explicit in CopyTrade UI
+- Step: replaced ambiguous “Not simulated”/“Missing Dune data” copy with explicit `Never queried`, `Queried · no match`, and matched states; added aggregate counts above the Dune action.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: presentation-only change; the existing duplicate-protection and fetch scope remain unchanged so no extra Dune requests are introduced.
+- Test: `npx tsc -p tsconfig.ui.json --noEmit`, `npm run build:ui`, and `npm test -- --runInBand` passed; 312/312 tests.
+- Errors/unresolved: queried-but-unmatched rows still require a separately governed retry policy; this change makes that fact visible but does not re-query them.
+- Next: reload the CopyTrade page and expand Copy-delay feasibility to see the three evidence counts.
+
+## 2026-08-19 — Load persisted Dune simulation evidence in lightweight wallet-stats view
+- Step: fixed the wallet-stats-only route so it reads the saved copy-simulation report when the page opens; previously the table saw `copySimulation = null` and labeled every wallet “Never queried” even when SQLite contained completed Dune runs.
+- Files: `ui/main.tsx`.
+- Decision: add a read-only simulation report load only; this does not start GMGN or Dune work and does not alter duplicate protection.
+- Test: `npx tsc -p tsconfig.ui.json --noEmit` passed; `npm run build:ui` passed.
+- Errors/unresolved: none from this change.
+- Next: reload `#copytrade/wallet-stats`; the table should show persisted matched/queried-no-match states and the evidence counts should no longer be all zero.
+
+## 2026-08-19 — Scope Dune fetch to wallet-stats table rows
+- Step: fixed the second zero-fetch condition: the wallet-stats button now sends the addresses currently shown in its table, and the saved simulation report is read back for that same explicit scope. The server accepts an optional `walletAddresses` query on the read-only simulation report route while retaining the existing candidate scope when omitted.
+- Files: `ui/main.tsx`, `src/scripts/server.ts`.
+- Decision: explicit user action may cover all displayed wallets; duplicate protection still excludes already-covered trade IDs, so existing Dune targets are not re-fetched.
+- Test: `npm test -- --runInBand` passed; 312/312 tests, server/UI builds and UI type-check passed.
+- Errors/unresolved: the currently running dev server must reload/restart to serve the updated server route and UI bundle.
+- Next: restart the local app, reload wallet-stats, then click “Fetch unqueried Dune targets”; progress should reflect the table scope rather than only screen-pass candidates.
+
+## 2026-08-19 — Diagnose missing wallet-stats table
+- Step: reproduced the browser console failures against the live API and then rechecked each endpoint after the server recovered.
+- Finding: the screenshot’s missing table was caused by transient HTTP 500 responses from the API (`/api/copytrade/rosters`, `/api/copytrade/stats`, fetch/simulation status), not by an empty database. The same requests now return 200; `/api/copytrade/stats?limit=25&snapshotId=140` returns 25 roster wallets and 26 persisted GMGN stat records, and the scoped simulation endpoint returns saved data.
+- Decision: no data was deleted and no new GMGN/Dune request is required. Reload the page after the API is healthy; the table is read from SQLite. A future hardening change could add an explicit retry/error panel for transient startup failures, but it is not needed to restore the current data.
+- Test: read-only endpoint checks and repeated stats requests all returned HTTP 200 after recovery; no mutations performed.
+- Errors/unresolved: the original 500 response body was no longer available once the process recovered, so the exact transient server exception cannot be identified from the current state.
+- Next: refresh `#copytrade/wallet-stats`; if 500s recur, capture the API response body and server terminal log before restarting so the underlying transient failure can be identified.
+
+## 2026-08-19 — Check active Dune missing-target run before retry changes
+- Step: inspected the live `/api/copytrade/copy-simulation/status` twice while the user’s run was active.
+- Finding: 4,258 targets were planned across 29 batches. Batch 1 and batch 2 each timed out after roughly 74–76 seconds; 300 targets are failed/protected, 0 are stored, 3rd batch is running, and 3,958 remain. The run is progressing through batches, but no useful result has completed yet.
+- Decision: do not implement the wide-window retry while this baseline run is still failing; the current 150-target query is timing out and should be stopped before additional Dune spend. Existing failed runs remain retained and protected from duplicate retries.
+- Test: read-only status polling; no code or database mutation.
+- Errors/unresolved: exact Dune-side query cause is not exposed beyond the 60-second timeout in the run status.
+- Next: stop the active run from the UI, then investigate/query-size or Dune execution timing before adding the separate wide-window no-match path.
+
+## 2026-08-19 — Inspect Dune responses for timed-out copy-simulation batches
+- Step: inspected SQLite run records and made read-only Dune execution-status requests for runs 12–15.
+- Finding: runs 12–14 were locally marked `timed_out` and run 15 was in flight, but Dune returned HTTP 200 with `state: QUERY_STATE_PENDING`, `is_execution_finished: false`, and no result/error body. Each execution reported `execution_cost_credits: 0.0025`; Dune also reported `max_inflight_interactive_executions: 3`. The local 60-second poll timeout is expiring while queries remain queued/pending, not because Dune returned “no match.”
+- Decision: this is a queue/timeout problem. Submitting the next batch immediately after a local timeout can leave several pending Dune executions and worsen the queue. No retry path was implemented.
+- Test: read-only database inspection and Dune status checks; no API key output and no data mutation. The local run is now stopped with 600 failed/protected targets and 3,658 remaining.
+- Errors/unresolved: pending executions need reconciliation later; they must not be resubmitted as duplicates while Dune still owns them.
+- Next: increase/decouple reconciliation wait from the 60-second local timeout and enforce one pending Dune execution before submitting another; only then add the separate wide-window no-match retry.
+
+## 2026-08-19 — Keep Dune polling live with granular status
+- Step: replaced the 60-second local Dune cutoff for copy simulation with continued polling until Dune reaches a terminal state or the user stops the workflow.
+- Files: `src/copytrade/copySimulationDune.ts`, `src/copytrade/copySimulation.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: poll Dune every 5 seconds to avoid status-request pressure; expose execution id, Dune state, elapsed seconds, poll count, finished flag, and reported execution credits through `/api/copytrade/copy-simulation/status`. The run remains sequential, so a pending batch blocks submission of the next batch instead of filling Dune’s queue.
+- Test: server/UI TypeScript checks passed; UI build passed; full suite passed 312/312.
+- Errors/unresolved: existing timed-out Dune executions remain pending on Dune and require reconciliation; explicit Stop ends the local workflow but does not cancel a Dune execution already submitted.
+- Next: restart the local API/UI, run one small Dune batch, and verify the live status line changes from submitting to pending/executing to completed.
+
+## 2026-08-19 — Verify granular Dune status implementation
+- Step: reran the server/UI TypeScript checks, UI build, and full tests after wiring live Dune status through the run state.
+- Files: no additional files beyond the implementation above.
+- Decision: implementation is ready for a restarted local process; no existing Dune rows or runs were changed.
+- Test: `npx tsc -p tsconfig.json --noEmit`, `npx tsc -p tsconfig.ui.json --noEmit`, `npm run build:ui`, and `npm test -- --runInBand` passed; 312/312 tests.
+- Errors/unresolved: the currently running server must be restarted to load the new polling behavior.
+- Next: restart the app, run a small scope, and watch the Dune state/poll/elapsed fields before allowing a larger queue.
+
+## 2026-08-19 — Verify live long-polling in the browser
+- Step: checked the active `/api/copytrade/copy-simulation/status` while the screenshot showed the new Dune status line.
+- Finding: the current run is genuinely active on batch 1 of 25: 3,658 targets planned, 0 processed/stored so far, Dune state `QUERY_STATE_PENDING`, 309 seconds elapsed, 56 Dune status polls, execution id present, and no failed targets. This is waiting in Dune’s queue, not a local 60-second timeout.
+- Decision: no intervention or code change; the zero stored count is expected until the first 150-target Dune query completes.
+- Test: read-only status check; no mutation.
+- Errors/unresolved: Dune has not returned result rows yet, so target-level progress cannot advance until this batch completes.
+- Next: let batch 1 finish; only then will batch 2 be submitted.
+### 2026-08-18 — Expose saved Dune responses in UI
+- Step: Added a read-only endpoint and expandable raw JSON evidence panel for copy-simulation Dune batches.
+- Files: `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: Show exact persisted `raw_result` per query with execution/archive metadata; do not issue new Dune requests or expose API keys.
+- Agent/model: Codex luna medium.
+- Tests: `tsc` server/UI, UI build, and full suite pass (312/312).
+- Errors/unresolved: In-flight queries have no result body until Dune completes; raw response panel is intentionally empty before first completion.
+- Next: Reload the wallet-stats page and open “Dune responses · raw JSON saved locally” under Copy-delay feasibility.
+### 2026-08-18 — Immediate Dune health check
+- Step: Read copy-simulation status and latest saved Dune response evidence without changing the run.
+- Files: Local API state only; no source changes.
+- Decision: Workflow is active; query #18 is executing and #16 completed with 148/150 returned rows, so no-match rows are expected rather than fabricated.
+- Agent/model: Codex luna medium.
+- Tests: Read-only HTTP check succeeded.
+- Errors/unresolved: Current batch has not completed yet, so `targetsProcessed=0` is expected until Dune returns the batch.
+- Next: Continue scheduled monitoring; inspect the next completed response for stored/failed counts.
+### 2026-08-18 — Estimate current Dune drain
+- Step: Read live copy-simulation status to estimate completion time.
+- Files: Local API state only; no source changes.
+- Decision: Batch 1 remains Dune `EXECUTING` at 574s; 23 sequential batches are planned, so completion is likely hours, not minutes. No hard timeout now; terminal completion, stop, or failure ends the run.
+- Agent/model: Codex luna medium.
+- Tests: Read-only HTTP check succeeded.
+- Errors/unresolved: Exact ETA is uncertain because Dune queue/runtime varies; the first batch has not produced a measured local result yet.
+- Next: Let the current batch finish before judging throughput; consider reducing batch size only if repeated runs remain excessively slow.
+### 2026-08-18 — Investigate long-running Dune executions
+- Step: Checked live copy-simulation status and recent run records after the user reported a 30-minute wait.
+- Files: Local API state only; no source changes.
+- Decision: Query #18 remains `QUERY_STATE_EXECUTING` at 1,731s (~29m) with 309 polls and 154.51 reported credits; older Query #17 is also still running. This is beyond the normal range observed earlier and indicates queue/query pressure, not a completed result.
+- Agent/model: Codex luna medium.
+- Tests: Read-only HTTP check succeeded.
+- Errors/unresolved: The app has no automatic stale-execution cutoff by design; stopping locally will not cancel already-submitted Dune executions.
+- Next: User should decide whether to stop the local drain; future hardening should prevent overlapping orphaned Dune executions and add a stale warning/cost guard.
+### 2026-08-18 — Persisted Dune stop control after refresh
+- Step: Fixed Dune action button to use server-persisted running state, not only transient browser state.
+- Files: `ui/main.tsx`.
+- Decision: Show Stop whenever the API reports an active run, even after page reload; prevent a second fetch button from appearing.
+- Agent/model: Codex luna medium.
+- Tests: UI TypeScript check and production UI build pass.
+- Errors/unresolved: Stop remains cooperative and does not cancel already-submitted Dune executions.
+- Next: Reload the page; the active run should show Stop immediately.
+### 2026-08-18 — Single live Dune query and raw-response panel
+- Step: Reworked the Dune copy-simulation UI to show one current query and one latest raw response instead of stacking every batch and response in the main page.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: The active panel reports batch, target count, Dune state, elapsed seconds, poll count, and a slow-query warning after 60 seconds. The raw panel displays the exact saved Dune response body from the latest completed query; older responses remain persisted in SQLite/ZIP archives but are not rendered as a stack.
+- Agent/model: Codex luna medium.
+- Tests: `npx tsc -p tsconfig.ui.json --noEmit`; `npm run build:ui` — passed.
+- Errors/unresolved: Dune response bodies remain unavailable until Dune marks the execution complete; an executing query therefore shows metadata only. The 60-second warning is informational and does not cancel the Dune execution.
+- Next: Reload the Dune Capture/GMGN wallet stats page and watch the single current-query panel; after completion, the raw JSON panel will be replaced with that query's exact response.
+### 2026-08-18 — Preserve raw Dune body verbatim in the single-response view
+- Step: Removed the UI pretty-printer from the displayed latest response.
+- Files: `ui/main.tsx`.
+- Decision: The response `<pre>` now renders the stored `rawResult` string directly, so no parsing, remapping, or summary transformation is applied to the visible Dune payload.
+- Agent/model: Codex luna medium.
+- Tests: `npx tsc -p tsconfig.ui.json --noEmit`; `npm run build:ui` — passed.
+- Errors/unresolved: The body is still empty while Dune reports an executing state because the server has not received a completed response body.
+- Next: Reload the page and expand “Latest Dune response · raw JSON” after the current execution completes.
+### 2026-08-18 — Expose Dune network request lifecycle
+- Step: Added explicit request-phase telemetry for the copy-simulation Dune poller and surfaced it in the live query panel.
+- Files: `src/copytrade/copySimulationDune.ts`, `src/scripts/server.ts`, `ui/main.tsx`.
+- Decision: The UI now distinguishes waiting between polls, `GET /status` in flight, status received (including HTTP code and request duration), `GET /results` in flight, and raw results received. A slow warning now says whether the HTTP request itself is pending or Dune has replied that the execution is still running.
+- Agent/model: Codex luna medium.
+- Tests: `npx tsc -p tsconfig.json --noEmit`; `npx tsc -p tsconfig.ui.json --noEmit`; `npm run build:ui` — passed.
+- Errors/unresolved: The browser only sees the short in-flight phase when its 2-second status refresh catches it; the authoritative network timing and last HTTP response remain visible after each poll. Dune can keep an execution in `QUERY_STATE_EXECUTING` for many minutes.
+- Next: Reload the wallet-stats page while a query is active and inspect Network step, Last HTTP check, Dune state, and raw response sections.
+### 2026-08-19 — Show the exact live Dune status payload
+- Step: Preserved the raw response body returned by Dune’s execution-status endpoint and exposed it in the current-query panel.
+- Files: `src/copytrade/copySimulationDune.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: The parsed `QUERY_STATE_PENDING/EXECUTING` label remains for quick reading, but the expandable “Latest raw Dune payload” now shows the exact status JSON string, with HTTP status and request duration. When the results request completes, the same panel switches to the exact raw results response.
+- Agent/model: Codex luna medium.
+- Tests: `npx tsc -p tsconfig.json --noEmit`; `npx tsc -p tsconfig.ui.json --noEmit`; `npm run build:ui` — passed.
+- Errors/unresolved: During an in-flight request there is no response body yet; the panel explicitly shows the request phase until Dune returns one.
+- Next: Reload the page and expand the raw payload panel while a Dune execution is pending or after its next status poll.
+### 2026-08-19 — Add account-aware Dune execution scheduling
+- Step: Replaced blind copy-simulation submission with a persisted, capacity-aware scheduler.
+- Files: `src/copytrade/duneScheduler.ts`, `src/copytrade/copySimulationDune.ts`, `src/db/schema.ts`, `tests/copytrade-dune-scheduler.test.ts`.
+- Decision: The application defaults to at most two active executions when Dune reports a limit of three (configurable with `DUNE_CONCURRENCY_SAFETY_MARGIN`). It records Dune's reported limit, raw execution/status payloads, state, and timestamps; waits locally when capacity is full; polls existing execution IDs; and uses an in-process submission lock so concurrent requests cannot both claim the same slot. `QUERY_STATE_PENDING` remains a normal persisted state. HTTP 429 responses honor Retry-After and rate-limit reset headers with jittered retries.
+- Agent/model: Codex.
+- Tests: `npm run build:server --silent`; focused scheduler tests (5/5); full `npm test -- --runInBand` (317/317) — passed.
+- Errors/unresolved: Account-wide executions started outside this application are invisible to local SQLite, so Dune may still queue a submission despite the local safety margin. Stop is cooperative; it does not cancel an execution already accepted by Dune. The scheduler change covers copy-simulation submissions; older independent Dune paths retain their existing run guards and should be migrated separately if they are run concurrently with this workflow.
+- Next: Run the Dune Capture workflow and verify the UI's raw status payload shows `QUERY_STATE_PENDING`/`QUERY_STATE_EXECUTING` without duplicate submissions; consider adding the same scheduler wrapper to the older signal/top-caller Dune paths if those workflows must share the same account concurrently.
+### 2026-08-19 — Apply capacity gate across Dune workflows
+- Step: Extended the scheduler's active-execution accounting to include `dune_outcome_runs`, and applied the same locked capacity check before signal-outcome and top-caller checkpoint submissions.
+- Files: `src/copytrade/duneScheduler.ts`, `src/dune/outcomes.ts`, `src/copytrade/topCallerCheckpoints.ts`, `src/db/schema.ts`.
+- Decision: Copy simulation, signal outcomes, and top-caller checkpoint submission now share the in-process submission lock and account-capacity gate. The scheduler reads the latest reported limit from either persisted execution table; the outcome table now stores that reported limit for restart-time decisions. This avoids cross-workflow slot races while preserving each workflow's existing append-only run records.
+- Agent/model: Codex.
+- Tests: `npm run build:server --silent`; full `npm test -- --runInBand` — 317/317 passed.
+- Errors/unresolved: Dune executions started by another process/account client remain unknowable locally; the safety margin is still required. Existing reconciliation paths for signal outcomes/top callers retain their legacy polling behavior and do not resubmit, but their raw status payload persistence is less detailed than copy simulation's.
+- Next: Observe a real run with the account's `max_inflight_interactive_executions` payload and confirm the UI remains at one/two local submissions rather than creating avoidable pending executions.
+### 2026-08-19 — Backfill scheduler columns for existing databases
+- Step: Fixed startup migration coverage after an existing database reported `no such column: dune_execution_payload`.
+- Files: `src/db/schema.ts`.
+- Decision: Added a new idempotent migration instead of editing only the already-applied scheduler migration. Existing databases now receive missing copy-simulation payload/state columns and the outcome concurrency column; fresh databases remain safe because each addition checks `PRAGMA table_info` first.
+- Agent/model: Codex.
+- Tests: Server build; schema and scheduler tests (7/7) — passed.
+- Errors/unresolved: A backend process must restart once so `openDatabase()` runs the new migration. No data is deleted or rewritten.
+- Next: Restart the local API, reload the wallet-stats page, and retry the scheduler/status request.
+### 2026-08-19 — Make copy-delay feasibility columns sortable
+- Step: Added independent sorting for Trader, Median hold, delay/hold, Copy coverage, Edge kept, and Reading in the copy-delay feasibility table.
+- Files: `ui/main.tsx`.
+- Decision: Sorting operates on the same derived values rendered in each cell; the default is Edge kept descending, text columns sort alphabetically, numeric columns sort numerically, and missing values remain last.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Click any table header on the GMGN wallet-stats page to change the sort; click again to reverse direction.
+### 2026-08-19 — Fix sortable delay-table initialization order
+- Step: Fixed the UI runtime crash introduced by the sortable copy-delay table.
+- Files: `ui/main.tsx`.
+- Decision: Initialize `copySimulationByWallet` before all derived delay-table rows consume it, preserving the existing data flow and sort behavior.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload the UI; the copy-delay table should render normally and remain sortable.
+### 2026-08-19 — Promote copy-delay feasibility and add CSV export
+- Step: Moved the copy-delay feasibility panel to the top of the wallet-stats route and added a CSV export action above its sortable table.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: The panel still uses existing stored stats/simulation data and makes no new requests. Export includes trader, wallet, median hold, delay share, coverage, edge kept, and plain-language reading.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload the wallet-stats page; copy-delay feasibility appears immediately below the intro, with “Export table CSV” above the table.
+### 2026-08-19 — Highlight delay-surviving wallets in GMGN stats
+- Step: Applied the same wallet-level delay-survivor highlight to the GMGN aggregate stats table.
+- Files: `ui/main.tsx`.
+- Decision: A row is highlighted only when its existing copy simulation has a positive simulated median and at least 70% coverage; the wallet receives a small “delay survived” badge so the cross-table relationship is explicit.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload wallet-stats; highlighted wallets should match the highlighted rows in Copy-delay feasibility.
+### 2026-08-19 — Refresh current GMGN top-100 roster before summary fetch
+- Step: Replaced the local-only roster sync action with a controlled current GMGN wallet-rank request, append-only snapshot storage, and roster sync from the new snapshot.
+- Files: `src/gmgn/walletRankFetch.ts`, `src/copytrade/roster.ts`, `src/scripts/server.ts`, `ui/main.tsx`.
+- Decision: The refresh makes one rate-limited leaderboard request, stores the raw response and request provenance without overwriting older snapshots, then scopes the existing missing/stale summary fetch to the refreshed roster. Existing cached summaries remain protected by the 24-hour freshness rule.
+- Agent/model: Codex.
+- Tests: `npm run build:server`; `npm test -- --test-name-pattern="copytrade|wallet rank"` — 317 passed.
+- Errors/unresolved: The rank endpoint is an isolated GMGN web/API route; if the account key is not authorized for it, the UI now reports the HTTP failure and leaves the stored roster untouched. No fallback to a semantically different KOL/smart-money feed was added.
+- Next: Reload the CopyTrade → GMGN wallet stats page and use “Refresh GMGN top 100”; after it completes, use the separate missing/stale summaries action.
+### 2026-08-19 — Validate current-rank refresh build and payload compatibility
+- Step: Accepted both documented GMGN rank response shapes (`data.rank` and `data` array) for roster and stats projections, and verified the server/UI builds after the refresh integration.
+- Files: `src/copytrade/roster.ts`, `src/scripts/server.ts`.
+- Decision: A malformed or empty response is rejected before snapshot storage; valid responses are preserved verbatim and older data remains untouched.
+- Agent/model: Codex.
+- Tests: `npm run build:server`; `npm run build:ui` — passed. Earlier targeted suite: 317 passed.
+- Errors/unresolved: The live endpoint authorization still depends on the configured GMGN key being accepted by the rank route; the UI reports a failed request without changing the roster.
+- Next: Use the new refresh button once; only then run missing/stale summary fetches for the resulting top-100 snapshot.
+### 2026-08-19 — Fix empty GMGN 30d $100 column
+- Step: Corrected the aggregate-stats parser to accept GMGN decimal strings as well as JSON numbers, including `realized_profit_pnl`, win rate, token count, and holding period.
+- Files: `ui/main.tsx`.
+- Decision: The 30d `$100` value is derived from the stored 30d `realized_profit_pnl` field; no new GMGN request is made and no database data is changed.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: Existing rows with genuinely missing or malformed GMGN fields will still display `—`.
+- Next: Reload the GMGN wallet stats page; rows with stored 30d stats should now show the calculated `$100` equivalent.
+### 2026-08-19 — Add shared delay-survivor filter to both wallet tables
+- Step: Added a synchronized “Delay survivors only” toggle to the GMGN aggregate stats table and Copy-delay feasibility table.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: The filter reuses the existing survivor definition exactly: positive simulated median after delay/costs and at least 70% usable coverage. It is display/export-only and makes no new provider requests.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload `http://localhost:5173/#copytrade/wallet-stats`; turn the toggle on in either table and both tables plus CSV export will show the same survivor set.
+### 2026-08-19 — Hide latest raw Dune response panel from wallet-stats UI
+- Step: Removed the visible “Latest Dune response · raw JSON” accordion and its polling calls from the wallet-stats page.
+- Files: `ui/main.tsx`.
+- Decision: This is a presentation/noise reduction change only. Existing Dune raw responses, archives, and backend persistence remain intact; the page no longer loads or displays that separate response list.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload the wallet-stats page; the active Dune progress/status panel remains available while the separate raw-response stack is hidden.
+### 2026-08-19 — Fill 30d $100 from preserved leaderboard metrics
+- Step: Diagnosed the mostly-empty 30d `$100` column and added a safe leaderboard fallback when a dedicated 30d stats response is absent.
+- Files: `ui/main.tsx`.
+- Decision: The database currently has 1 dedicated `30d` stats row, while the latest preserved GMGN rank snapshot has `pnl_30d` for 100 wallets. The UI now derives `$100 × (1 + pnl_30d)` from that snapshot and marks the cell source in its tooltip; dedicated 30d stats remain preferred when present.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: Leaderboard fallback is GMGN’s rank `pnl_30d`, not a newly fetched per-wallet stats response; missing leaderboard fields still display `—`.
+- Next: Reload `http://localhost:5173/#copytrade/wallet-stats`; most rows with preserved leaderboard data should now show a 30d `$100` value without another API call.
+### 2026-08-19 — Show explicit GMGN roster refresh outcome
+- Step: Added inline refresh progress, success summary, and failure messaging to the current-top-100 roster action.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: The UI now distinguishes “contacting GMGN” from a successful saved snapshot and reports wallet counts/new versus known rows. Failures explicitly state that the previous roster was left unchanged.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload wallet-stats and click “Refresh GMGN top 100”; the result appears directly beside the workflow step instead of only in the footer message.
+### 2026-08-19 — Recover transparently from forbidden live rank refresh
+- Step: Added a safe HTTP-403 fallback for the GMGN rank refresh: reuse the newest valid stored rank snapshot instead of substituting another feed or changing old evidence.
+- Files: `src/gmgn/walletRankFetch.ts`, `ui/main.tsx`.
+- Decision: Live responses remain preferred and are marked `live: true`. On 403, the workflow syncs the newest captured snapshot with an explicit “Live refresh blocked; used stored snapshot” message; if no valid snapshot exists, the original error remains visible.
+- Agent/model: Codex.
+- Tests: `npm run build:server`; `npm run build:ui` — passed.
+- Errors/unresolved: This does not make the web rank endpoint API-authorized; a truly current list still requires a successful browser capture or an authorized GMGN source.
+- Next: Reload wallet-stats and click refresh; verify the message identifies live success versus stored fallback.
+### 2026-08-19 — Prevent copy-simulation status polling backlog
+- Step: Changed wallet-stats status polling so it runs only during an active copy-simulation and never overlaps requests.
+- Files: `ui/main.tsx`.
+- Decision: Replaced the continuous 1.5-second interval with single-flight polling that schedules the next check 3 seconds after the prior response finishes. Idle pages make no copy-simulation status calls.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload wallet-stats and confirm that at most one `/api/copytrade/copy-simulation/status` request is in flight during a run.
+### 2026-08-19 — Keep one status check for resumed runs
+- Step: Adjusted the same polling effect to perform one status check when entering wallet-stats, while retaining active-run-only polling afterward.
+- Files: `ui/main.tsx`.
+- Decision: A page reload can now discover an already-running server job, but idle pages still issue no repeated status calls; each follow-up waits for the previous response and uses a 3-second delay.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload wallet-stats and verify one initial status request, then no further requests while idle; active runs should show one request at a time.
+### 2026-08-19 — Continue polling after transient status errors
+- Step: Hardened the single-flight status loop so a temporary status-request failure does not silently stop monitoring an active run.
+- Files: `ui/main.tsx`.
+- Decision: While the last known run is active, the next check is still scheduled after 3 seconds even if one status request fails; the loop stops only after a confirmed non-running state or leaving wallet-stats.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Confirm in DevTools that status requests are sequential and do not accumulate while Dune is slow.
+### 2026-08-19 — Show GMGN activity totals in copy-delay table
+- Step: Added a sortable `GMGN trades (30d)` column to the copy-delay feasibility table and included it in CSV export.
+- Files: `ui/main.tsx`.
+- Decision: The column uses the latest saved GMGN 30-day buy + sell count (falling back to 7d when 30d is unavailable). It is explicitly labeled as total activity, not the simulator's round-trip denominator, so users can identify wallets whose full history may be feasible to fetch before spending Dune budget.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: The column does not guarantee complete history or Dune coverage; it is a planning signal only.
+- Next: Reload Wallet Stats and compare GMGN activity totals with Copy coverage before deciding which wallets to fetch completely.
+### 2026-08-19 — Simplify Wallet Stats table hierarchy
+- Step: Added explicit titles for the GMGN wallet summary and Dune copy-delay tables; moved explanatory text into collapsed information panels and shortened the Dune fetch control labels.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Presentation-only change; fetch behavior, SQLite reads/writes, and Dune logic are unchanged. Removed the flex ordering rule that could place the Dune section before the first table.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload `#copytrade/wallet-stats` and verify the two headings are visible while explanations remain collapsed until opened.
+### 2026-08-19 — Show shorter GMGN activity window
+- Step: Split the copy-delay activity column into separate sortable `GMGN trades (7d)` and `GMGN trades (30d)` columns.
+- Files: `ui/main.tsx`.
+- Decision: Each value is the saved GMGN buy + sell count for that exact period; no fallback from 30d to 7d and no new request is made. CSV export now includes both fields.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: A dash means that exact period is not present in the saved GMGN summary.
+- Next: Reload Wallet Stats and use the 7-day count to identify wallets whose recent activity may be feasible to fetch completely.
+
+### 2026-08-19 — Initial full 7-day Dune coverage scope
+- Step: Changed the missing-price action to target the first safe scope: wallets with no more than 1,000 saved GMGN buy+sell events in the last 7 days.
+- Files: `src/copytrade/copySimulation.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`, `tests/copytrade-copy-simulation.test.ts`.
+- Decision: The old 150-round-trip sample cap is removed from this pass. For an explicit 7-day run, round trips are paired from stored history, filtered by sell time, and coverage is copied round trips divided by all eligible round trips in that scope. Higher-activity wallets remain visible but are explicitly deferred for a later expansion; raw history and duplicate protections remain intact.
+- Agent/model: Codex.
+- Tests: `npm test -- --runInBand` — 318/318 passed; `npm run build:server` and `npm run build:ui` — passed. Added a regression test proving the 7-day period excludes older sells while retaining the report's period metadata.
+- Errors/unresolved: The initial pass still limits each wallet to 1,000 eligible round trips and does not submit wallets whose saved 7-day GMGN activity is missing or above 1,000. Dune request batching and existing account/rate-limit safeguards remain in effect.
+- Next: Reload `#copytrade/wallet-stats`; use `Fetch missing Dune prices` to run the labeled 7-day/≤1,000 scope, then review actual coverage before expanding to higher-activity wallets.
+
+### 2026-08-19 — Clarify deferred wallet scope
+- Step: Updated the scope note to explain that wallets above 1,000 trades **or without a saved 7-day count** are deferred.
+- Files: `ui/main.tsx`.
+- Decision: Do not silently treat a missing GMGN activity count as eligible; the first pass uses only known, bounded 7-day activity.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: Reload Wallet Stats and confirm the scope note matches the eligible-wallet count.
+
+### 2026-08-19 — Diagnose GMGN top-100 refresh 403
+- Step: Compared the refresh implementation with the bundled GMGN CLI documentation and official GMGN help pages.
+- Files inspected: `src/gmgn/walletRankFetch.ts`, `src/scripts/server.ts`, `src/gmgn/rateLimit.ts`, `node_modules/gmgn-cli/dist/client/OpenApiClient.js`, `node_modules/gmgn-cli/skills/gmgn-track/SKILL.md`.
+- Decision: The API key is not the primary problem. Refresh calls the GMGN website route `/api/v1/rank/sol/wallets/7d` with API headers, but the documented OpenAPI routes are `/v1/...` and use `X-APIKEY` plus timestamp/client_id. GMGN's own help says a general data API is not publicly open. Do not substitute KOL or smart-money trades for the wallet leaderboard; their semantics differ.
+- Agent/model: Codex.
+- Tests: No code changed; existing build/test state remains 318/318 tests passing.
+- Errors/unresolved: Live rank refresh can still return HTTP 403 when no browser-captured rank snapshot exists. The current code can only fall back to an already imported immutable browser snapshot.
+- Next: Use the Chrome extension to capture `/api/v1/rank/sol/wallets/` while viewing the GMGN Rank page, import that JSON, then sync the local roster; a true live API refresh requires GMGN data-API access/whitelisting or a supported documented rank endpoint.
+
+## 2026-08-19 — Copy-simulation resilience + GMGN stats detail dialog
+- Step: fixed the "Fetch missing Dune data stops after the first wallet" defect, added run transparency, then added a click-through detail dialog on the GMGN stats table.
+- Files: `src/copytrade/copySimulation.ts`, `src/copytrade/copySimulationDune.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Root cause found: the batch loop awaited `runCopySimulationDuneBatch` with no try/catch, so one Dune timeout threw and abandoned all remaining batches. Targets are ordered by wallet, so batch 1 is essentially wallet 1 — which is why it read as "stops after the first wallet". It was never wallet-scoping.
+- Fix 1: batch call wrapped in try/catch; a failure now records into a returned `failedBatches[]` and the loop continues.
+- Fix 2: new `reconcileStuckCopySimulationRuns`, mirroring `reconcileDuneRun` in `src/dune/outcomes.ts` (same status-poll -> results -> archive+sha flow, same grace period for a missing execution id). Runs before planning so `alreadyCoveredTradeIds` cannot permanently skip targets from a locally timed-out run. Verified live: recovered 2 orphaned runs, matched trade ids went 715 -> 2329.
+- Fix 3: `MAX_TARGETS_PER_RUN` 300 -> 150 with `MAX_BATCHES_PER_CALL` 15 -> 30 to hold per-click coverage constant. Caveat recorded honestly: a later live batch of 150 targets still took 2941s, so Dune variance is not primarily batch-size driven and this change is minor next to fixes 1 and 2.
+- Transparency: run status now reports `batches[]` (per-query targets/seconds/status/error), `storedTargets`, `failedTargets`, `remainingTargets`, and an `outcome` of complete/partial/stopped/error, so the four distinct "it stopped" cases are no longer indistinguishable. UI renders a summary line, a per-Dune-query table, and a note that observed query time has ranged 6s to 49min so "Waiting on Dune" reads as normal rather than hung.
+- Detail dialog: rows in the GMGN aggregate table are now clickable and open a modal built from the saved response — realized profit, return on cost, win rate, avg hold, GMGN's outcome-distribution buckets as a proportional bar, flow/costs grid, wallet tags, creation date, and Twitter handle. `parseAggregateRecord` extended to keep the `pnl_stat` buckets and the `common` block, which were previously discarded.
+- Test: `npm test` 317/317; server and UI typechecks clean; `npm run build:ui` clean. Live browser check on real data opened wallet F5jWYui (mercy) showing 66 positions, 61 in the 0-2x bucket; verified close button, backdrop click, and inside-click-does-not-close; zero console errors.
+- Errors/unresolved: 2458 targets still pending for the current scope; a full drain will take many batches given Dune's variance, but a slow or failed query no longer ends the run.
+- Next: run "Fetch missing Dune data" again and watch the per-batch table; nothing further pending on the dialog.
+
+### 2026-08-20 — Investigate latest 7-day Dune coverage
+- Step: Read the SQLite copy-simulation runs, GMGN wallet stats, and the live 7-day simulation report to explain the reported ~75% coverage.
+- Files: `.data/crypto-research.sqlite` (read-only queries), `src/copytrade/copySimulation.ts`, `ui/main.tsx`.
+- Decision: Keep the denominator distinction explicit: GMGN's `buy + sell` activity count is not the simulator's completed round-trip count. Copy coverage is matched/simulated round trips divided by locally stored completed round trips; it is not matched events divided by GMGN's aggregate activity count.
+- Agent/model: Codex.
+- Tests: No code changed; read-only database/API inspection.
+- Evidence: Latest run IDs 58–61 completed 462 Dune targets and returned 448 matched rows (97.0% at the query-target level). The live 7-day report currently shows wallet-level denominators such as 164 round trips / 155 copied (94.5%) and 220 / 198 (90%). The stats table can report 169 GMGN events while local captured history contains a different number of buy/sell rows; the missing portion is therefore not automatically a Dune failure.
+- Errors/unresolved: The exact UI row showing “169 / 75%” was not uniquely identifiable from the current roster response; it may be a stale/non-selected roster row or a different period. Exact classification requires the wallet address or the screenshot row context.
+- Next: if the user supplies the wallet/address, reconcile its GMGN event count, local round trips, Dune target states, and no-match/missing-leg counts directly.
+
+### 2026-08-20 — Add per-period Dune coverage indicators
+- Step: Updated the Copy-delay feasibility table so 7-day and 30-day GMGN activity cells show a hoverable Dune coverage dot; removed the ambiguous aggregate Copy coverage column; added a queried percentage summary to the Dune fetch evidence strip.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Green means 100% of locally eligible round trips have usable Dune prices, yellow means 90–99.9%, red means below 90%, and gray means that period has not been measured. Tooltips explicitly explain that GMGN event totals are not the Dune denominator.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: The Dune fetch control still scopes requests to its existing 7-day eligibility rule; the 30-day indicator is read-only and does not trigger a request.
+- Next: reload Wallet Stats and hover the dots beside the 7-day/30-day activity counts.
+
+### 2026-08-20 — Clarify Dune pass progress
+- Step: Added a pass-level percentage and explicit remaining/retry counts beside the Dune run message.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Progress is based on stored targets divided by the current pass total; remaining targets are described as eligible for later batches rather than implying that GMGN activity was deleted.
+- Agent/model: Codex.
+- Tests: `npm run build:ui` — passed.
+- Errors/unresolved: None.
+- Next: run the final UI build and reload the page.
+
+### 2026-08-20 — Remove Dune missing-data caps and order work by activity
+- Step: Removed the per-wallet round-trip sample cap and the arbitrary per-call batch-count cap from copy simulation; the Dune queue now drains all eligible locally stored targets until completion or user stop.
+- Files: `src/copytrade/copySimulation.ts`, `ui/main.tsx`.
+- Decision: Wallets are submitted in ascending saved 7-day GMGN activity count; wallets without a count remain at the end. Dune requests remain bounded per query, sequential, rate-limited, resumable, and stop-capable. The per-query target size is retained as a query-safety boundary, not a total-data cap.
+- Agent/model: Codex.
+- Tests: `npm test -- --runInBand` — 318/318 passed; `npm run build:ui` — passed.
+- Errors/unresolved: A 30,000-trade wallet can create a very large number of Dune batches and may run for a long time; the UI Stop control is the intended interruption path. The limitations tooltip still uses legacy wording and should be simplified in a follow-up if needed.
+- Next: reload Wallet Stats and start the missing-Dune fetch; confirm the progress total includes all eligible wallets and that the lowest-activity wallets are processed first.
+
+- Correction: the backend now preserves the UI-provided wallet order when building targets; SQL address ordering is used only to make per-wallet pairing deterministic and no longer changes queue priority.
+
+### 2026-08-20 — Add explicit copy-coverage states and controlled wide-window retry
+- Step: Added persistent Dune match-window provenance (`search_window_minutes`, `match_source`) and a separate `/api/copytrade/copy-simulation/wide-retry` path that retries only previously recorded no-match trade legs with a 120-minute window. Precise and wide-window results remain distinguishable in the raw run evidence, and matching results prefer precise observations.
+- Files: `src/db/schema.ts`, `src/copytrade/copySimulationDune.ts`, `src/copytrade/copySimulation.ts`, `src/scripts/server.ts`, `ui/main.tsx`.
+- Decision: A wider query is an explicit controlled retry, never a silent replacement of the precise query. Copy reports now classify small samples, truncated local GMGN history, missing Dune rows, partial coverage, and fully covered wallets separately.
+- Agent/model: Codex.
+- Tests: `npm run build:server` passed; full test suite previously passed 318/318 before this additive change and UI build passed. No external Dune request was made.
+- Errors/unresolved: Existing GMGN history request/insertion safety caps remain in place; truncated coverage is reported as missing local history and remains resumable. The wide retry requires the backend restart to apply the schema migration before the new button is used.
+- Next: restart the local app, reload Wallet Stats, run the normal missing-Dune fetch first, then use the separate wider-window retry only for rows labelled queried/no match.
+
+- Verification update: added a pure SQL/match-provenance regression test; `npm test -- --runInBand` now passes 319/319 and both server/UI builds pass.
+
+### 2026-08-20 — Clarify wider-window progress and collapse technical Dune details
+- Step: Added explicit precise-vs-wider-retry mode to copy-simulation status, clearer live target/batch progress text, and a note distinguishing processed Dune targets from refreshed coverage. Wrapped the current-query diagnostics/raw payload block in a collapsed-by-default disclosure.
+- Files: `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: Keep operational progress visible during a run while hiding verbose query internals until expanded; the UI now says when the wider-window retry is active and how many targets remain.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` passed 319/319; server and UI builds passed.
+- Errors/unresolved: Coverage totals refresh from stored results after batches; the live progress counter is Dune-target progress, not a per-wallet coverage calculation.
+- Next: restart/reload the local app if the running server has not picked up the new bundle.
+
+### 2026-08-20 — Collapse completed Dune run report by default
+- Step: Made the completed/idle Dune run summary a disclosure panel while keeping an active run expanded automatically.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: The compact summary remains visible with stored/failed counts; users can expand it to inspect progress details, the current query, and raw payload. Active runs open automatically so background work is visible.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` — 319/319 passed; server and UI builds passed; `git diff --check` passed (only existing line-ending warnings).
+- Errors/unresolved: None.
+- Next: Reload the app to see the collapsed completed report.
+
+### 2026-08-20 — Consolidate Dune controls and progress UI
+- Step: Removed duplicate Dune action/progress blocks and reduced the visible workflow to compact controls, one result summary, and one live progress line.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Keep technical query state and raw payload behind the existing disclosure; move explanatory copy behind the compact help/guide controls. The visible area now shows only the action, current state, processed/remaining targets, and final matched/no-match counts.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` — 319/319 passed; server and UI builds passed.
+- Errors/unresolved: None.
+- Next: Reload the app and review the Dune section with a completed or running batch.
+
+### 2026-08-20 — Add one focused coverage-help control
+- Step: Replaced the verbose Dune-controls explanation with a single expandable “How to improve coverage” panel.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Keep the fetch/stop action, current progress, and matched/no-match counts visible; explain low coverage, precise retries, and wider-window recovery only when requested. Existing matches are explicitly described as reusable.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` — 319/319 passed; server and UI builds passed.
+- Errors/unresolved: None.
+- Next: Reload the app to review the simplified coverage workflow.
+
+### 2026-08-20 — Add Dune coverage color legend
+- Step: Added a compact legend directly below the copy-delay feasibility table so the coverage dots are self-explanatory.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Green means 100% of eligible round trips matched; yellow means 90–99.9%; red means below 90%; grey means not measured yet.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm test -- --runInBand` — 319/319 passed; `git diff --check` passed.
+- Errors/unresolved: None.
+- Next: Reload the wallet-stats page and review the legend beneath the table.
+
+### 2026-08-20 — Make wider Dune retries finite and auditable
+- Step: Added retryable-target accounting, before/after coverage, and a terminal guard for wider-window retries.
+- Files: `src/copytrade/copySimulation.ts`, `src/copytrade/copySimulationDune.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`, `tests/copytrade-copy-simulation.test.ts`.
+- Decision: A precise no-match may receive one wider retry; a wider no-match is terminal and cannot be submitted again. The UI reports remaining retryable targets and coverage before → after, and disables the retry button when exhausted. Existing raw runs and matches remain append-only.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` — 320/320 passed; server and UI builds passed; `git diff --check` passed.
+- Errors/unresolved: None.
+- Next: Reload the wallet-stats page and run the wider retry once; verify the result line and exhaustion message.
+
+### 2026-08-20 — Show Dune pre-fetch state before starting work
+- Step: Added a visible preflight summary and truthful button states to the copy-delay section.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: The UI now distinguishes precise targets still unqueried from no-match round trips eligible for the one-time wider retry. “Fetch missing” is disabled when the precise queue is empty; wider retry is disabled when there are no candidates or the retry queue is exhausted.
+- Agent/model: Codex luna medium.
+- Tests: Server and UI builds passed; `git diff --check` passed.
+- Errors/unresolved: None.
+- Next: Reload the wallet-stats view; the preflight line should explain the current state before any button is pressed.
+
+### 2026-08-20 — Add per-wallet round-trip detail dialog
+- Step: Made copy-delay feasibility rows keyboard/clickable and added a read-only dialog listing every stored round trip for the selected wallet.
+- Files: `src/copytrade/copySimulation.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision: Preserve the existing simulation as the source of truth; opening a row performs no network request. Each detail row shows token, hold duration, wallet return, delayed copy return, edge kept (only when the wallet return is positive), entry/exit lag, and match status. Missing Dune matches remain explicit.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` — 320/320 passed; server and UI builds passed.
+- Errors/unresolved: Older persisted/test-shaped trade objects may omit the new audit fields; the UI renders those fields safely as unavailable.
+- Next: Reload wallet-stats and click a row in “Copy-delay feasibility” to inspect its stored round trips.
+
+### 2026-08-20 — Implement decision-first wallet-stats UI
+- Step: Replaced the visible wallet-stats research surface with one unified trader decision table combining GMGN historical summaries, Dune copy-delay evidence, coverage, activity, and a plain-language verdict. Added tested-candidate/watch/needs-data/not-copyable counts, survivor filter, row click-through, CSV export, and collapsed guidance.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision/reason: Keep the existing GMGN/Dune workflows, raw responses, tables, and controls intact but move them under collapsed “Data maintenance and raw evidence”; this removes visual noise without deleting research machinery. Row selection opens the existing saved GMGN detail modal and expands maintenance context.
+- Agent/model: Codex luna medium.
+- Tests: `npm test` passed (320 tests); `npm run build:server` passed; `npm run build:ui` passed; `git diff --check` passed.
+- Errors/unresolved: No blocking errors. The unified table is a decision summary; detailed raw GMGN/Dune evidence remains available after expanding maintenance/detail views.
+- Next step: Reload `http://localhost:5173/#copytrade/wallet-stats` and click a trader row to inspect its saved evidence.
+
+### 2026-08-20 — Make 7-day evidence the primary decision window
+- Step: Updated the wallet-stats decision view to evaluate historical positivity from the 7-day GMGN result, while retaining 30-day values as optional context. Updated headings, table labels, verdict explanation, status text, and candidate CSV fields to make the policy explicit.
+- Files changed: `ui/main.tsx`.
+- Decision/reason: 30-day coverage is currently sparse; making 7-day evidence primary allows timely candidate discovery without weakening the existing Dune coverage/sample/delay gates. Thirty-day evidence is not fabricated or discarded.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed. Existing full suite previously passed (320 tests).
+- Errors/unresolved: 7-day candidates remain provisional; the UI does not claim 30-day confirmation when that context is missing.
+- Next step: Reload the wallet-stats route and review the 7-day decision table; fetch additional 7-day evidence if rows remain in “Needs data.”
+
+### 2026-08-20 — Make the 7-day winner explicit in the UI
+- Step: Added a prominent “7-DAY WINNER” summary, changed visible candidate labels to “7d candidate,” and made the table’s 7-day basis explicit. The winner is the highest-priority row that passes the existing 7-day performance, Dune coverage, sample-size, delay, and cost gates.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision/reason: Users should not infer the primary window from a generic “Tested candidate” label. When no row passes, the banner now says “No 7-day winner yet” and explains that rows need more evidence.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `git diff --check` passed.
+- Errors/unresolved: No blocking errors.
+- Next step: Reload the wallet-stats page; inspect the 7-DAY WINNER banner and the `7d candidate` row badge.
+
+### 2026-08-20 — Audit winner-selection and delayed-copy logic
+- Step: Traced the complete winner path from the GMGN historical screen and consistency gate through Dune matching, fixed-stake copy simulation, the backend Winners endpoint, the 7-day wallet-stats verdict, and frozen forward experiments. Cross-checked the logic against the running local API and inspected current candidate outcomes.
+- Files inspected: `src/copytrade/evaluate.ts`, `src/copytrade/historicalConsistency.ts`, `src/copytrade/copyCandidates.ts`, `src/copytrade/copySimulation.ts`, `src/copytrade/copySimulationDune.ts`, `src/copytrade/experiments.ts`, `src/scripts/server.ts`, `ui/main.tsx`, and candidate/simulation tests.
+- Decision/reason: The historical screen is useful for hypothesis generation, but the current winner label is not yet a valid delayed-copy profitability verdict. One current 7-day candidate has a positive simulated median (+9.23%) while the app's own fixed-$10 portfolio loses $24.80 from $100 before gas; the round-trip pairing also reuses one buy for multiple partial sells, and trades whose hold is shorter than the delay are not rejected per trade.
+- Agent/model: Codex luna medium.
+- Tests/evidence: Read-only audit; no test suite run. Live API evidence inspected: 6yaPa... has 35/35 7-day Dune-covered rows, +9.23% simulated median, -7.09% simulated mean, and $75.20 ending capital; all-history simulation has 485 sell rows but only 345 distinct token/buy-time entries. 7JFSA... has 363 simulated sell rows but only 246 distinct entries.
+- Errors/unresolved: P0 correctness gaps remain in inventory/partial-sell accounting, impossible hold<delay handling, gas deduction, liquidity-sensitive execution, model-versioned Dune matches, and alignment between backend and UI winner definitions. Existing stored raw evidence remains intact.
+- Next step: Fix the P0 simulation invariants first, then recompute candidate results before treating any wallet as a proven copy winner.
+
+### 2026-08-20 — Verify consolidated wallet-stats decision view
+- Step: Confirmed the requested consolidated view is present at `#copytrade/wallet-stats`: one 7-day decision table at the top, explicit candidate/watch/needs-data/not-copyable counts, a winner summary, row click-through to saved evidence, export, and collapsed maintenance/raw-data controls.
+- Files inspected: `ui/main.tsx`, `ui/styles.css`.
+- Decision/reason: Keep the consolidated decision surface as the primary workflow while retaining GMGN refresh, stats fetch, Dune evidence, and raw-response inspection below the fold. No duplicate UI was added.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320); no new runtime errors observed.
+- Errors/unresolved: The view is consolidated, but the audit still identifies simulation-correctness issues that affect whether a displayed candidate is truly copy-profitable; those are separate from this UI change.
+- Next step: Reload `http://localhost:5173/#copytrade/wallet-stats` and use the top decision table; click a row for details and expand maintenance only when new evidence is needed.
+
+### 2026-08-20 — Review attached final-UI proposal
+- Step: Compared the attached UX review with the current wallet-stats implementation.
+- Files inspected: `ui/main.tsx`, `ui/styles.css`.
+- Decision/reason: The current UI already has the unified decision table, winner summary, row interaction, export, and collapsed maintenance area. The review correctly identifies the remaining gap: `Update research` currently starts the GMGN stats fetch only; it does not orchestrate the required Dune work, and row details do not yet combine all evidence into one drawer.
+- Agent/model: Codex luna medium.
+- Tests: Existing verification remains green: UI/server builds and 320/320 tests passed.
+- Errors/unresolved: Verdict logic still exists in both UI and backend; historical positive values can visually read as good even when copyability is unresolved. Default sorting and the detail surface still need the proposal's final treatment.
+- Next step: If approved for implementation, unify verdict computation, add the sequential Update research workflow, and replace the current row detail/modal path with one evidence drawer.
+
+### 2026-08-20 — Implement consolidated research workflow UI
+- Step: Connected the primary Update research action to sequential roster refresh, GMGN summary refresh, missing 7-day Dune measurement, and final table reload; added compact evidence summary to trader details and restricted green performance styling to tested candidates.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision/reason: Keep the decision table as the default surface while making the workflow explainable and resumable through one action; retain technical controls below the fold.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+- Errors/unresolved: Backend and UI verdict rules remain separate; the update action uses existing endpoints and does not yet have a dedicated server-side workflow record.
+- Next step: Verify the workflow in the browser and, if needed, move verdict computation into a shared backend response.
+- Follow-up: The orchestrator now passes the freshly refreshed roster snapshot into the Dune step instead of relying on asynchronous React state.
+- Test result: UI and server builds still pass after the snapshot handoff adjustment.
+
+### 2026-08-20 — Add research progress and table legend
+- Step: Added a visible four-step update progress panel and an always-available table legend explaining verdicts, history, copy test, Dune evidence, and activity.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision/reason: Make the single Update research action auditable without exposing the technical maintenance console or adding new workflow buttons.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+- Errors/unresolved: Progress reflects the client-orchestrated stages; a server-side durable workflow record is still not present.
+- Next step: Reload the wallet-stats route and run Update research once to verify stage transitions against the live backend.
+
+### 2026-08-20 — Add full stored trade history to trader dialog
+- Step: Added a read-only wallet trade-history API and rendered every locally stored trade in the existing GMGN trader dialog with a scrollable table, transaction copy controls, and fetch-coverage context.
+- Files inspected or changed: `src/scripts/server.ts`, `ui/main.tsx`, `ui/styles.css`, `progress.md`.
+- Decision/reason: The dialog now answers “what trades do we actually have?” without making a new GMGN or Dune request; raw stored rows remain unchanged and any provider truncation is disclosed.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+- Errors/unresolved: The table shows all locally stored rows; it cannot recover trades never returned by the provider or stopped by an earlier fetch cap.
+- Next step: Open a trader row in the wallet-stats view and verify the history table and coverage note against SQLite.
+
+### 2026-08-20 — Show exact research-update results
+- Step: Added a completed-update summary showing roster additions/reuse, GMGN requests and cached rows, Dune targets/batches and new matches, plus before/after decision verdict counts and changed rows.
+- Files inspected or changed: `ui/main.tsx`, `ui/styles.css`, `progress.md`.
+- Decision/reason: The workflow now reports its actual work and visible effect instead of ending with only a generic “complete” message.
+- Agent/model: Codex luna medium.
+- Tests: `npm test -- --runInBand` passed (320/320); UI and server builds passed.
+- Errors/unresolved: Verdict deltas are limited to wallets present before and after the update; newly added roster rows are reported in roster counts but do not have a before-verdict comparison.
+- Next step: Run Update research once and inspect the expanded “Last research update” panel.
+
+### 2026-08-20 — Replace verbose trade prices with per-trade P/L
+- Step: Updated the trader-dialog history table to show realized percentage return for sell rows, mark buy rows as entries, and compact token amounts; removed long raw price/cost columns from the primary view.
+- Files inspected or changed: `ui/main.tsx`, `ui/styles.css`, `progress.md`.
+- Decision/reason: The dialog should answer profit/loss per trade without exposing unreadable decimal strings. Sell P/L uses the stored proceeds and buy-cost basis; missing basis remains unavailable rather than guessed.
+- Agent/model: Codex luna medium.
+- Tests: Pending build and test run.
+- Errors/unresolved: Buy rows have no realized P/L by definition; they are labeled `Entry`.
+- Next step: Verify the dialog visually after reload.
+- Test result: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+
+### 2026-08-20 — Consolidate wallet evidence and simplify trade detail
+- Step: Replaced the visible split GMGN-summary and copy-delay tables with one combined trader-evidence table; retained the prior summary markup hidden for rollback. Updated the wallet dialog to show sell rows only, realized P/L percentage, and matched holding duration instead of token amount.
+- Files inspected or changed: `ui/main.tsx`, `ui/styles.css`, `progress.md`.
+- Decision/reason: The main view should present one decision-oriented row per wallet. Sell rows are the realized outcome; matching stored buys provides a readable hold duration without exposing noisy token quantities. Missing buy matches remain `—`.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+- Errors/unresolved: Hold matching is a local FIFO approximation for multiple buys/sells of the same token; it does not alter stored data or simulation results.
+- Next step: Reload `/#copytrade/wallet-stats`, confirm one combined table is visible, then click a trader row to verify sell-only dialog details.
+
+### 2026-08-20 — Align dialog labels with sell-only history
+- Step: Changed the dialog block title/count from full trade history to stored sell history, while retaining buy rows in SQLite for hold matching and audit.
+- Files inspected or changed: `ui/main.tsx`, `progress.md`.
+- Decision/reason: The visible count and explanatory copy must describe the filtered sell-only view, not the underlying all-row storage.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed.
+- Errors/unresolved: None.
+- Next step: Reload the wallet-stats page and click a trader row to verify the combined table and sell-history dialog.
+
+### 2026-08-20 — Make research-update failures stage-specific
+- Step: Added explicit stage failure tracking to the Update research workflow, fail-fast validation when roster refresh or GMGN summary start fails, and corrected the progress list to show completed, failed, active, and waiting stages.
+- Files inspected or changed: `ui/main.tsx`, `progress.md`.
+- Decision/reason: A generic `Failed to fetch` must not make every stage look untouched. The user needs to see the exact failed stage while preserving already completed work.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+- Errors/unresolved: Server diagnostics currently record HTTP status but not response body, so a Dune 400 still needs the browser response or a future diagnostics enhancement for its exact message.
+- Next step: Reload the page and run Update research; if it stops, the failed stage will be marked with `!` and later stages will remain waiting.
+
+### 2026-08-20 — Diagnose stopped research update
+- Step: Inspected the update orchestration, server route, and latest SQLite diagnostics after the UI reported `Update stopped: Failed to fetch`.
+- Files inspected or changed: `ui/main.tsx`, `src/scripts/server.ts`, `.data/crypto-research.sqlite`, `progress.md`.
+- Decision/reason: No code change made during diagnosis. Recent request evidence shows roster refresh and GMGN stats fetch returned HTTP 200, while the Dune run returned HTTP 400; the server route rejects an implicit simulation run when no current candidates pass the other gates. The UI also renders every stage as “waiting” for a generic/network failure, which hides the actual failing stage.
+- Agent/model: Codex luna medium.
+- Tests: Read-only SQLite and source inspection only; no tests run.
+- Errors/unresolved: The request log stores status but not the 400 response body, so the exact user-visible error must be captured from the failed network response or added to diagnostics.
+- Next step: Improve updateResearch stage/error handling so a failed stage is marked explicitly and no-candidate Dune work is reported as a completed no-op rather than a generic fetch failure.
+### 2026-08-20 — Fix Dune coverage rendering and explain initial load
+- Step: Hardened the Dune coverage label formatter against missing or malformed coverage values and added a visible wallet-stats loading state.
+- Files inspected or changed: `ui/main.tsx`, `progress.md`.
+- Decision/reason: Incomplete legacy/API coverage objects must render as `—` instead of crashing the whole page. Initial wallet-stats loading reads saved SQLite evidence and should be visibly distinguished from a new GMGN/Dune request.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (320/320).
+- Errors/unresolved: The existing page still performs several read-only endpoint loads on entry; the new status banner explains this activity, but endpoint consolidation was not changed in this fix.
+- Next step: Reload `#copytrade/wallet-stats` and confirm the banner appears while saved evidence loads and the table renders when incomplete coverage rows are present.
+
+### 2026-08-20 — Handover checkpoint: current implementation state
+- Step: Audited the handover log against the current working tree after the wallet-stats loading/crash fix.
+- Files inspected or changed: `progress.md`, `ui/main.tsx`, `ui/styles.css`, `src/scripts/server.ts`, `src/copytrade/*`, `src/gmgn/walletRankFetch.ts`, `src/db/schema.ts`, `src/dune/outcomes.ts`, and related tests.
+- Decision/reason: Treat SQLite and archived raw provider responses as the source of truth; UI reads remain read-only and must show an explicit loading state. Dune coverage values are defensive: incomplete records render `—` instead of aborting the React tree.
+- Current implemented areas: combined wallet evidence table; sell-only trade detail dialog with local hold matching; GMGN aggregate stats/latest roster refresh; sequential/rate-limited GMGN and Dune workflows with resumable status, stop controls, raw Dune response evidence, and scheduler tests; representative trade sampling; Top Caller collection/checkpoints; copy-candidate and copy-delay evaluation; sortable evidence columns and coverage indicators.
+- Agent/model: Codex luna medium.
+- Tests: `npm run build:ui` passed; `npm run build:server` passed; `npm test -- --runInBand` passed (`320/320`).
+- Errors/unresolved: Working tree contains broad uncommitted changes across UI, server, database, Dune, GMGN, and tests. Existing wallet-stats entry still loads several read-only endpoints before the combined table appears. A prior diagnosed research-update failure was caused by a Dune HTTP 400/no-candidate path; exact provider response-body logging remains a follow-up. Do not assume provider workflows are running solely because a page is open; inspect the corresponding status endpoint.
+- Next step for a new chat: read this file and `crypto/CLAUDE.md`, inspect `git status`, then verify the current browser route and status endpoints before making further changes. Reload `#copytrade/wallet-stats` to confirm the new loading banner and safe coverage rendering.
+
+### 2026-08-20 14:16 -07:00 — Onboarding checkpoint
+- Step: Read `crypto/progress.md` and `crypto/CLAUDE.md`; inspected the repository worktree state.
+- Files inspected: `crypto/progress.md`, `crypto/CLAUDE.md`; no implementation files changed.
+- Decision: Preserve the broad uncommitted crypto changes and treat the wallet-stats handover plus P0 copy-simulation audit as the active context.
+- Agent/model: Codex GPT-5.
+- Test result: Not run; onboarding/read-only inspection.
+- Errors/unresolved: Browser route/status endpoint verification remains pending; simulation correctness gaps remain as documented above.
+- Next step: Before implementation, verify `#copytrade/wallet-stats` and its status endpoints, then address simulation invariants if requested.
+
+### 2026-08-20 14:19 -07:00 — Integrated Graphify for project-aware code navigation
+- Step: Installed the project-scoped Graphify Codex skill at the `vantage` root, scoped the initial graph to `crypto`, documented the workflow, and built a local code-only graph.
+- Files changed: top-level `AGENTS.md`, `GRAPHIFY.md`, `.codex/skills/graphify/`, `.codex/hooks.json`, `crypto/.gitignore`.
+- Decision: Keep the shared Graphify integration at monorepo top level, but index `crypto` first to avoid mixing unrelated projects and generated data into crypto architecture answers.
+- Agent/model: Codex GPT-5.
+- Test result: Graph build succeeded: 113 code files, 1,151 nodes, 2,500 edges. Smoke query against `crypto/graphify-out/graph.json` succeeded. No application tests run; integration is developer tooling only.
+- Errors/unresolved: The generated `.codex/hooks.json` contains a machine-local uv cache executable path; verify portability before sharing it across machines. Graph outputs remain local and ignored.
+- Next step: Use scoped Graphify queries for crypto architecture work and run `graphify update crypto` after crypto code changes; consider a broader top-level graph only if cross-project relationships become a real need.
+
+### 2026-08-20 14:22 -07:00 — Verified Graphify is picked up by the current Codex workspace
+- Step: Confirmed top-level `AGENTS.md` is active, `crypto/graphify-out/graph.json` exists, and a scoped wallet-stats architecture query succeeds.
+- Files inspected: `AGENTS.md`, `crypto/AGENTS.md`, `crypto/graphify-out/graph.json`; no application files changed.
+- Decision: Treat Graphify as the default first lookup for crypto architecture questions, while retaining direct source inspection for implementation, tests, runtime data, and stale-graph validation.
+- Agent/model: Codex GPT-5.
+- Test result: Local Graphify query succeeded; no application tests run.
+- Errors/unresolved: Token reduction is workload-dependent, not guaranteed; Codex Desktop's generated PreToolUse hook is intentionally a no-op, so the behavior depends on the project instructions and graph freshness.
+- Next step: Query the graph first for future crypto codebase questions and refresh it after code changes.
+
+### 2026-08-20 14:28 -07:00 — Made Graphify refresh instruction mandatory
+- Step: Updated top-level `AGENTS.md` to require running `uvx --from graphifyy graphify update crypto` after every crypto source modification.
+- Files changed: top-level `AGENTS.md`.
+- Decision: Use the repository-root command explicitly to avoid the prior path error when running from inside `crypto`.
+- Agent/model: Codex GPT-5.
+- Test result: Not run; instruction-only change.
+- Errors/unresolved: None.
+- Next step: Run the Graphify update after future crypto source changes before finishing the task.
+
+### 2026-08-20 14:38 -07:00 — Began diagnosis of verdict changes with zero new rows
+- Step: Queried the Graphify architecture map and inspected the Update research orchestration plus verdict computation.
+- Files inspected: `ui/main.tsx`, `src/copytrade/evaluate.ts`, `src/scripts/server.ts`, Graphify output.
+- Decision: First investigate recomputation inputs rather than assuming new trades: the workflow refreshes the roster snapshot and recomputes a moving 90-day report even when no rows are added.
+- Agent/model: Codex GPT-5.
+- Test result: Graphify query succeeded; SQLite read attempt was blocked by the workspace's incompatible native `sqlite3` binary.
+- Errors/unresolved: Need last-run API/diagnostic data or a compatible SQLite reader to confirm whether roster membership, rolling cutoff, GMGN stats, or Dune evidence changed.
+- Next step: Compare the last two research-update snapshots and per-wallet verdict inputs, then make verdict recomputation deterministic and explainable.
+
+### 2026-08-20 14:41 -07:00 — Identified why the last two roster snapshots differ
+- Step: Compared live GMGN wallet-rank snapshots 140 and 165, their request parameters, wallet membership, and report outputs.
+- Evidence: Snapshot 140 (`2026-08-15T22:46:10Z`) used `orderby=pnl_30d` plus `min_winrate_30d=0.5`; snapshot 165 (`2026-08-15T22:45:56Z`) used `orderby=pnl_1d` with no win-rate filter. Both had 100 rows, but 69 wallets were added and 69 removed. Snapshot 165 currently produces 0 stored-trade report rows, while snapshot 140 produces 100.
+- Decision: Verdict changes are explained by switching roster definitions, not by new trades. These snapshots must not be treated as the same research cohort.
+- Agent/model: Codex GPT-5.
+- Test result: Live read-only API comparison succeeded; no writes or application tests run.
+- Errors/unresolved: Need to trace which UI action/request created each snapshot and enforce one fixed leaderboard query for the research workflow.
+- Next step: Make the research update preserve/use a fixed query contract and display the snapshot query parameters beside the verdict.
+
+### 2026-08-20 14:44 -07:00 — Locked research roster filter and displayed provenance
+- Step: Fixed the research roster refresh to use `orderby=pnl_30d`, `min_winrate_30d=0.5`, and limit 100; added the filter to the last-update summary.
+- Files changed: `src/gmgn/walletRankFetch.ts`, `src/scripts/server.ts`, `ui/main.tsx`.
+- Decision: Prevent leaderboard-query drift from silently changing the verdict population; the roster snapshot now records the research filter in its request provenance.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:server` passed; `npm run build:ui` passed; `npm test -- --runInBand` passed (320/320); Graphify updated to 1,938 nodes and 3,020 edges.
+- Errors/unresolved: `git diff --check` reports one pre-existing trailing-whitespace warning in `unusualwhales/progress.md`, outside this change.
+- Next step: Restart/reload the crypto server and run Update research once; verify the summary shows the fixed filter and the new snapshot uses it.
+
+### 2026-08-20 14:48 -07:00 — Added loading spinner to empty wallet-stats table
+- Step: Replaced the ambiguous empty candidate-list message with an inline spinner and loading text whenever roster, GMGN summary, or research-update work is active.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Distinguish “still loading” from “no roster/evidence exists” so the empty table does not appear stuck.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:ui` passed; `npm run build:server` passed; Graphify updated to 1,939 nodes and 3,021 edges.
+- Errors/unresolved: None.
+- Next step: Reload wallet-stats and confirm the spinner appears during initial loading.
+
+### 2026-08-20 14:52 -07:00 — Stabilized wallet-stats initial loading
+- Step: Removed duplicate concurrent wallet-stats loads that could overwrite the candidate table with stale or partial responses; added explicit GMGN-read loading state to the spinner.
+- Files changed: `ui/main.tsx`.
+- Decision: Wallet-stats now loads the report, GMGN summaries, and simulation evidence through one sequenced route path; other routes retain their independent loaders.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:ui` passed; `npm run build:server` passed; Graphify updated to 1,940 nodes and 3,022 edges.
+- Errors/unresolved: Full test suite not rerun for this UI-only race fix.
+- Next step: Reload wallet-stats and verify the candidate count remains unchanged after the spinner disappears.
+
+### 2026-08-20 14:54 -07:00 — Added 7-day and 30-day GMGN results to trader dialog
+- Step: Extended the wallet row dialog with separate stored 7-day and 30-day GMGN aggregate result cards.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Keep the 7-day decision table and Dune copy test unchanged, while preserving and exposing GMGN’s 30-day context alongside 7-day results.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:ui` passed; Graphify updated to 1,941 nodes and 3,023 edges.
+- Errors/unresolved: None.
+- Next step: Reload wallet-stats and click a trader row to review both GMGN periods.
+
+### 2026-08-20 14:55 -07:00 — Hid temporary wallet-stats verdicts during loading
+- Step: Suppressed decision rows, verdict counts, winner text, and table counts until all roster, GMGN, and simulation evidence loaders finish.
+- Files changed: `ui/main.tsx`.
+- Decision: Prevent partial “Needs data” values from appearing as final verdicts during initial page refresh.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:ui` passed; Graphify updated to 1,942 nodes and 3,024 edges.
+- Errors/unresolved: None.
+- Next step: Reload wallet-stats and verify only the final stable verdict set appears after the spinner ends.
+
+### 2026-08-20 14:57 -07:00 — Covered the post-spinner empty gap
+- Step: Added an explicit wallet-stats ready flag; the spinner and temporary-result suppression now remain active until the sequenced load completes and React receives the final combined state.
+- Files changed: `ui/main.tsx`.
+- Decision: Do not expose an empty table between the end of network loading and the final rendered candidate rows.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:ui` passed; Graphify updated to 1,943 nodes and 3,025 edges.
+- Errors/unresolved: None.
+- Next step: Reload wallet-stats and confirm the table appears immediately when the spinner disappears.
+
+### 2026-08-20 14:59 -07:00 — Made candidate export self-contained
+- Step: Extended Export candidates to include GMGN 7d/30d aggregate JSON, risk evidence, Dune copy evidence, and locally stored sell history with hold time and realized return fields.
+- Files changed: `ui/main.tsx`.
+- Decision: Fetch each wallet's local trade-history endpoint during export so another AI can analyze the CSV without opening the dialogs or querying the app.
+- Agent/model: Codex GPT-5.
+- Test result: `npm run build:ui` passed; Graphify updated to 1,944 nodes and 3,026 edges.
+- Errors/unresolved: Individual history-request failures export as empty history fields rather than aborting the whole export.
+- Next step: Reload wallet-stats and use Export candidates; inspect the JSON columns in the downloaded CSV.
+2026-08-20 15:05
+- Step: Removed wallet-history fetch ceilings.
+- Files: `src/copytrade/constants.ts`, `src/copytrade/estimate.ts`, `tests/copytrade-estimate.test.ts`.
+- Decision: Per-wallet requests and daily stored inserts are now uncapped; legacy cap fields remain compatible with old run records.
+- Agent/model: Codex GPT-5.
+- Tests: `npm test` — 320 passed.
+- Unresolved: The API process must load the rebuilt server before starting the new run.
+- Next step: Restart the 100-wallet fetch and monitor its status.
+
+2026-08-20 15:08
+- Step: Restarted the roster fetch after rebuilding.
+- Files: SQLite research database via API run 47.
+- Decision: Started 100 wallets for a 90-day window with both caps disabled.
+- Agent/model: Codex GPT-5.
+- Tests: Run 47 active; initial status shows 50 trades, 0 daily-capped trades, 3 requests.
+- Unresolved: Fetch is still running and may take hours because it now retrieves all available history.
+- Next step: Let run 47 continue; inspect `/api/copytrade/fetch/status` for progress.
+
+2026-08-20 15:10
+- Step: Refreshed Graphify after the cap-removal changes.
+- Files: `graphify-out/graph.json`, `graphify-out/graph.html`, `graphify-out/GRAPH_REPORT.md`.
+- Decision: Graph now includes the uncapped fetch/estimate implementation.
+- Agent/model: Codex GPT-5.
+- Tests: Graphify update completed — 1,945 nodes, 3,025 edges.
+- Unresolved: Run 47 remains active.
+- Next step: Monitor the API status until the roster fetch completes.
+2026-08-20 15:22
+- Step: Removed the remaining local analysis and coverage limits.
+- Files: `src/copytrade/representativeSample.ts`, `src/copytrade/fetch.ts`, `src/copytrade/evaluate.ts`, `ui/main.tsx`, `tests/copytrade.test.ts`.
+- Decision: Reports now use every stored sell and coverage history accepts the full requested limit; raw trade fetching remains uncapped.
+- Agent/model: Codex GPT-5.
+- Tests: `npm test` — 320 passed.
+- Unresolved: GMGN stats currently cover 25 of the requested 100 wallets. Those 25 report 170,791 buys and 74,125 sells over 30d.
+- Next step: Fetch 30d stats for the remaining wallets to get the complete pre-fetch activity estimate.
+2026-08-20 15:35
+- Step: Split the combined research action into screening and approval stages.
+- Files: `ui/main.tsx`.
+- Decision: Stage 1 refreshes the top 100 roster and 7d/30d GMGN summaries, reports fast/not-fast counts and 30-day total activity, and does not call Dune. Stage 2 requires explicit approval before starting Dune research.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Fast-trader screening uses GMGN 30d average holding time under 60 seconds; missing stats are shown separately and are not counted as candidates.
+- Next step: Refresh the browser UI and test both buttons against the local API.
+2026-08-20 15:45
+- Step: Expanded the screening result with activity-volume evidence.
+- Files: `ui/main.tsx`.
+- Decision: Show analyzed-wallet count, total 30-day buys+sells, maximum trades by one wallet, and the top 10 highest-activity wallets. Missing stats are separated from zero fast/not-fast counts.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: The current screen result has no usable GMGN stats, so it must be rerun after the stats fetch completes.
+- Next step: Refresh the UI and run “Fetch top 100 and screen” again.
+2026-08-20 15:50
+- Step: Diagnosed the empty screening summary and restarted the stats fetch with the correct roster snapshot.
+- Files: SQLite GMGN stats data via API.
+- Decision: The screenshot represented an empty/stale stats result, not zero-activity wallets. Snapshot 140 is now being processed for all 100 wallets.
+- Agent/model: Codex GPT-5.
+- Tests: Live stats run active at 28/100 wallets; 50 summaries reused, 7 new requests. Existing top 30d activity counts are 53,598, 41,407, and 33,625 trades.
+- Unresolved: Remaining 72 wallets are still being processed.
+- Next step: Rerun the screening button after the stats fetch completes.
+2026-08-21 00:02
+- Step: Connected the screening summary to persisted GMGN stats after background completion.
+- Files: `ui/main.tsx`.
+- Decision: Research-tab loading now reads saved stats with GET requests and rebuilds the high-activity list; it does not trigger another GMGN fetch.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed. Live stats run completed 100/100 with 304,833 30-day trades.
+- Unresolved: Browser must refresh once to load the updated UI bundle.
+- Next step: Refresh the page and expand “Show highest-activity wallets.”
+2026-08-21 00:10
+- Step: Made the persisted screening result visible on initial research-tab load.
+- Files: `ui/main.tsx`.
+- Decision: Show last stats-fetch time and saved activity totals/list; viewing the result performs only local GET reads and never starts a new GMGN fetch.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Browser refresh is required to load the new bundle.
+- Next step: Refresh the page; the saved result should appear below the stage buttons.
+2026-08-21 00:25
+- Step: Verified the live UI and fixed the saved-stats roster-snapshot race.
+- Files: `ui/main.tsx`.
+- Decision: Screening stats now use the selected roster snapshot or its catalog default, preventing the older 25-wallet result from overwriting the 100-wallet result.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed; live browser inspection found and reproduced the race.
+- Unresolved: A fresh browser reload is needed to load the final bundle.
+- Next step: Verify the summary shows 100 of 100 analyzed and 304,833 total trades.
+2026-08-21 00:40
+- Step: Added database-aware server caching for expensive CopyTrade reads.
+- Files: `src/scripts/server.ts`.
+- Decision: Summary, results, and historical-consistency reports reuse cached values while the underlying SQLite fingerprint is unchanged; trades, roster, stats, and simulation writes change the fingerprint automatically.
+- Agent/model: Codex GPT-5.
+- Tests: `npm test` — 320 passed. Timings: results 2.6s first read, 0.1s cached; historical 1.41s first read, 0.07s cached.
+- Unresolved: The first report after a process restart or new data still computes once.
+- Next step: Refresh the UI and confirm subsequent loads no longer show the long analysis spinner.
+2026-08-21 00:55
+- Step: Replaced the highest-activity numbered list with a collapsible sorted table.
+- Files: `ui/main.tsx`.
+- Decision: The overview stays compact by default; expanding it shows every analyzed wallet ranked by 30-day trade count.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: None.
+- Next step: Refresh the UI and expand “Show all activity.”
+
+2026-08-20 19:25 - Step: Reworked 30-day winner gating to require 100% Dune coverage, rank by delayed-copy portfolio net P&L, and deduct recorded GMGN gas USD from portfolio equity. Files: `src/copytrade/copySimulation.ts`, `src/copytrade/copyCandidates.ts`, `src/scripts/server.ts`, `ui/main.tsx`. Decision: incomplete Dune matches or gas costs cannot produce a final winner. Agent/model: Codex GPT-5. Tests: build passed; full test rerun pending after final edits. Unresolved: existing UI tabs need refresh. Next step: run tests and refresh Graphify.
+2026-08-20 19:30 - Step: Completed the winner-model fix and updated the affected portfolio expectations. Files: `tests/copytrade-copy-simulation.test.ts`, `graphify-out/`. Decision: net portfolio equity now includes recorded GMGN gas USD; Graphify reflects the new code. Agent/model: Codex GPT-5. Tests: `npm test` passed 320/320; Graphify update passed. Unresolved: existing UI tabs need refresh before showing the new winner rules. Next step: refresh the app, then fetch the 30-day data.
+2026-08-20 19:40 - Step: Made the research progress UI granular and honest. Files: `ui/main.tsx`, `graphify-out/`. Decision: show separate roster, GMGN trade-history, GMGN summaries, Dune, and decision-table states with live counts; removed the ambiguous “No active GMGN request” footer. Agent/model: Codex GPT-5. Tests: `npm run build` and `npm test` passed; 320/320 tests; Graphify update passed. Unresolved: refresh the browser tab to load the rebuilt UI. Next step: verify the live progress panel during the current fetch.
+2026-08-20 21:55 - Step: Added verified complete-history coverage tracking. Files: `src/db/schema.ts`, `src/copytrade/fetch.ts`, `graphify-out/`. Decision: old capped/sampled timestamps no longer authorize an early stop; only a new uncapped pass reaching the 30-day boundary marks a wallet complete. Agent/model: Codex GPT-5. Tests: `npm test` passed 320/320; Graphify update passed. Unresolved: the already-running process must restart before this logic is used; its saved trades remain safe. Next step: restart the server, then let the current run reprocess any wallets lacking verified coverage.
+2026-08-20 22:05 - Step: Changed wallet fetch ordering to lowest known 30-day trade count first. Files: `src/copytrade/fetch.ts`, `graphify-out/`. Decision: low-volume wallets complete sooner; unknown counts remain last and leaderboard rank is unchanged. Agent/model: Codex GPT-5. Tests: `npm test` passed 320/320; Graphify update passed. Unresolved: the active process must restart before the new ordering is used. Next step: use the new ordering on the next fetch run.
+
+2026-08-21 02:45
+- Step: Simplified the top-trader workflow into an explicit GMGN-first, Dune-second flow.
+- Files: `ui/main.tsx`, `src/copytrade/fetch.ts`, `src/copytrade/constants.ts`, `src/copytrade/evaluate.ts`.
+- Decision: The top-100 action now fetches complete 30-day GMGN history before summaries; Dune is a separate second step and excludes wallets whose GMGN history fetch failed.
+- Decision: Removed automatic high-activity exclusions. Manual exclusions remain available.
+- Decision: Removed application-enforced request and daily-trade caps. Wallet-level GMGN failures are persisted as `stop_reason = 'failed'`, counted, and skipped without aborting the remaining wallets.
+- Verification: `npm test` passed — 320 tests. Graphify updated `crypto/graphify-out` successfully.
+- Unresolved: Existing browser tabs need a refresh to load the rebuilt UI. Provider-side pagination, rate limits, and unavailable API data remain external limitations.
+- Next step: Refresh the UI, run “Fetch complete GMGN top 100,” wait for completion, then run “Fetch Dune details.”
+
+2026-08-21 02:55
+- Step: Removed legacy resume-cursor behavior and classified cursor stalls as failed/incomplete history.
+- Decision: A repeated/stalled GMGN cursor now marks the wallet failed and incomplete instead of presenting partial data as complete.
+- Verification: Server and UI builds passed after the final change; Graphify graph refreshed again.
+
+2026-08-21 03:05
+- Step: Aligned the Dune query window with the five-minute accepted-match rule.
+- Files: `src/copytrade/copySimulationDune.ts`, `tests/copytrade-copy-simulation.test.ts`.
+- Decision: Precise and retry queries now search five minutes; matches cannot be found in a larger window and then rejected later.
+- Verification: `npm test` passed — 320 tests. Graphify refreshed successfully.
+
+2026-08-21 03:20
+- Step: Clarified the decision-table horizons and added a dedicated sortable 30-day history column.
+- UI: The page now says `30-DAY COHORT · 7-DAY DECISION`; the winner is labeled `7-DAY DECISION WINNER`.
+- Decision: Kept 7-day as the primary verdict horizon because copyability is the recent decision, while displaying 30-day results as explicit cohort context.
+- Verification: UI/server build passed. Graphify refreshed successfully.
+
+2026-08-21 03:35
+- Step: Reduced screening-summary text noise and clarified the main decision heading.
+- UI: Replaced repeated explanatory sentences with compact facts, conditional exclusion text, and a collapsible activity-table label.
+- UI: Renamed the visible candidate count to `7-day decision candidates`; existing saved screening data remains unchanged.
+- Verification: Build passed. Graphify check completed.
+
+2026-08-21 03:50
+- Step: Moved the primary decision horizon from 7 days to 30 days.
+- UI/workflow: Verdicts now use 30-day GMGN performance and 30-day Dune copy evidence; 7-day values remain secondary context.
+- UI: Renamed candidates, winner, progress labels, and Dune controls to 30-day terminology.
+- Verification: Build passed. Graphify refreshed successfully.
+
+2026-08-21 04:10
+- Step: Closed the pre-fetch 30-day audit blockers.
+- Fix: Winner selection is now independent of UI sorting and ranks tested candidates by 30-day result, simulated 30-day result, coverage, rank, then name.
+- Fix: Any GMGN failed/truncated/incomplete wallet is forced to `Needs data` and cannot become a candidate from stale prior Dune evidence.
+- Fix: Main report period defaults to 30 days.
+- Fix: GMGN rate limits now stop the run globally and enter cooldown instead of hammering the remaining wallets as individual failures.
+- Verification: `npm test` passed — 320 tests. Graphify refreshed. No external fetch was started.
+
+2026-08-21 01:25
+- Step: Improved dollar-value formatting across the UI.
+- Files: `ui/main.tsx`.
+- Decision: Use readable compact units (`K`, `M`, `B`), comma separators, and two decimals; the example now renders as `$1.80M`.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the rebuilt UI.
+- Next step: Refresh the UI and verify the 30-day net-profit column.
+
+2026-08-21 01:35
+- Step: Added persistent screening exclusions and delay-fit guidance to the saved activity table.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Use GMGN 30-day average holding time as the available delay-risk proxy; excluded wallets are struck through and omitted from Dune research. The research button now uses saved screening data and shows the selected candidate count.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh; exclusions are persisted per browser, not server-wide.
+- Next step: Refresh the UI, expand “Show all activity,” and uncheck wallets to exclude.
+
+2026-08-21 01:40
+- Step: Added automatic initial exclusion for wallets with more than 2,000 30-day trades.
+- Files: `ui/main.tsx`.
+- Decision: High-activity wallets start unchecked because their speed makes delayed copying less reliable; users can manually re-enable them.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the rebuilt UI.
+- Next step: Refresh the UI and review the initially excluded high-activity rows.
+
+2026-08-21 01:45
+- Step: Made saved screening exclusions explicit in the UI.
+- Files: `ui/main.tsx`.
+- Decision: Show the selected research count and the number of skipped wallets saved for later; skipped rows remain visible and re-enableable.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: The saved skip list remains browser-local rather than server-shared.
+- Next step: Refresh the UI and verify the skipped count beside the screening result.
+
+2026-08-21 01:55
+- Step: Fixed the post-approval Dune refresh scope.
+- Files: `ui/main.tsx`.
+- Decision: After research completes, reload the simulation report for the exact approved wallet list instead of the server’s narrower default scope; this prevents stale “Not measured” rows.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh once to load this fix.
+- Next step: Approve a research run and confirm the decision table updates automatically.
+
+2026-08-21 02:10
+- Step: Fixed the 2,000-trade exclusion overwrite bug.
+- Files: `ui/main.tsx`.
+- Decision: High-activity wallets are only default-excluded; explicit user re-enables are stored separately and override that default across roster snapshot changes. Legacy automatic exclusions are migrated once.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the fixed selection logic.
+- Next step: Refresh the UI, re-enable the four wallets, and confirm they remain selected after research.
+
+2026-08-21 02:20
+- Step: Added granular live research progress to the main 7-day decision view.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Show the active stage, GMGN wallet/request progress, Dune query number, target progress, stored/failed/remaining counts, Dune state, and latest message; poll Dune status on the main view as well as wallet-stats.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the new progress panel.
+- Next step: Start a research run and verify the live panel beside the winner card.
+
+2026-08-21 02:30
+- Step: Added prominent GMGN history completeness warnings and sortable columns to the main decision table.
+- Files: `ui/main.tsx`, `ui/styles.css`.
+- Decision: Show `GMGN history incomplete` directly in each affected row; sortable columns now include rank, trader, history, verdict, 7-day result, copy result, Dune evidence, and activity.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the new table layout.
+- Next step: Refresh the UI and click a main-table header to sort.
+
+TODO
+- Add more detailed live progress data to the Dune fetch status UI instead of only showing “waiting for all evidence to finish loading.” Include current query/batch, processed/total, stored, failed, remaining, elapsed time, and the latest Dune status message.
+2026-08-21 01:05
+- Step: Changed the CopyTrade decision table default from 25 to 100 traders.
+- Files: `ui/main.tsx`.
+- Decision: The main table now matches the top-100 screening workflow by default; users can still select 25, 50, or 250.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs retain their current selected limit until refreshed.
+- Next step: Refresh the UI and confirm the table says 100 traders.
+
+2026-08-21 01:10
+- Step: Added a Rank column to the CopyTrade decision table.
+- Files: `ui/main.tsx`.
+- Decision: Show the current selected-GMGN-roster rank before each trader; keep the original rank when filtering to tested copy survivors.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the rebuilt UI.
+- Next step: Refresh the UI and verify the Rank column.
+
+2026-08-21 01:15
+- Step: Added GMGN rank to the expanded “Show all activity” table.
+- Files: `ui/main.tsx`.
+- Decision: Keep both activity order and leaderboard rank visible as separate columns.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the rebuilt UI.
+- Next step: Refresh the UI and expand the saved activity table.
+
+2026-08-21 01:20
+- Step: Added 30-day net profit to the expanded activity table.
+- Files: `ui/main.tsx`.
+- Decision: Display GMGN `realized_profit` as a dollar amount alongside activity rank, GMGN rank, and trade count.
+- Agent/model: Codex GPT-5.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Existing browser tabs need a refresh to load the rebuilt UI.
+- Next step: Refresh the UI and expand “Show all activity.”
+2026-08-20 22:20 - Step: Added trade-count-based GMGN fetch progress. Each run now records the expected 30-day trade total, starting stored-trade baseline, current wallet target/start, and exposes current-wallet and all-wallet progress percentages plus separate ETAs. The roster UI now shows both trade coverage and current/full-run remaining time. Existing active runs are not interrupted; new fields apply on the next server start/run. Tests: npm test 320/320.
+2026-08-20 22:28 - Fix: The progress migration had been inserted before older migrations, so databases already at the previous final version skipped it. Appended an idempotent migration at the end, applied it to the live database (schema version 36), and verified the status endpoint returns trade-progress fields. The interrupted run retained its fetched trades.
+2026-08-20 22:42 - Fix: GMGN roster refresh now falls back to the latest saved leaderboard snapshot when the live rank request fails due to network/API availability. Verified POST /api/copytrade/roster/refresh returns the saved 100-wallet snapshot instead of HTTP 502. Tests: 320/320.
+2026-08-20 22:50 - Fix: Fetches were stopping immediately because the live database had skipped the existing `coverage_complete` migration. Added and applied an end-of-chain compatibility migration (schema version 37). The failure is now recorded explicitly instead of appearing as a silent stop; already stored trades remain intact.
+2026-08-21 00:10 - Fix: Dune approval was disabled because the UI used the raw GMGN leaderboard snapshot ID as the roster snapshot ID. The refresh response now uses `roster.snapshotId` for saved stats and Dune selection, while preserving the raw leaderboard ID separately.
+2026-08-21 00:35 - Fix: Verified Dune run 137,345/137,345 targets stored, 0 failed, 0 remaining. The main decision view now loads the persisted Dune status on page load and prominently explains that “Needs data” means Dune was queried but usable coverage/sample thresholds remain unmet.
+2026-08-21 00:50 - Fix: Corrected decision-table Copy test sorting. It now sorts by the displayed delayed simulated median return, instead of the separate portfolio net-P&L ranking metric.
+2026-08-21 01:05 - UI cleanup: Removed the redundant History column from the 30-day decision table. History completeness remains part of verdict logic; Evidence is the visible Dune coverage/match measure.
+2026-08-21 01:20 - UI cleanup: Condensed the 30-day decision view, shortened the page description, replaced the large repeated Dune explanation with a compact status line plus info tooltip, and made the table guide collapsed by default.
+2026-08-21 01:35 - UI cleanup: Removed 7-day and 30-day history columns from the main decision table; those histories remain in each trader’s details. Renamed Copy test to “30d copy test” and clarified it is the delayed result after costs.
+2026-08-21 01:55 - UI cleanup: Rebuilt the research controls as separate GMGN and Dune workflow rows. Each row now has a purpose label, smaller explanation, last-fetched/status metadata, and its action button; export is separated as a utility action.
+2026-08-21 02:15 - Fix: Made Dune Evidence percentage derive directly from the displayed matched/eligible counts. A row such as 57/57 now displays 100.0% consistently; stale or differently scoped cached percentages can no longer contradict the fraction.
+2026-08-21 02:35 - UI cleanup: Standardized fetched/captured timestamps to `DD MON YYYY, HH:MM AM/PM` with uppercase month abbreviations and no seconds, including GMGN screening and Dune workflow status.
+2026-08-21 02:50 - Fix: Removed the two leftover 7-day/30-day row cells that remained after removing their headers. The cells were shifting the table and placing old “GMGN 7-day context” text under the 30-day copy-test column.
+2026-08-21 03:10 - UI cleanup: Integrated the saved GMGN screening result and expandable activity table into the first GMGN screening workflow row. Removed the separate duplicate screening panel.
+2026-08-21 03:40 - Performance fix: Measured a cold `/api/copytrade/results` call at ~5.7 seconds versus ~0.1 seconds from the in-memory cache. Added a persistent SQLite report cache keyed by the data fingerprint, so static reports survive page loads and server restarts while recomputing automatically when source data changes.
+2026-08-21 04:00 - UI improvement: Added simple native hover tooltips to every cell in the 30-day decision table. Tooltips explain rank, trader, verdict, delayed copy result, Dune evidence, holding-time activity, and how to open details.
+2026-08-21 04:15 - UI cleanup: Moved the verdict-count overview from the top of the 30-day decision page to a compact strip directly above the table. Reduced its size and visual emphasis while retaining candidate, watch, needs-data, not-copyable, freshness, and Dune-match counts.
+2026-08-21 04:30 - UI improvement: Recent GMGN and Dune fetch timestamps now use friendly relative labels: Today, Yesterday, or 2–4 days ago. Older fetches retain the full date and time.
+2026-08-21 04:45 - UI cleanup: Renamed the decision-table Activity column to Typical hold and removed the repeated Active evidence / Evidence older than 24h text from each cell. Freshness remains available in the cell tooltip.
+2026-08-21 05:00 - UI cleanup: Decision-table trader cells now show five wallet-address characters instead of three. When no username is available, the address appears only once, with the copy button preserved.
+2026-08-21 05:15 - UI improvement: “Show tested copy survivors only” is now checked by default, so the decision view initially focuses on wallets that survived the configured copy-delay test.
+2026-08-21 05:30 - UI cleanup: Converted the lower Trader evidence area into a table-only deep-dive view by hiding duplicate maintenance, status, explanatory, fetch, retry, export, and filter controls. Its 30-day copy-test and Dune-coverage values now use the same displayed metrics as the main decision table.
+2026-08-21 05:45 - Performance fix: Wallet-stats initial load now renders the saved roster/report immediately after the base SQLite reads. GMGN summaries and Dune evidence refresh in the background instead of keeping the whole decision table behind a spinner. The server-side persistent report cache remains the source of truth.
+2026-08-21 06:00 - UI cleanup: Removed the redundant “How the verdict is decided” explanation panel from the 30-day decision view.
+2026-08-21 06:15 - UI cleanup: Removed the redundant “How to read this table” legend from the 30-day decision view; the table remains self-explanatory through its labels and hover tooltips.
+2026-08-21 06:30 - UI improvement: Added a floating “Top” button that appears after scrolling down and smoothly returns the page to the top.
+2026-08-21 06:45 - UI cleanup: Removed the outdated 7-day-context sentence from the 30-day decision page. The Dune selection label now explains reductions from 100 using history-incomplete and manually-excluded counts.
+2026-08-21 07:00 - UI cleanup: Decision-table trader labels now detect address-like display names and show the wallet only once. Wallet-only rows now show six leading characters, with the copy button retained.
+2026-08-21 07:15 - UI improvement: The 30-day decision winner now shows the full wallet address as a clickable link to the wallet’s GMGN profile.
+2026-08-21 07:30 - UI improvement: The winner card now shows a loading spinner and “Reading saved results…” while the initial report loads, preventing a temporary no-winner state.
+2026-08-21 07:45 - UI copy improvement: Replaced the technical application subtitle with: “Find promising Solana wallets by comparing GMGN performance with realistic delayed-copy backtests.”
+2026-08-21 08:00 - UI copy improvement: Shortened the decision-table label from “% of wallet edge kept” to “% edge kept.”
+2026-08-21 08:15 - UI improvement: Redesigned the 30-day winner card with compact visual metric tiles and bars for copy P&L, GMGN 30-day result, Dune coverage, and edge kept.
+2026-08-21 08:30 - UI cleanup: Removed the extra horizontal padding inside the Trader evidence panel so its expanded contents align with the surrounding decision table.
+2026-08-21 08:45 - UI improvement: Added plain-language hover tooltips to every winner metric. They explain net copy P&L, GMGN 30-day return, Dune price coverage, retained edge, and that large bars are capped visual indicators rather than the raw value.
+2026-08-21 09:00 - Fix: Restored decision-row details opening by keeping the Trader evidence panel open whenever a row has selected a wallet. The modal can no longer be hidden by the panel’s collapsed state.
+2026-08-21 09:15 - UI cleanup: Removed the repeated helper text from verdict cells. Gate, coverage, sample, and delay explanations now appear only in the verdict hover tooltip.
+2026-08-21 09:30 - UI cleanup: Removed the visible usable-price percentage from the main Evidence cells; the exact percentage now appears in the hover tooltip while the count and color remain visible.
+2026-08-21 09:40 - UI wording: Renamed the decision-table filter to “Show positive copy gains only” so its purpose is immediately clear.
+2026-08-21 09:50 - UI wording: Renamed the export control to “Export full table” so it is clear that the complete table is exported, not only positive candidates.
+2026-08-21 10:00 - UI clarity: The winner panel now shows the first six wallet characters. Its portfolio P&L label and tooltip distinguish compounded $100 portfolio results from the decision table’s median per-trade copy return; the table header and tooltip now state that metric explicitly.
+2026-08-21 10:10 - UI navigation: Added a dedicated GMGN link column between Rank and Trader in the 30-day decision table. The link opens the wallet directly without opening the row details.
+2026-08-21 10:20 - UI wording: Removed the unnecessary “capped at 100% for readability” sentence from the GMGN return tooltip.
+2026-08-21 10:30 - UI cleanup: Removed the redundant Dune price coverage metric from the winner panel because winner selection already requires complete Dune coverage. Detailed coverage remains in the table and row details.
+2026-08-21 10:40 - UI fix: Made decision-table row opening explicit and automatically scrolled the GMGN evidence dialog into view, restoring reliable click and keyboard access to trader details.
+2026-08-21 10:50 - UI improvement: Added a “$100 after copy” column after the 30-day copy median. It shows the cash-constrained simulated ending value, including delay, costs, gas, and overlapping-position limits.
+2026-08-21 11:00 - UI polish: Styled the GMGN wallet links in the decision table with readable theme colors, including visited, hover, and keyboard-focus states.
+2026-08-21 11:10 - UI layout: Evenly distributed the main decision-table columns across the available width, while keeping the rank, GMGN, and details columns compact.
+2026-08-21 11:20 - UI fix: Rendered trader evidence dialogs through a document portal so they are independent of the collapsed “Trader evidence” section and always open when a decision-table row is clicked.
+2026-08-21 11:30 - UI improvement: Made the “$100 after copy” decision-table column sortable by simulated ending portfolio value.
+2026-08-21 11:40 - Loading-state fix: Kept the wallet-stats view in its explicit loading state until the initial saved roster, GMGN summaries, and Dune report reads finish, preventing a misleading empty winner/table state during startup.
+2026-08-21 11:50 - UI interaction fix: Added an explicit Open trader details button to every decision-table row, preserving row clicks while providing a reliable direct control for opening evidence.
+2026-08-21 12:00 - Bug fix: Corrected the React portal import used by trader evidence dialogs. The previous import allowed the build but failed at runtime when a row tried to open details.
+2026-08-21 12:10 - UI interaction fix: Added pointer-event handling to decision rows and the detail arrow so mouse clicks reliably open the trader evidence dialog across browser table implementations.
+2026-08-21 12:20 - UI interaction fix: Removed the invalid button role from table rows, which was interfering with native table click handling. Rows remain keyboard-accessible and retain the dedicated detail button.
+2026-08-21 12:30 - UI interaction fix: Added table-level click capture keyed by each row’s wallet address, ensuring row clicks open details even when browser table event dispatch is inconsistent.
+2026-08-21 12:40 - Bug fix: Simplified trader evidence rendering to a direct in-page dialog after confirming row clicks fired but the portal-based dialog was not appearing in the live browser.
+2026-08-21 12:50 - Root-cause fix: Moved the trader evidence dialog outside the legacy hidden maintenance block. The click handler worked, but the dialog JSX was previously unreachable because it lived inside `{false && ...}`.
+2026-08-21 13:00 - UI improvement: Highlighted the current 30-day decision winner row in the main table with a green accent and stronger contrast.
+2026-08-21 13:10 - UI polish: Removed the misleading full-width bar from the winner's portfolio P&L metric, enlarged the value, and added a subtle reduced-motion-safe shine animation.
+2026-08-21 13:20 - UI polish: Simplified the `$100 after copy` column values to whole dollars (or compact whole-dollar K/M/B values), while retaining cents only for amounts below $1.
+2026-08-21 13:35 - UI/data improvement: Added a large colorful delayed-copy $100 capital chart to trader details, using one point per completed copied trade when available and preserving the older daily path as a fallback.
+2026-08-21 13:45 - Chart fix: Added the starting $100 point, made the y-axis adapt to the actual capital range, and corrected negative currency labels so sharp losses and trade-by-trade movement remain visible.
+2026-08-21 13:55 - UI polish: Replaced circular trade markers on the delayed-copy capital chart with thin rectangular bars for a clearer bar-chart appearance.
+2026-08-21 14:05 - Chart redesign: Converted the delayed-copy capital visualization into a conventional vertical bar chart with a zero baseline and one bar per trade.
+2026-08-21 14:15 - Chart fix: Removed artificial negative y-axis padding when all portfolio values are non-negative; real negative capital still renders below zero with red bars.
+2026-08-21 14:25 - UI polish: Replaced the raw date-and-value browser tooltip on chart bars with a styled tooltip showing the trade label, readable date, and prominent portfolio value.
+2026-08-21 14:40 - Detail-view interaction: Moved stored sell history directly below the capital chart and linked chart bars to trade rows with synchronized hover highlighting and row scrolling.
+2026-08-21 14:50 - Detail-view cleanup: Kept the sell-history table directly below the capital chart and moved its explanatory and coverage notes into a separate block below the table.
+2026-08-21 15:05 - Main table improvement: Added a sortable 30-day GMGN PnL column showing GMGN's own realized profit, with its reported return percentage beneath it, clearly separate from the Dune copy results.
+2026-08-21 15:20 - Detail-view filter: Added a checkbox to restrict stored sell history to the current research window, while retaining the option to reveal older saved sells.
+2026-08-21 15:35 - Detail-view diagnostics: Added numbered sell rows and a chart/table reconciliation summary that reports unmatched chart points or table trades, including a warning for legacy charts without trade IDs.
+2026-08-21 15:55 - Chart usability: Widened the trader detail dialog and added mouse-wheel zoom with horizontal scrolling so individual trade bars can be inspected more clearly.
+2026-08-21 - Initial loading: cached the expensive copy-simulation report by wallet scope and period, so reopening the page reuses the saved result and recomputes only when research data changes.
+2026-08-21 - Initial loading follow-up: removed the duplicate 30-day copy-simulation request; the same saved report now populates both decision-view states.
+2026-08-21 - Trade history table: ordered visible sell rows chronologically, oldest first, with trade ID as the stable tie-breaker.
+2026-08-21 - Chart tooltip: preserved each trade’s full ISO timestamp in the after-copy path and display the exact UTC date and time on hover.
+2026-08-21 - Chart zoom: handled wheel zoom across the full chart area in both directions, removed the horizontal scrollbar, and added a Reset 100% control.
+2026-08-21 - Chart wheel interaction: installed a non-passive wheel handler on the complete chart surface so zooming consumes the event and never scrolls the page simultaneously.
+
+2026-08-22 - Candidate Scrutiny sub-tab (task: research/prompts/copytrade-candidate-scrutiny-task.md)
+- Step completed: Built the "Scrutiny" sub-tab that interrogates individually-pinned top candidates against ten fixed thresholds (never re-ranked against each other, no composite score), plus scoped re-fetch/coverage-fill actions for the pinned wallets only.
+- Phase 0 inventory (reused, not duplicated): summarizeTrades/median/mean and computeProfitConcentration (evaluate.ts) reused via the wallet's already-computed CopyTradeReport row; holdSecondsPerSell's result reused via row.riskEvidence.medianHoldSeconds; DORMANT_AFTER_DAYS/MAX_CONCENTRATION_PERCENT/MIN_MEDIAN_HOLD_SECONDS (copyCandidates.ts) imported directly; DEFAULT_COPIER_DELAY_SECONDS/TAIL_THRESHOLD_PERCENT/MIN_COPY_SIMULATION_SAMPLE/computeCopySimulationReport (copySimulation.ts) reused for coverage, coverage-bias, and tail-fragility checks (two read-only calls per wallet: periodDays 90 and full history; computeCopySimulationReport only reads already-stored Dune matches, no network call, no new Dune query shape); splitByDate/suggestSplitDate (stats/holdout.ts) reused as-is for the out-of-sample check; holmCorrection/bootstrapMedianCI/signTest (stats/inference.ts) were in the inventory table but ended up not needed by any of the 11 checks as specified (no CI or corrected p-value is displayed, matching "do not attach a corrected p-value to the ranking" in the task doc) - noted rather than force-using them. One genuinely new small piece: a local readWalletTrades helper in candidateScrutiny.ts, because evaluate.ts's per-wallet completed-trade parsing is folded into the whole-roster report and isn't exported standalone; it mirrors evaluate.ts's exact rule (a sell needs a positive cost basis to count; missing is excluded, never zeroed). Repeat-entry/single-entry grouping and buy/sell-leg counting are also new (nothing existing computed per-token entry counts).
+- Files changed: new src/copytrade/candidateScrutiny.ts (computeCandidateScrutiny, computeCandidateScrutinyBatch, MAX_SCRUTINY_WALLETS=5); src/scripts/server.ts (added GET /api/copytrade/scrutiny and POST /api/copytrade/scrutiny/refresh-trades; the "Fill Dune coverage" button reuses POST /api/copytrade/copy-simulation/run as-is, no new route, per the task doc's explicit instruction); ui/main.tsx (fifth CopyTradeSubTab = 'scrutiny', route parsing, nav button, pin/unpin state persisted to localStorage, "Scrutinize" button added to both Winner and High-Upside cards, full Scrutiny panel rendering ten checks per pinned wallet with visually distinct pass/fail/insufficient badges); ui/styles.css (scrutiny-* classes; insufficient renders amber, fail renders red, pass renders green - three visually distinct states); new tests/copytrade-candidate-scrutiny.test.ts (7 tests: concentration fail plus materially-lower without-token median; negative-median/positive-mean divergence with both figures kept; insufficient vs fail are distinct enum values; zero Dune coverage yields insufficient, never pass, for every coverage-dependent check; out-of-sample split reports both halves and is insufficient when one side is thin; repeat-entry/single-entry trade sets are disjoint and reconstruct the full population; selection-context N/M text and the MAX_SCRUTINY_WALLETS batch cap).
+- Did NOT change: computeCopyCandidates, computeCopyTradeReport, the copy-simulation engine (copySimulation.ts untouched), any Dune query shape, or any existing gate constant. Purely additive and read-only.
+- Thresholds chosen for the ten checks (display-only, not new candidacy gates): coverage fail threshold 50% of full history matched; coverage-bias gap threshold 8pp (near this project's own previously-measured ~8.4pp unmatched-vs-matched big-win gap); tail-fragility fail threshold top-3 trades over 50% of positive simulated return; buy/sell composition pass band 35-65%; copyability threshold derived, not invented, as MIN_MEDIAN_HOLD_SECONDS/DEFAULT_COPIER_DELAY_SECONDS = 4x; repeat-entry/out-of-sample minimum group sample MIN_GROUP_SAMPLE=5 before treating a comparison as more than "insufficient." insufficient and fail are separate ScrutinyVerdict enum members end to end (backend type, JSON payload, CSS class), never collapsed.
+- Live browser check (localhost:4174, real SQLite database, WALLET_STATS_ONLY temporarily flipped to false locally only for this check, then reverted before finishing; confirmed the reverted production build hash matches the original): pinned four real screen_pass wallets manually, since no wallet currently clears every Winners gate (0 of 25 screened pass right now) - consistent with the task's expectation that this view should find current candidates fragile, not flatter them:
+  - 4k92XBen2ofaTYi5ntXX9TVjMPgFaaZRK5K8UmtLKqez (7,692 trades, median +32.04%): coverage FAIL (18.7% of 8,194 full-history round trips Dune-matched), repeat-entry FAIL (repeat-entry median +62.58% n=5,915 vs single-entry -1.21% n=1,777, edge lives in re-entries), copyability FAIL (median hold 33s, 2.2x the 15s delay, needs 4x); concentration/coverage-bias/tail-fragility/divergence/out-of-sample all PASS.
+  - F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt "mercy" (105 trades, median +1.02%): concentration FAIL (best token ANSEM is 66.2% of profit; median without it drops to 0.8%), tail-fragility FAIL (top 3 trades are 73.5% of total positive simulated return, 0 trades above +100%, the fragile-concentration case the task doc's own example warns about), copyability FAIL (median hold 13s, 0.87x the delay, literally shorter than the assumed copy delay).
+  - 8gxNUi3uDnqPdpVciCAf8EDD6Bc1e5spQijXBzwGjRsW (158 trades, median +75.74%): coverage-bias FAIL, direction "optimistic" (unmatched trades are only 5% big winners vs 48% for matched, n=20/148, this wallet's measured return is likely flattered, not conservative).
+  - 7JFSAQbodH8otbLx1K6hzjT3CU7k71VmpReLu4mMNYrV (281 trades, median +14.87%): dormancy FAIL (20.4 days since last trade, past the 14-day threshold, a live-looking candidate that has actually gone quiet), coverage-bias FAIL (optimistic, -22.4pp gap), repeat-entry FAIL (repeat median +122.35% n=151 vs single-entry -16.5% n=130).
+  All four wallets failed at least one check; none failed zero. This matches the task's stated success criterion.
+- Agent name and model: Claude Code, Sonnet 5.
+- Test result: npx tsc -b --noEmit clean (0 errors, backend). npx tsc -p tsconfig.ui.json --noEmit: 102 pre-existing errors before this change (recorded baseline, none touching copytrade code), 95 after; the drop is incidental to line-number shifts in existing unrelated error messages (copySimulationRunStatus/delayExample/gmgnStatsStatus nullability, all pre-existing), not fixes; zero new errors reference scrutiny/candidateScrutiny code, confirmed by grep. npm test: 327 tests, 326 pass, 1 pre-existing failure ("schema initialization creates V1 tables and is idempotent", in tests/schema.test.ts against src/db/schema.ts; both files were already modified/dirty before this task started per git status, confirmed via git diff --stat; not touched by this change). npm run build:ui succeeds; production bundle hash before/after this session's temporary WALLET_STATS_ONLY flip is identical, confirming the flag was correctly reverted to its deployed value (true).
+- Recommendations (not applied, per "if you believe an existing gate is wrong, write it here, do not change it"): (1) DEFAULT_COPIER_DELAY_SECONDS (15s) has never been measured against a real fill; the copyability check surfaces this every time, but the assumption itself should eventually be validated or replaced with a measured distribution. (2) Several real candidates show strong repeat-entry dependence (edge only in re-entered tokens); computeScreenPassCandidates has no gate for this today, and it may be worth considering whether a naive mirror-copier, which would not reproduce position-adding, should be excluded or flagged upstream rather than only surfaced downstream in Scrutiny. (3) The coverage-bias check found "optimistic" bias (unmatched trades skew toward losers, inflating the measured return) on two of the three small-sample wallets tested here, the opposite direction from the project's previously-documented "conservative" 20.5%/12.1% finding, suggesting the bias direction is wallet-dependent and should not be assumed to run one way in aggregate reporting elsewhere in the app.
+- Errors or unresolved items: None blocking. The refresh-trades and fill-coverage buttons were wired and route-tested via curl and manual pin, but not exercised end-to-end through a live GMGN/Dune round trip in this session, since that takes several minutes per the task doc's own estimate and risks real API rate limits; the underlying routes are direct reuses of already-tested existing machinery (startCopyTradeFetch scope:'single', and the unmodified copy-simulation/run route), which the task doc's own "Scoped re-fetch" section treats as sufficient reuse.
+- Next step: None required; feature complete per task doc. Optionally exercise the two scoped-refresh buttons live in the browser against a wallet with known-stale data to confirm the per-wallet outcome message wording reads well in practice.
+
+2026-08-22 - Follow-up: exposed Scrutiny in lightweight mode (user request; WALLET_STATS_ONLY was hiding it)
+- Step completed: `WALLET_STATS_ONLY=true` (the deployed default) previously hid the entire CopyTrade sub-nav, including the new Scrutiny tab, behind a single static "CopyTrade · GMGN wallet stats" label, and a mount/hashchange effect force-redirected any other route back to `#copytrade/wallet-stats`. Root cause of the deepest layer: `.wallet-stats-only #copytrade { display: none !important; }` in styles.css hides the entire `#copytrade` section (which houses Scrutiny's content) whenever lightweight mode is on, regardless of React state. Made Scrutiny reachable in lightweight mode without exposing the other three research sub-tabs (research/forward-validation/top-callers stay hidden, matching the existing lightweight-mode intent).
+- Files changed: `ui/main.tsx` (added `WALLET_STATS_ONLY_VISIBLE_SUBTABS = ['wallet-stats', 'scrutiny']`; initial-route and hash-redirect logic now allow either instead of forcing wallet-stats always; the top-level nav in lightweight mode now renders two buttons, "CopyTrade · GMGN wallet stats" and "CopyTrade · Scrutiny", both driving `navigateCopyTradeSubTab`; `<main>` gets a `lightweight-scrutiny` class when `WALLET_STATS_ONLY && copyTradeSubTab === 'scrutiny'`; the Scrutiny intro copy no longer references the (hidden, in this mode) Winners cards); `ui/styles.css` (`.wallet-stats-only.lightweight-scrutiny #copytrade { display: block !important }` and `.wallet-stats-only.lightweight-scrutiny #copytrade-wallet-stats { display: none !important }` so the two sections swap cleanly instead of both showing at once).
+- Live browser check (localhost:4175, real database): loaded in lightweight mode, confirmed only "GMGN wallet stats" and "Scrutiny" appear in the top nav (not the other three); clicked into Scrutiny, added F5jWYuiDLTiaLYa54D88YbpXgEsA6NKHzWy4SN4bMYjt via the manual-entry form, got the full ten-check report back (same result as the original session's check, confirming no regression); switched back to "GMGN wallet stats" and confirmed its content still renders and Scrutiny's is hidden.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` still at 95 errors (same as the prior entry's post-change baseline, zero new). `npx tsc -b --noEmit` clean. `npm test`: 327 tests, 326 pass, same 1 pre-existing unrelated failure. `npm run build` succeeds.
+- Agent name and model: Claude Code, Sonnet 5.
+- Errors or unresolved items: None. Ad-hoc local test servers (ports 4174/4175, and one pre-existing leftover process on 4173 unrelated to this session) were stopped before finishing; the user's own dev server on 5173 was not running at the time and was untouched.
+- Next step: None required.
+
+2026-08-21 23:50:11 -07:00 - Added GMGN Pattern Discovery outcome-coverage export
+- Step completed: Added a read-only `/api/copytrade/pattern-discovery/export` route and separate CopyTrade Pattern Discovery submenu. Wallet selection is predeclared by `coverage_complete=1`, `truncated=0`, and matching period; final inclusion requires exact 100% copy-simulation outcome coverage, never returns.
+- Files changed: `src/copytrade/patternDiscovery.ts`, `src/scripts/server.ts`, `tests/copytrade-pattern-discovery.test.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Decision made and reason: Kept Pattern Discovery separate from the local-history 100% view and labeled it explicitly as outcome coverage, not local history coverage or profitability. The shared engine receives normalized JSON only.
+- Agent name and model: Codex, GPT-5.
+- Test result: `npm run build:server` pass; `npm run build:ui` pass; focused crypto tests 4/4 pass.
+- Errors or unresolved items: Python runner is not configured (`python` not recognized, `py -3` reports no installed Python, workspace venv paths contain no Python executable). Required graph update blocked with `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Next step: Use the visible JSON download plus the documented two-command Python fallback after installing/configuring the shared package runtime.
+
+2026-08-21 23:51:30 -07:00 - Final verification for Pattern Discovery integration
+- Step completed: Re-ran `npm run build`, focused Pattern Discovery/local-coverage tests, JSON config parse, and diff whitespace checks.
+- Files inspected or changed: Same crypto adapter/view/test files listed above; no unrelated project files changed.
+- Decision made and reason: Stop at the requested narrow integration because the read-only export, separate UI route, and JSON-only shared adapter are buildable and tested where runtimes are available.
+- Agent name and model: Codex, GPT-5.
+- Test result: `npm run build` pass; focused crypto tests 4/4 pass; `crypto.json` parses; `git diff --check` clean apart from normal line-ending warnings.
+- Errors or unresolved items: Shared Python tests remain unrun because no Python executable is installed/configured; graphify update remains blocked by the uv cache collision recorded above.
+- Next step: Configure Python/uv cache before running the documented shared adapter and engine commands.
+
+2026-08-22 00:55:00 -07:00 - Fixed Pattern Discovery route visibility fall-through
+- Step completed: Corrected lightweight route CSS so `#copytrade`, `#copytrade-wallet-stats`, and `#copytrade-fully-covered` are hidden while `#copytrade-pattern-discovery` is shown with `!important`. This prevents the generic Top-trader copy research panel from masking Pattern Discovery.
+- Files changed: `ui/styles.css`, `progress.md`.
+- Decision made and reason: Kept the fix strictly to route visibility; the existing Pattern Discovery loader and export endpoint were already wired correctly.
+- Agent name and model: Codex, GPT-5.
+- Test result: `npm run build` passed; focused Pattern Discovery tests 2/2 passed; CSS selector verification passed. Live endpoint check returned HTTP 200 with 4 exact-coverage wallets and 126 normalized events, excluding 93 wallets below exact coverage.
+- Errors or unresolved items: No dedicated UI test framework exists; graphify update remains subject to the existing uv cache collision.
+- Next step: None for this bug fix.
+
+2026-08-22 00:55:30 -07:00 - Graphify verification
+- Step completed: Attempted `uvx --from graphifyy graphify update crypto` from the Vantage repository root after the CSS fix.
+- Files changed: `progress.md` only for this entry.
+- Decision made and reason: No further source changes; the required route fix and verification are complete.
+- Agent name and model: Codex, GPT-5.
+- Test result: Graphify was blocked before execution with `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Errors or unresolved items: Graph remains stale because of the uv cache collision.
+- Next step: None.
+
+2026-08-22 - Bug fix: Scrutiny silently dropped any wallet ranked outside the top 25 roster
+- Step completed: User reported "No scored data yet for: C6x…. Fetch their trades first." for a pinned wallet with recent (yesterday) trades. Root cause: GET /api/copytrade/scrutiny hardcoded `traderLimit: 25` when building screenReport/historicalConsistency (copied from the /winners route's pattern), and listRosterWallets truncates to the top N by rank_position after the SQL query — so any pinned wallet ranked below #25 in the current roster snapshot silently had no row at all, regardless of how much trade history existed for it. Confirmed live: the wallet (C6xQ5Tvysx8gyHRxXgknYnnxZybSMLJWm95m2pnFgQ19, 397 trades) was absent from a traderLimit:25 report but present in a traderLimit:100 one. Unlike /winners (a deliberately-paginated top-N ranked view with its own UI selector), Scrutiny interrogates individually pinned wallets — there is no reason a wallet's own merits (dormancy, concentration, etc.) should be unavailable just because it ranked outside an arbitrary top-25 default.
+- Files changed: `src/scripts/server.ts` — added `SCRUTINY_ROSTER_LIMIT = 500` (covers the full ~100-113-wallet roster with headroom) and use it in place of the hardcoded `25` for both the screenReport and historicalConsistency calls inside the `/api/copytrade/scrutiny` route only. No other route touched.
+- Live verification against the user's own running dev backend (localhost:4173, via tsx watch auto-reload — confirmed picked up the fix without a manual restart): `/api/copytrade/results?limit=500` now returns the previously-missing wallet with 397 trades; `/api/copytrade/scrutiny?wallets=<that wallet>` now returns `missingWallets: []` and a full ten-check report ("selected as one of 0 candidates from 100 wallets scanned").
+- Test result: `npx tsc -b --noEmit` clean. `npm test`: 327 tests, 326 pass, same 1 pre-existing unrelated schema.test.ts failure.
+- Agent name and model: Claude Code, Sonnet 5.
+- Errors or unresolved items: None.
+- Next step: None required.
+
+2026-08-22 - Fix: prefer a usable bundled Python runtime for Pattern Discovery
+- Step completed: Extended runner resolution while keeping `PATTERN_DISCOVERY_PYTHON` highest priority. Workspace `.venv` candidates are checked first, followed by configurable `PATTERN_DISCOVERY_BUNDLED_PYTHON`/`PATTERN_DISCOVERY_RUNTIME_ROOT` candidates, project-local `.runtime` bundles, and a portable `USERPROFILE`/`HOME`-derived Codex runtime candidate at `.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe`. Missing-NumPy failures now return a precise dependency/configuration error instead of silently presenting a report.
+- Files changed: `src/copytrade/patternDiscoveryRunner.ts`, `tests/copytrade-pattern-discovery-runner.test.ts`, `progress.md`.
+- Test result: Bundled Python imports NumPy 2.3.5; SciPy is absent but optional. Corrected CLI run against the current 126-row normalized GMGN export produced exact counts: `discovered candidate=0`, `validation survivor=0`, `rejected=0`, `insufficient data=1`; feature allow-list `gmgn-v2-pre-event-only`; 11 leakage fields were rejected. Resolver verification selected `C:\Users\hamed\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe` from the supplied `USERPROFILE` without hard-coding that path. `npm run build` passed; focused runner/export tests passed 6/6.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: `uvx --from graphifyy graphify update crypto` remains blocked by `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Next step: None for this runtime fix.
+
+2026-08-22 - Fix: render successful zero-pattern Pattern Discovery reports
+- Step completed: Confirmed the API wrapper is `{ report, execution }` and the UI already assigns `result.report`; the actual missing UX was filtering the sole `feature_gate` / `insufficient data` pattern out of the visible table without showing its reason. Added explicit completed-report messaging, prominent insufficient-data reasons, runtime/output metadata, and an export-only message stating that the engine has not run yet. Zero candidates/survivors no longer suppress the report summary.
+- Files changed: `ui/main.tsx`, `progress.md`.
+- Test result: `npm run build` passed; focused Pattern Discovery runner/export tests passed 6/6. The emitted Vite bundle contains the new completed-report, insufficient-reason, and engine-not-run strings, confirming the build output is current. Browser/server sessions must be refreshed/restarted if they still hold an older Vite bundle.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Required `uvx --from graphifyy graphify update crypto` remains blocked by `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Next step: Reload the app (and restart the dev server if it is serving a stale bundle), click Run shared discovery, and the 0/0/0/1 summary plus the feature-gate reason should appear.
+
+2026-08-22 - UI cleanup: remove the CopyTrade local-history submenu
+- Step completed: Removed the visible `CopyTrade · 100% local history` buttons, fully-covered route type/loader/state, dedicated panel, and lightweight CSS visibility rules. Legacy `#/copytrade/fully-covered` navigation now safely maps to `wallet-stats`. Preserved the read-only `/api/copytrade/fully-covered` endpoint, `fullyCovered.ts` reader, and backend tests.
+- Files changed: `ui/main.tsx`, `ui/styles.css`, `progress.md`.
+- Test result: `npm run build` passed; relevant tests passed 7/7 (`copytrade-fully-covered`, Pattern Discovery runner, and Pattern Discovery export tests). No backend or database changes.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Graphify query/update remains blocked. The required update command `uvx --from graphifyy graphify update crypto` failed with `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Next step: None for this focused removal.
+
+2026-08-22 - Feature: Run the shared Pattern Discovery engine from GMGN Pattern Discovery
+- Step completed: Added the project-local runner and `POST /api/copytrade/pattern-discovery/run/report`. It reads the existing exact-100%-outcome normalized export, writes an isolated JSON handoff under `research/shared-pattern-discovery/runs/crypto`, invokes `shared_pattern_discovery.cli` with project `crypto`, minimum-N, chronological validation, and a reserved 20% holdout, then returns the parsed report. The UI now exposes “Run shared discovery,” loading/error states, candidate/survivor/rejected/insufficient counts, pattern rows, and discovery/validation/untouched-holdout metadata. The engine still receives JSON only and makes no database or network calls.
+- Files changed: `src/copytrade/patternDiscoveryRunner.ts`, `src/scripts/server.ts`, `tests/copytrade-pattern-discovery-runner.test.ts`, `ui/main.tsx`, `progress.md`.
+- Test result: `npm run build` passed; focused Pattern Discovery tests passed 5/5. Live export at 30 days returned `selected_wallet_count=4`, `exported_rows=126`, `excluded_wallets_not_exactly_100_percent=93`. Live run endpoint returned HTTP 503 before report generation because the fallback Python interpreter lacks `numpy`; exact status counts are therefore unavailable, not zero. The response preserves the normalized-export/download fallback and identifies `PATTERN_DISCOVERY_PYTHON` or a workspace `.venv` as configuration points.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Required graphify refresh was attempted with `uvx --from graphifyy graphify update crypto` and blocked with the exact error `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`. No source database was modified.
+- Next step: Install/configure Python dependencies for the shared engine (at minimum `numpy`, plus the package’s declared scientific dependencies), then rerun the report endpoint to obtain candidate/survivor/rejected/insufficient counts.
+
+2026-08-22 - Verification follow-up: hardened Pattern Discovery run-path resolution
+- Step completed: Updated the runner to resolve the root-level shared project correctly from both source/dev and compiled-server layouts, and added the workspace-root `.venv` fallback alongside project/shared `.venv` candidates.
+- Files changed: `src/copytrade/patternDiscoveryRunner.ts`, `progress.md`.
+- Test result: `npm run build` passed; focused Pattern Discovery tests passed 5/5. The live 30-day export remains `4` selected wallets, `126` normalized rows, and `93` excluded below exact coverage; the live engine report remains unavailable because the fallback Python runtime lacks `numpy`.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Retried `uvx --from graphifyy graphify update crypto`; it remains blocked by `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Next step: Configure the shared engine runtime, then rerun the endpoint for real status counts.
+
+2026-08-22 - Critical follow-up: block GMGN outcome and post-event feature leakage
+- Step completed: Replaced the crypto allow-list with `gmgn-v2-pre-event-only` and `feature_source=features`; the GMGN adapter now requires an explicit `row.features` object containing only wallet/token/chain/signal identifiers. The shared validator rejects extra feature keys, and the engine reads the explicit feature view instead of legacy top-level fields whenever present. With no numeric pre-event features in the current GMGN export, the engine emits one explicit `insufficient data` feature-gate status rather than valid-looking patterns. The UI now states that returns, hold duration, delays, fees, outcomes, and post-event matching fields are rejected leakage, not valid discovery features.
+- Files changed: `research/shared-pattern-discovery/configs/crypto.json`, `research/shared-pattern-discovery/shared_pattern_discovery/validation.py`, `research/shared-pattern-discovery/shared_pattern_discovery/engine.py`, `research/shared-pattern-discovery/shared_pattern_discovery/exporters/gmgn.py`, `research/shared-pattern-discovery/tests/test_engine.py`, `research/shared-pattern-discovery/tests/test_gmgn_exporter.py`, `crypto/src/copytrade/patternDiscovery.ts`, `crypto/ui/main.tsx`, `progress.md`.
+- Test result: `npm run build` passed; focused crypto Pattern Discovery tests passed 5/5. The live 30-day export remains 4 exact-coverage wallets and 126 normalized rows, with 93 wallets excluded below exact coverage. The live report rerun returned HTTP 503 before engine execution because the configured `python` runtime has no `numpy`; corrected status counts are therefore not produced by this environment. The prior 8 survivors are invalidated by this fix and must not be presented as valid patterns.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Required `uvx --from graphifyy graphify update crypto` was retried and remains blocked by `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`. Python shared-engine tests could not run without the missing dependency.
+- Next step: Install/configure the shared engine’s declared Python dependencies, rerun the CLI/report, and verify the expected no-valid-pattern/insufficient-data result from the corrected export.
+
+2026-08-22 - Bug fix: "Fill Dune coverage" button could appear permanently stuck on "Filling…"
+- Step completed: User asked whether the Scrutiny "Fill Dune coverage" button (shown greyed out/disabled with "Filling Dune coverage…" label) was actually doing anything. Confirmed via `GET /api/copytrade/copy-simulation/status` on the user's own running backend that the underlying Dune run had genuinely completed (521/521 targets stored across 4 batches, ~51s) — so the work itself was fine. The bug: `fillScrutinyCoverage`'s busy-guard and the button's disabled/label condition both also checked `copySimulationRunBusy`, a state flag owned entirely by a *different*, pre-existing button ("Run simulation" / "Fetch missing", unrelated to Scrutiny). If that flag were ever stuck true for any reason in that other code path, my Fill Dune coverage button would stay disabled and mislabeled even after its own request had long since resolved — despite the backend already enforcing the real mutual-exclusion rule via a 409 response, which `fillScrutinyCoverage` already handles gracefully.
+- Files changed: `ui/main.tsx` — removed `copySimulationRunBusy` from both the `fillScrutinyCoverage` early-return guard and the button's `disabled`/label expression, leaving only `scrutinyFillBusy` (which is exclusively owned and correctly cleared by this function's own try/finally). The backend's existing 409 handling remains the sole real-conflict guard, matching how every other action button in this app already relies on server-side 409s rather than client-side cross-coupled flags.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` unchanged at 95 errors (same baseline, zero new). `npm run build:ui` succeeds. `npm test`: 327 tests, 326 pass, same 1 pre-existing unrelated failure.
+- Agent name and model: Claude Code, Sonnet 5.
+- Errors or unresolved items: Not reproduced from a cold state (the user's live session already showed the underlying work as complete by the time this was investigated), so it's unconfirmed whether this exact coupling was the actual cause in their case versus the button simply not having re-rendered yet when the screenshot was taken — but the coupling was a real latent bug regardless and is now removed.
+- Next step: None required; ask the user to confirm the button clears correctly next time they run it.
+
+2026-08-21 - Added CopyTrade fully-covered local-history view
+- Step completed: Added read-only `GET /api/copytrade/fully-covered` with a default 30-day period. It filters strictly to Solana rows with `coverage_complete = 1`, `truncated = 0`, and matching `requested_period_days`; stored trade count is derived from normalized `copytrade_trades`. Added a CopyTrade hash route/submenu and table labeled “100% verified local history coverage,” with an explicit warning that this is not 100% Dune outcome coverage. No schema, Dune, GMGN fetch, shared engine, or Unusual Whales files were changed.
+- Files changed: `src/copytrade/fullyCovered.ts`, `src/scripts/server.ts`, `tests/copytrade-fully-covered.test.ts`, `ui/main.tsx`, `ui/styles.css`.
+- Test result: focused test 2/2 pass; `npm run build:server` pass; `npm run build:ui` pass; `npm test` 329 tests, 328 pass, 1 pre-existing `tests/schema.test.ts` failure because the expected table list omits the already-existing `copytrade_report_cache` table. The new fully-covered tests pass.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Required initial graphify query was attempted but blocked by `error: failed to create directory C:\Users\hamed\AppData\Roaming\uv\python: Access is denied.` Graph update remains to be attempted after this change. No live database was modified or queried by the new feature.
+- Next step: Attempt the required graphify update and report its exact result.
+
+2026-08-21 - Verification follow-up
+- Step completed: Attempted the required post-change graph refresh from the repository root with `uvx --from graphifyy graphify update crypto`.
+- Files inspected or changed: `progress.md` only for this entry; no source files changed during verification.
+- Decision made and reason: Kept the implementation unchanged because build and focused tests pass and the full-suite failure is the pre-existing schema expectation mismatch.
+- Agent name and model: Codex, GPT-5.
+- Test result: Graph refresh was blocked before execution with the exact error `error: failed to create directory \`C:\Users\hamed\AppData\Local\uv\cache\`: Cannot create a file when that file already exists. (os error 183)`.
+- Errors or unresolved items: Graphify remains stale because the uvx cache path is blocked; no database or external project was modified.
+- Next step: None for this focused implementation; retry graphify after the local uv cache collision is resolved.
+
+2026-08-22 - Feature: Scrutiny auto-pins the current candidates on first visit
+- Step completed: User pointed out the wallet-stats decision table already surfaces a "candidates" concept (the "30d candidate" badge / "N candidates" count, driven by `unifiedTraderRows`'s `verdict === 'Tested candidate'`) — available even in lightweight mode — so Scrutiny should default to interrogating those rather than requiring the reader to manually pin every wallet. Implemented: the first time the Scrutiny tab is opened with nothing pinned, it auto-pins up to `MAX_SCRUTINY_WALLETS_UI` (5) current candidates, then never re-fires (so a reader who deliberately unpins everything is left alone). In full (non-lightweight) mode it uses the actual Winners candidates (`copyWinners.candidates`); in lightweight mode — where the Winners computation is skipped — it reuses the wallet-stats page's own already-visible "Tested candidate" verdict instead of computing a second, parallel candidate concept.
+- Bug caught and fixed before shipping: the first implementation depended on `unifiedTraderRows.length` to know when data was ready, but that length is constant (one entry per known wallet) from the moment the roster loads — well before GMGN stats/simulation data has actually settled — so the effect fired once, too early, found zero 'Tested candidate' rows, and never re-checked. Switched the dependency to the existing `walletStatsReady` flag (which the wallet-stats loading effect already flips true only once its data has genuinely finished), and made the Scrutiny tab trigger the same wallet-stats loading sequence itself when opened directly (without first visiting the GMGN wallet-stats tab), so `walletStatsReady` has something to become true from.
+- Files changed: `ui/main.tsx` only — added `scrutinyAutoPinnedRef`, the auto-pin `useEffect` (placed after `unifiedTraderRows`'s own definition, since it reads that value and hooks execute top-to-bottom), and extended the `copyTradeSubTab === 'scrutiny'` branch of the existing subtab-loading effect to also kick off `loadCopyTradePage`/`loadGmgnStats`/`loadCopySimulation(...,30)` and set `walletStatsReady` when in lightweight mode. No backend change.
+- Live verification (fresh test instance, port 4176, cleared localStorage, real database): navigated directly to `#copytrade/scrutiny` in lightweight mode with no prior visit to wallet-stats and nothing pinned — confirmed all three currently-qualifying "30d candidate" wallets (C6xQ5T…, 6yaPaP…, 2rD4gB…) were auto-pinned and their full ten-check reports rendered, without any manual action.
+- Note: while investigating, confirmed `ui/main.tsx` is being concurrently edited by something else in this session/environment (a `'fully-covered'` sub-tab and other unrelated content appeared mid-session that this agent did not add) — all edits here were applied as precise, uniquely-matched patches, and diffs were re-verified against the file's live content immediately before each edit to avoid clobbering concurrent work.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` unchanged at 95 errors (same baseline, zero new). `npm run build:ui` succeeds. `npm test`: 329 tests (2 more than this feature's prior entry, from the concurrent unrelated work), 328 pass, same 1 pre-existing schema.test.ts failure.
+- Agent name and model: Claude Code, Sonnet 5.
+- Errors or unresolved items: None.
+- Next step: None required.
+
+2026-08-22 - Feature: Leakage-safe GMGN pre-event discovery features
+- Step completed: Added prior wallet trade count, prior token trade count, and prior wallet buy volume aggregates to the explicit pattern-discovery features object. Aggregates use copytrade_trades rows strictly before each buy, with observed_timestamp plus source id as the deterministic cutoff.
+- Files changed: `src/copytrade/copySimulation.ts`, `src/copytrade/patternDiscovery.ts`, `tests/copytrade-pattern-discovery.test.ts`, `../research/shared-pattern-discovery/configs/crypto.json`.
+- Decision made and reason: Used only locally recorded pre-event trade history; excluded returns, hold time, fees, Dune matching, exits, and all post-event fields to preserve leakage safety.
+- Test result: Server build passed; focused pattern-discovery tests 3/3 passed. Full build and shared-engine tests remain to be run.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Required graphify query/update remains blocked by the existing uv cache collision (`C:\Users\hamed\AppData\Local\uv\cache` is a file).
+- Next step: Run full crypto build and shared-pattern-discovery tests, then attempt the mandatory graph update and report results.
+
+2026-08-22 - Verification: Leakage-safe GMGN pre-event discovery features
+- Step completed: Verified the implementation after the focused test; full crypto build completed and mandatory graph refresh was retried.
+- Files inspected or changed: `src/copytrade/copySimulation.ts`, `src/copytrade/patternDiscovery.ts`, `tests/copytrade-pattern-discovery.test.ts`, `../research/shared-pattern-discovery/configs/crypto.json`, `progress.md`.
+- Decision made and reason: Kept the minimal three-feature patch; no current/outcome fields were admitted to the shared-engine allow-list.
+- Test result: `npm run build` passed; focused `copytrade-pattern-discovery` tests passed 3/3. Shared Python tests could not run because the configured bundled Python has no `pytest` module.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: `uvx --from graphifyy graphify update crypto` remains blocked before execution by `C:\Users\hamed\AppData\Local\uv\cache` being a file (`os error 183`).
+- Next step: User can restart the API process and run Pattern Discovery again; the report should now contain numeric pre-event features.
+
+2026-08-22 - UI: Simplify Pattern Discovery results
+- Step completed: Replaced the raw feature/condition table and repeated methodology disclaimer with plain-English result cards, a discovery-to-validation flow, readable rule descriptions, status badges, and sample-size summaries.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision made and reason: This is an internal test system; keep the visible UI focused on what was found and how many rows support it, while leaving technical details collapsed.
+- Test result: `npm run build:ui` and `npm run build:server` passed.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Mandatory graphify refresh remains blocked by the existing uv cache collision (`C:\Users\hamed\AppData\Local\uv\cache` is a file).
+- Next step: Restart the API/dev server and hard-refresh Pattern Discovery to load the simplified view.
+2026-08-22 - Fetch audit diagnostics: persisted per-wallet and per-run page counts, inserted rows, duplicates, malformed rows, and daily-cap skips in both latest coverage and immutable coverage events. These diagnostics will be available from the next GMGN refetch onward.
+
+2026-08-22 - UI: Collapse Pattern Discovery source data and persist reports
+- Step completed: Wrapped the raw event table in a closed `Source data` details section; restored Pattern Discovery reports from period-specific localStorage and saved successful runs.
+- Files changed: `ui/main.tsx`, `progress.md`.
+- Decision made and reason: Keep rule results visible while making the audit table optional; key reports by period days so 30-day and 90-day results do not overwrite each other.
+- Test result: `npm run build:ui` passed; `npm run build:server` passed.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Mandatory graphify refresh remains blocked by the existing uv cache collision (`C:\Users\hamed\AppData\Local\uv\cache` is a file).
+- Next step: Report build results to the user.
+
+2026-08-22 - UI: Enforce collapsed Pattern Discovery source data
+- Step completed: Added explicit React-controlled open state defaulting to false for the raw source-event details panel.
+- Files changed: `ui/main.tsx`.
+- Decision made and reason: The audit table must remain available but never expand automatically when the export refreshes or the page rerenders.
+- Test result: Pending final UI/server build.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: The browser screenshot was using an older visible bundle; restart the dev server and hard-refresh after rebuilding.
+- Next step: Verify the new bundle in the running browser.
+
+2026-08-22 - UI: Simplify Pattern Discovery rule cards
+- Step completed: Replaced repetitive rule sentences and long decimal values with compact rule cards showing the feature, direction/range, color-coded result, and older/newer sample counts.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision made and reason: The page should communicate the observed relationship at a glance instead of exposing raw engine serialization.
+- Test result: Pending final UI/server build.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Graphify refresh remains blocked by the existing uv cache collision.
+- Next step: Rebuild and hard-refresh the browser.
+
+2026-08-22 - UI: Label Pattern Discovery effect units
+- Step completed: Distinguished correlation coefficients from bucket-rule outcome differences; bucket cards now show `pts` and correlation cards show `CORRELATION`.
+- Files changed: `ui/main.tsx`.
+- Decision made and reason: A generic `RESULT` label made `-104` look like a correlation coefficient even though it is a difference in the simulated-return outcome.
+- Test result: Pending final UI/server build.
+- Agent name and model: Codex, GPT-5.
+- Errors or unresolved items: Graphify refresh remains blocked by the existing uv cache collision.
+- Next step: Rebuild and hard-refresh the browser.
+2026-08-22 - Expanded verdict-pill tooltips with the reason for each 30-day status and the refresh action for stale or incomplete evidence.
+2026-08-22 - Clarified the stale-history tooltip to name the exact visible action: click “Fetch top 100” to refresh GMGN data and recalculate the verdict.
+
+2026-08-22 - Pre-simulation elimination triage: new "Which wallets can we stop chasing?" panel
+- Step completed: Added a wallet-level triage that decides which wallets can be dropped from further Dune investment now, using data already in hand, versus which still need it. A wallet is eliminated only when BOTH hold: (1) trustworthy — complete GMGN history, >=100 trades (reuses RULES.minTrades), and 100% Dune coverage, so a mid-coverage "loser" is never eliminated on its numbers alone (this project already measured unmatched trades are ~2x more likely to be >100% winners); and (2) a bad-outcome signal fires — strongly negative 30d GMGN P&L (<=-20%), a negative delayed-copy simulated median (post fee/gas/slippage), or median hold time shorter than the 15s copier delay. Never re-ranks candidates; only ever narrows the pool that still needs Dune work.
+- Files changed: `src/copytrade/eliminationFilter.ts` (new: `computeEliminationReport`, `estimateDuneRefetchDuration`), `src/scripts/server.ts` (new `GET /api/copytrade/elimination`, reusing `computeCopyTradeReport`/`computeCopySimulationReport` read-only, no new Dune/GMGN calls triggered), `ui/main.tsx` (new temp panel above the GMGN wallet-stats panel, gated on `copyTradeSubTab === 'wallet-stats'`), `ui/styles.css` (see below), `tests/copytrade-elimination-filter.test.ts` (new, 10 tests).
+- Decision made and reason: `duneMissedTrades`/target counts are only summed over survivors that already have simulation data (`measuredDuneTargetsRemaining`); wallets never simulated are counted separately (`survivorsNeverSimulatedCount`) rather than folded in as 0, so the refetch-time estimate is an honest lower bound, not a guess. The Dune refetch-time estimate reads real `copytrade_copy_simulation_runs` history (requested_at/completed_at/trade_refs count) over the last 20 completed runs and falls back to a seeded rate (2,941s/150 targets from this project's own prior run) only when no completed runs exist yet — mirrors the existing GMGN fetch-estimate pattern in `estimate.ts` rather than inventing a new one.
+- CSS bug found and fixed along the way: two separate route-visibility mechanisms in `ui/styles.css` allow-list `.menu-section` ids explicitly — `.routed-view.page-copytrade #id { display: block }` (line ~57) and a much higher-specificity `.focused-view .menu-section:not(#id)...` exclusion chain (line 38). A new top-level `.menu-section` id must be added to BOTH or it silently renders with `display: none` despite being correctly mounted in the DOM (confirmed via `document.getElementById` returning the node with `getComputedStyle().display === 'none'`) — cost real debugging time live in the browser before the cause was found. Added `#copytrade-elimination` to both.
+- Test result: `npx tsc -b --noEmit` clean (0 errors, backend). `npx tsc -p tsconfig.ui.json --noEmit` unchanged at 102 pre-existing errors both with and without this change (verified by temporarily reverting just this feature's UI edits and re-running tsc) — confirmed these are all pre-existing from concurrent work, none introduced here. `npm test`: 345 tests, 344 pass; the 1 failure (`schema initialization creates V1 tables and is idempotent`, missing `copytrade_report_cache` from the expected-tables list) is pre-existing schema drift unrelated to this change. `npm run build` (server+UI) clean. Live-verified in the running dev server against the real database: 100/100 wallets checked, 0 eliminated (correct — no wallet currently has 100% Dune coverage, so nothing is trustworthy enough to eliminate yet), 97 survivors still need Dune coverage, estimated refetch time 17.6h for 50,151 known targets measured from 20 real completed runs at 1.3s/target.
+- Agent name and model: Claude Sonnet 5 (claude-sonnet-5), Claude Code.
+- Errors or unresolved items: `STRONGLY_NEGATIVE_PNL_PERCENT = -20` is a judgment call, not a measured threshold — exposed as a named constant for later revisiting. Silent GMGN omissions (rows GMGN never returned at all, not flagged truncated) remain unmeasured and are explicitly not modeled by this filter, per the earlier finding that `dailyCapped` is only aggregated at the run level (not per-wallet) and `malformed` counts are not persisted anywhere at all.
+- Next step: If elimination is to start actually skipping wallets in the real Dune backfill queue (not just reporting), that needs an explicit follow-up — this panel is read-only triage only, it does not yet change what `/api/copytrade/copy-simulation/run` fetches.
+
+2026-08-22 - Review of "Fetch audit diagnostics" work + fixed all 102 UI typecheck errors
+- Step completed (review): Reviewed the concurrent agent's fetch-audit diagnostics work (per-wallet malformed_rows/duplicate_rows/inserted_rows/daily_capped_rows/pages_fetched persisted in both `copytrade_wallet_coverage` and the append-only `copytrade_wallet_coverage_events`). Logic is correct: counters accumulate per-page inside `fetchAndStore` in `src/copytrade/fetch.ts` and are passed through `recordCoverage` on every stop path, including the rate-limit early-return. Two gaps found: (1) the same migration batch added `copytrade_report_cache` without updating `tests/schema.test.ts`'s expected-table list, breaking the schema idempotency test — fixed by adding the missing entry. (2) The new diagnostic columns have zero test coverage and are not read by any API route or UI yet — flagged as a follow-up, not fixed here (out of scope for this pass).
+- Step completed (102 UI errors): All pre-existing `npx tsc -p tsconfig.ui.json --noEmit` errors are fixed; 0 remain. Root causes were: (a) ~95 of them lived inside four `{false && <div>...</div>}` dead-code blocks in `ui/main.tsx` (lines formerly ~4289-4313, ~4446-4460, ~4462-4498) — an old "GMGN wallet summary" workflow (Refresh GMGN top 100 / Fetch missing stats / old Dune preflight+report UI) that had been disabled wholesale rather than removed, superseded by the current "30-day decision" consolidated panel (confirmed the old buttons have no live counterpart anywhere else before deleting — this also explains the earlier unresolved "Refresh GMGN top 100 button not working" report: the button was never broken, it was inside dead markup). (b) A genuinely impossible comparison `completedStats.status === 'rate_limited'` in `runFullResearchUpdate` — the stats-fetch status type never includes that value (verified against `src/copytrade/statsFetch.ts`; rate limits there surface as `status: 'failed'` with a message, unlike the separate bigger fetch-run status type which does have `rate_limited`) — removed the dead branch. (c) `formatCount`/`formatDuration` were typed `number | null` but several `CopyTradeFetchStatus` fields are optional (`?: number | null`), so callers could pass `undefined` — widened both helpers to accept `number | null | undefined`. (d) A real display bug: `duneCoverageLabel(evidencePercent, 'Dune')` passed a bare percentage number where the function expects a `{matched, eligible, percent}` object, so the `typeof coverage !== 'object'` guard always failed and this tooltip always rendered "Dune Dune coverage has not been measured yet." regardless of actual data — fixed by building a proper `DuneCoverageSummary` object from `entry.sim` at the call site. (e) `trade.edgeKeptPercent` is `number | null | undefined` but was only checked against `null` — switched to `== null`.
+- Files changed: `ui/main.tsx`, `tests/schema.test.ts`.
+- Decision made and reason: Deleted dead code rather than patching null-checks inside markup that can never render — patching would have hidden ~95 real errors behind unreachable code instead of removing it, and the project's own convention is no dead code. Verified before deleting that every button/table inside the dead blocks has a live equivalent in the current consolidated workflow panel.
+- Test result: `npx tsc -b --noEmit` clean. `npx tsc -p tsconfig.ui.json --noEmit`: 102 → 0 errors. `npm test`: 345/345 passing (was 344/345 before the schema-test fix). `npm run build` (server+UI) clean. Live-verified in the running dev server: page renders correctly, new Scrutiny/elimination panels unaffected, no new console errors (only pre-existing HMR `createRoot` warnings from repeated dev-server reloads, unrelated).
+- Agent name and model: Claude Sonnet 5 (claude-sonnet-5), Claude Code.
+- Errors or unresolved items: The now-orphaned variables/functions that only the deleted dead blocks referenced (`delayExample`, `copySimulationRunReportOpen`, `currentDuneBatch`, `preciseTargetsRemaining`, `widerRetryCandidates`, `wideRetryExhausted`, `wideRetryRemaining`, `copyDelayDuneEligibleWallets`, `syncLatestWalletRoster`, `stopGmgnStatsFetch`, `rosterRefreshMessage`, `rosterRefreshError`, `visibleGmgnStatsRows`) still compute but are no longer read anywhere. `noUnusedLocals` is off in `tsconfig.ui.json` so these do not fail the build, but they are dead weight worth a follow-up cleanup pass.
+- Next step: Optional follow-up — prune the now-orphaned variables/functions listed above; add test coverage and an API/UI surface for the new fetch-audit diagnostic columns.
+
+2026-08-22 - "Does the gap matter?" column in the elimination triage Surviving-wallets table
+- Step completed: Added a per-wallet reading of whether a wallet's Dune coverage gap actually changes its picture, using the wallet's OWN GMGN outcomes (stored for every trade, matched or not) rather than inventing a copier price for unmatched trades. Compares the big-win rate (>TAIL_THRESHOLD_PERCENT on the wallet's own return) between Dune-matched and unmatched round trips.
+- Files changed: `src/copytrade/candidateScrutiny.ts` (extracted the existing inline coverage-bias logic into an exported, reusable `assessCoverageGap` + `CoverageGapAssessment`/`CoverageGapDirection` types; refactored the existing Scrutiny `coverageBias` check to call it so there is exactly one implementation), `src/copytrade/eliminationFilter.ts` (new `coverageGap` field on `WalletEliminationEntry`, null when never simulated), `ui/main.tsx` (new "Does the gap matter?" column with hover detail showing matched/unmatched big-win rates and n), `tests/copytrade-elimination-filter.test.ts` (5 new tests).
+- Decision made and reason: reused rather than reimplemented — the Scrutiny panel already had this exact computation inline; a second copy would have drifted. Kept it strictly descriptive: `coverageGap` never eliminates a wallet and never feeds `trustworthy`. A one-sided population (no matched or no unmatched trades) returns `no_gap`, never a "safe" reading, so missing data can't be mistaken for a pass.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean (0 errors, holding at the 0 established earlier today). `npm test` 350/350 passing (was 345; +5 new). `npm run build` clean. Live-verified against the real database via the running dev server: column renders correctly, e.g. `8gx... 89% "Gap hides losses" -43pp`, `2rD... 61% "Gap looks ordinary" -11.7pp`.
+- **Live finding, and it contradicts a claim I made earlier in this session.** Real distribution across the current 100-wallet cohort: **82 unclear ("gap looks ordinary"), 9 optimistic ("gap hides losses"), 2 conservative ("gap hides big wins"), 7 no_gap (not comparable)**. I had told the user to expect the gap to "matter" for a lot of wallets and that this test "may disqualify wallets as often as it clears them" — that was wrong at the current threshold: 82 of 100 wallets' gaps look ordinary. Two caveats that keep this honest: (1) `COVERAGE_BIAS_GAP_THRESHOLD_PERCENTAGE_POINTS` is deliberately loose at 30pp, far looser than this project's own cohort-measured ~8.4pp gap, so "ordinary" here means "under 30pp", and several `unclear` wallets sit at real -11 to -14pp biases; (2) more interestingly, the per-wallet gaps skew NEGATIVE (unmatched trades winning big LESS often), which is the opposite sign from the cohort-wide 20.5%-vs-12.1% figure this project has been citing and that is quoted in the panel's own explanatory text. That pooled figure is likely dominated by a few very-high-volume wallets (a Simpson's-paradox shape), so the cohort-level claim and the per-wallet reality may simply not be the same statement.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: The 20.5%/12.1% cohort-wide claim is now in doubt as a per-wallet guide and is still quoted verbatim in the elimination panel's intro text — that wording should be revisited once the pooled-vs-per-wallet discrepancy above is properly investigated. The 30pp threshold is inherited from Scrutiny and has never been calibrated against an outcome; it is a judgment call, not a measured bar.
+- Next step: investigate the pooled-vs-per-wallet sign discrepancy before relying on either number to gate anything; consider whether `unclear` should be split so that a real -14pp bias reads differently from a genuine ~0pp one.
+
+2026-08-22 - Elimination triage results now persist across reloads
+- Step completed: The "Run triage" result was in-memory only and lost on every page reload, forcing a recompute (which reruns `computeCopyTradeReport` over 90 days plus a full copy-simulation read for 100 wallets). Now persisted to localStorage and restored on mount, matching the existing convention in this file (`patternDiscoveryReportStorageKey` / `readStoredPatternDiscoveryReport`, and the `vantage.crypto.*` keys already used for screening-wallet and scrutiny-pinned state).
+- Files changed: `ui/main.tsx` only — new `ELIMINATION_REPORT_STORAGE_KEY` + `readStoredEliminationReport()`, state initialized lazily from it, successful runs written back, and a new line above the results reading "Saved result from <time> — read from your browser, not recomputed."
+- Decision made and reason: chose localStorage over the server-side `copytrade_report_cache` table because this is a per-user view preference, not shared derived data, and it matches how the sibling Pattern Discovery panel already persists its reports; going server-side would have meant a schema migration for something the browser already handles. Deliberately surfaced `generatedAt` rather than restoring silently: a restored report is a snapshot of whatever the database held at compute time, and showing "0 eliminated" from an earlier run as though it were current is exactly the kind of stale-evidence bug this project has hit before. The restore path also shape-checks the parsed object (`surviving`/`eliminated` arrays + `duneEstimate` present) before trusting it, so a report saved before a later field is added returns null and re-runs cleanly instead of crashing the table — the `coverageGap` field added earlier today is precisely the kind of addition that would otherwise break a restore.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` clean (holding at 0). `npm test` 350/350 passing. `npm run build` clean. Live-verified the full cycle in the browser against the real database: cleared the key and confirmed no table renders on load; ran triage and confirmed 98,234 bytes written to localStorage with the table rendering; reloaded the page and confirmed the table restored WITHOUT clicking anything, with the correct first row (`8gx... 89% "Gap hides losses" -43pp`) and the "Saved result from Today" line present.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: The saved report is ~98KB, comfortably inside typical localStorage quotas (~5MB) at the current 100-wallet cohort, but it scales with cohort size and embeds every wallet's full entry; a much larger roster could approach the limit, in which case the write silently fails (it is wrapped in try/catch and the in-memory report still works). The staleness indicator is honest but passive — it shows when the report was computed, but does not detect that newer GMGN/Dune data has since landed and actively warn that the saved result is out of date.
+- Next step: if cohort size grows substantially, consider persisting server-side in `copytrade_report_cache` (which already has a `data_fingerprint` column, the natural mechanism for detecting that underlying data changed) instead of localStorage.
+
+2026-08-22 - Coverage-gap reading rebuilt around loss risk, not win rate (safety fix)
+- Trigger: user stated their goal plainly — "my final goal is not to lose money, I don't care about exact profit percentage" — and asked whether the 30pp bar was tight enough for that. Investigated with real data before answering. It was not, in three separate ways, and the shipped column was giving false reassurance.
+- **Finding 1 — Simpson's paradox confirmed, in both directions.** Measured live over 131,742 round trips across 100 wallets. Pooled: big-win rate matched 12.1% vs unmatched 16.8% (unmatched look BETTER, matching the long-cited cohort claim). Per-wallet: median big-win gap 0.0pp, negative in 45 of 93 wallets — the cohort pattern mostly does not exist per wallet. On the loss side the flip is more dangerous: pooled loss rate matched 37.7% vs unmatched 34.6% (unmatched lose LESS — reassuring), but per-wallet the median loss gap is +7.6pp and unmatched trades lose MORE in 68 of 93 wallets. The pooled figures are dominated by a few very-high-volume wallets and are not a valid per-wallet guide in either direction.
+- **Finding 2 — the column was measuring the wrong thing.** It scored big-WIN rate. For a "don't lose money" goal the relevant quantity is the losing-trade rate. 82 of 93 comparable wallets were labeled green "Gap looks ordinary"; of those, 29 had unmeasured trades losing >10pp more often, 14 >20pp, 7 >30pp.
+- **Finding 3 — the threshold ignored coverage, which turned out to dominate.** A raw population difference is nearly meaningless without knowing how much of the wallet is unmeasured: the same +100pp difference moves the true loss rate by <1pp at 99% coverage and by >90pp at 9% coverage. Replaced the raw symmetric ±30pp bar with a coverage-weighted understatement: `trueLossRate - shownLossRate` over the wallet's own GMGN outcomes (which exist for every trade, matched or not). Only 1 of the top 5 riskiest wallets by raw gap is still top 5 once weighted — the weighting changes who is actually dangerous.
+- Files changed: `src/copytrade/candidateScrutiny.ts` (extended `assessCoverageGap` with `shownLossRatePercent`, `trueLossRatePercent`, `lossRateUnderstatedPercentagePoints`, `hiddenLossRisk`, plus `HIDDEN_LOSS_HIGH_PERCENTAGE_POINTS = 10` / `HIDDEN_LOSS_MODERATE_PERCENTAGE_POINTS = 3`; the existing big-win `direction` is retained as a separate secondary signal, not removed), `ui/main.tsx` (the "Does the gap matter?" column now leads with the loss risk and shows the actual numbers inline, e.g. "loses 0% shown → 72.7% real"), `tests/copytrade-elimination-filter.test.ts` (4 new tests).
+- Decision made and reason: made the risk deliberately ASYMMETRIC — a wallet whose unmeasured trades look WORSE than its measured ones is never flagged, because that direction cannot cause a loss, it only causes a missed opportunity. Kept it descriptive: `hiddenLossRisk` still never eliminates a wallet or feeds `trustworthy`; it informs the reader. Thresholds (10pp/3pp) remain judgment calls and are commented as such, but they now gate a quantity that is directly interpretable ("how many more of this wallet's trades really lose than the sample shows") rather than an uncalibrated raw difference.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean (0). `npm test` 354/354 passing (+4). `npm run build` clean. Key regression test asserts the coverage-weighting property directly: an identical +100pp population difference yields `negligible` at 99% coverage and `high` at 9% coverage.
+- **Live result on the real cohort after the fix**: 53 negligible, 22 moderate, 18 high, 7 unknown. The 18 now flagged high were all previously green. Worst: `5XQrQ9` shows a 0% loss rate on 9% coverage but really loses 72.7%; `EZ9KL8` 0% shown vs 63.2% real on 5% coverage. Notably the current #1 pick `C6xQ5T` comes out `negligible` (+0.3pp) — its scary-looking raw -30pp gap was harmless because it sits at 99% coverage, which the old raw-gap rule could not distinguish.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: the elimination panel's intro text still quotes the pooled "unmatched trades are roughly twice as likely to be big winners" claim, which Finding 1 shows is not a valid per-wallet statement — that wording needs revising. The 10pp/3pp thresholds are uncalibrated against any realized outcome. `hiddenLossRisk` is still advisory only and does not gate candidacy.
+- Next step: revise the panel intro wording to stop citing the pooled figure as if it were per-wallet guidance; consider whether `high` hidden-loss risk should actively exclude a wallet from candidacy rather than only annotate it.
+
+2026-08-22 - Acted on an external review of the elimination triage: 5 confirmed defects fixed
+- Trigger: a review flagged 6 issues. Verified every one against the code and the live database before acting rather than accepting or dismissing them. Five confirmed; one partially misstated; impact quantified for each because several were latent rather than active.
+- **Fixed (was actively wrong): unbounded Dune window.** `/api/copytrade/elimination` called `computeCopySimulationReport` without `periodDays`. `readRecentRoundTrips` treats an omitted `periodDays` as `cutoff = null`, i.e. the wallet's ENTIRE stored history, while the GMGN half of the same verdict was bounded to 90 days. Now passes an explicit shared `ELIMINATION_PERIOD_DAYS = 90` to both halves and returns it in the payload. Measured: unbounded vs 90d flips 100%-coverage status for 4 of 100 wallets (unbounded vs 30d would flip 10, and flip the simulated-median sign for 2). Chose 90 rather than 30 to match `/api/copytrade/winners`, whose 90-day choice is already documented as deliberate — the copy-viability inputs want the deepest history. The defect was never "should be 30", it was "was neither".
+- **Fixed: `historyFailed` ignored.** `trustworthy` checked `row.truncated` but not `row.historyFailed`. These are different failures — truncated means "stopped at a known cap", failed means "GMGN errored and we do not know what is missing", which is strictly worse. Currently 0 of 100 wallets have `historyFailed`, so this was latent, but it is a one-line guard on a safety path.
+- **Fixed: no Dune sample-size floor.** `ELIMINATION_MIN_TRADES` counts GMGN trade rows; coverage is a percentage of completed round trips, a separate and much smaller denominator. Added `ELIMINATION_MIN_DUNE_ROUND_TRIPS = 10` (mirroring `MIN_RELIABLE_SAMPLE`). This one is NOT theoretical: all 6 wallets currently at 100% Dune coverage have between 1 and 23 round trips, and 4 of them have fewer than 5.
+- **Fixed: stale stats could eliminate.** `strongly_negative_30d_pnl` read `gmgnAggregate` without consulting `fetchedAt`. Added `ELIMINATION_STATS_MAX_AGE_HOURS = 24`, matching the freshness window the stats fetcher itself uses. Gated per-reason, not folded into `trustworthy`, because the copy-result and hold-time reasons come from stored trades and stay valid however old the stats row is. 2 of 100 wallets currently have stats older than 24h.
+- **Fixed: saved triage could silently go stale.** The persisted localStorage report now compares its `generatedAt` against the real GMGN screening and Dune run timestamps already in the UI, and renders a warning ("Out of date — GMGN or Dune data has been fetched since this triage ran") instead of the neutral saved-result line. This closes the limitation logged in the previous entry.
+- **Fixed: unlabeled window, and a stale claim in the panel text.** The panel now states it is judged over 90 days. Also removed the pooled "unmatched trades are roughly twice as likely to be big winners" line from the intro — the earlier Simpson's-paradox finding showed that is not a valid per-wallet statement, and it was the last place still presenting it as guidance.
+- **Where the review was partly wrong**: it framed finding 1 as "the section is labeled 30-day". The triage panel itself was never labeled 30-day — it carried no window label at all; the adjacent (separate) panel is the 30-day one. The real defect was the missing label plus the unbounded Dune window, not a 90-vs-30 contradiction inside the panel.
+- **Net effect on current verdicts: none.** Before and after, 0 wallets are trustworthy and 0 are eliminated — because no wallet clears the gates at all: only 6 reach 100% Dune coverage and none of those has the required 100 GMGN trades. So every one of these defects was latent on today's data. They were still worth fixing: each would have produced a wrong elimination the moment a wallet did reach the gates, which is precisely when a wrong answer costs money.
+- Files changed: `src/copytrade/eliminationFilter.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `tests/copytrade-elimination-filter.test.ts` (+4 tests).
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean (0). `npm test` 358/358 passing (was 354). `npm run build` clean. New tests cover each fix, including that stale stats block the PnL reason while still allowing the two reasons that do not read the stats snapshot.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: `ELIMINATION_MIN_DUNE_ROUND_TRIPS = 10`, `ELIMINATION_STATS_MAX_AGE_HOURS = 24`, and the hidden-loss 10pp/3pp bars are all judgment calls, uncalibrated against any realized outcome. The 90-day window is now consistent within this feature but still differs from the 30-day framing the surrounding tab uses.
+- Next step: the gate breakdown above is the real story worth acting on — nothing is eliminable because coverage and trade count never co-occur. Deciding whether that is a data problem (fetch more) or a gate problem (100% coverage is too strict a bar) matters more than any further refinement here.
+
+2026-08-22 - Elimination triage moved to a single 30-day window (was mixing 90d trades with 30d PnL)
+- Trigger: user identified that the section mixed 90-day trade/copy-test data with GMGN's 30-day P&L, and directed that it use 30 days everywhere. Correct — the previous entry fixed the unbounded-Dune half of this but left the deeper inconsistency in place by standardizing on 90.
+- Step completed: `ELIMINATION_PERIOD_DAYS` 90 → 30, applied to both `computeCopyTradeReport` and `computeCopySimulationReport` in `/api/copytrade/elimination`; UI intro and the saved-result line now state 30 days, and the UI fallback constant follows.
+- Decision made and reason: 30 is the correct direction to reconcile toward rather than 90, because GMGN publishes realized PnL only as a rolling 7d/30d figure with no arbitrary date range — that input is FIXED at 30d and cannot be widened, so every other input must narrow to meet it. Documented in the route that this deliberately does NOT match `/api/copytrade/winners`' 90 days: that endpoint answers a different question and has no 30-day-only input to reconcile against, so the two windows are not required to agree.
+- **Measured effect on the live cohort (90d → 30d), and it is a clear improvement:**
+  - wallets at 100% Dune coverage: 6 → **12**
+  - of those, also clearing the 100-trade bar: 0 → **2**
+  - trustworthy: 0 → **2** (the first wallets ever to reach a judgeable state in this view)
+  - eliminated: 0 → 0 (both trustworthy wallets pass every bad-outcome check, so neither is eliminated — a real verdict, not a stalled one)
+  - hidden-loss risk shifts markedly safer: high 13 → **3**, negligible 54 → **69**. Expected and correct: the earlier high-risk readings were dominated by wallets with tiny measured samples over long histories, which the narrower window no longer stretches across.
+  - estimated remaining Dune work: 50,667 → **15,954** targets, i.e. the "17.6h" figure drops by roughly two thirds.
+- Note on the trade bar: `ELIMINATION_MIN_TRADES` is 100 and is now applied over 30 days rather than 90, which is a materially stricter bar (wallets with >=100 trades: 70 → 59). Left unchanged deliberately — it is `RULES.minTrades`, shared with the rest of CopyTrade, and changing it here would fork a shared constant to make this one view look better. Flagged rather than silently tuned.
+- Files changed: `src/scripts/server.ts`, `ui/main.tsx`.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean (0). `npm test` 358/358 passing. `npm run build` clean. Live-verified in the browser against the real database after clearing the saved report: panel reports "98 wallets checked / 0 eliminated / 98 surviving / 86 survivors still need Dune coverage", the saved-result line reads "over 30 days of history", and the first row renders `8gx... 81 trades 95% "Safe to trust"` — note this same wallet read `158 trades / 89% / "Hides real losses"` under the 90-day window, a concrete example of the window change altering a verdict.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: the 100-trade minimum over a 30-day window may now be too strict for this view's purpose and is the main reason only 2 of 98 wallets are judgeable; revisiting it means either forking the shared constant or changing it project-wide, neither of which should be done casually. The judgment-call thresholds noted in the previous entry (10 round trips, 24h staleness, 10pp/3pp hidden-loss bars) remain uncalibrated.
+- Next step: with 2 wallets now trustworthy and neither eliminated, the useful question is whether the 100-trade bar is the right gate for a triage view whose only job is deciding where NOT to spend more Dune budget.
+
+2026-08-22 - Replaced the 100%-coverage gate with "high coverage AND negligible hidden-loss risk"
+- Trigger: user asked why Trustworthy read "Not yet" for every visible row. Two separate causes, both real: (1) the 2 trustworthy wallets existed but sat at rows 14 and 16 of a 98-row table, so nothing visible from the top was decidable; (2) the 100% coverage requirement was blocking almost everything.
+- Diagnosis before changing anything: gate-by-gate breakdown on live data showed `coverageUnder100` blocked 86 of 98 wallets, and **57 wallets failed on coverage ALONE** while clearing every other bar — including `D53C33`, rejected over 3 missing round trips out of 144. A flat 100% also cannot distinguish a 3-trade gap from a 300-trade one.
+- Step completed: `TRUSTED_DUNE_COVERAGE_PERCENT` 100 → 90, paired with a new required clause `coverageGap?.hiddenLossRisk === 'negligible'`. Also sorted trustworthy wallets to the top of the surviving table (presentation only; changes no verdict).
+- Decision made and reason: 100% was the right instrument only while there was no way to tell whether a gap mattered. There now is, and it is a measurement rather than an estimate — GMGN supplies the wallet's own outcome for every trade, matched or not, so `trueLossRatePercent` covers 100% of trades even when Dune coverage does not. The 90% floor remains because the *copy-simulation median* is genuinely matched-only and therefore genuinely a sample. Chose 90 after measuring floors from 70–100: at 90, of the wallets newly admitted nearly all understate their true loss rate by under 2pp, and the two that do not (+3.8pp, +3.9pp) are rejected by the risk clause rather than by the coverage number — i.e. the risk check, not the floor, is doing the safety work.
+- **Bug found by the existing tests while making this change, and it was a real one**: `assessCoverageGap` required BOTH a matched and an unmatched population to return a verdict, so a wallet at genuinely 100% coverage — zero unmatched trades — returned `unknown` and could never be trustworthy. That conflates "nothing is missing" with "nothing was measured". With no unmatched trades the shown and true rates are the same number by construction, so the understatement is exactly 0 and the risk is negligible. Fixed the condition to require only a non-empty measured population. This would have silently excluded the best-evidenced wallets in the cohort. Corrected the test that had encoded the wrong expectation, and gave the shared `baseSim` fixture a realistic fully-matched trade list rather than `trades: []`.
+- **Measured effect on the live cohort:** trustworthy 2 → **7**; eliminated 0 → **17**; survivors still needing Dune 86 → **49**. The view now produces actual decisions instead of a uniform "unknown". All 17 eliminations are `negative_delayed_copy_result` (2 also fail hold-time), every one at 91–97% coverage with a negligible hidden-loss reading — i.e. wallets whose copy result is genuinely bad on well-measured data, not artifacts of missing data.
+- Files changed: `src/copytrade/eliminationFilter.ts`, `src/copytrade/candidateScrutiny.ts`, `tests/copytrade-elimination-filter.test.ts`.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 358/358 (7 failed mid-change from the fixture/`unknown` bug above; all green after the fix). `npm run build` clean. Live-verified in the browser: "98 wallets checked / 17 eliminated / 81 surviving / 49 survivors still need Dune coverage", with the four top rows all reading Trustworthy = Yes (`C6x` 100%, `6ya` 100%, `3bv` 98%, `D53` 98%).
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: 90% is calibrated against this cohort's observed understatement distribution, not against any realized trading outcome — it is better-grounded than the previous 100% but still not outcome-calibrated. The 100-trade minimum over 30 days remains the second-largest blocker (39 wallets) and is still the shared `RULES.minTrades`.
+- Next step: with 17 wallets now eliminated and 7 judged trustworthy, the remaining question is whether the 100-trade/30-day bar should be revisited for this view specifically.
+
+2026-08-22 - Forked the triage trade minimum from the shared candidacy bar (100 -> 50)
+- Trigger: user approved forking after the previous entry flagged the 100-trade bar as the remaining blocker. Measured first: 15 wallets were blocked by this bar ALONE while holding 93-100% Dune coverage, a real round-trip sample, and a negligible hidden-loss reading — including `2rD4gB` (46 trades, 100% coverage, +167% copy median) and `7JFSAQ` (69 trades, 99% coverage, +140%).
+- Step completed: `ELIMINATION_MIN_TRADES` no longer aliases `RULES.minTrades`; it is an explicit 50, with the reasoning written into the constant. Removed the now-unused `RULES` import. Added a test pinning the fork in both directions.
+- Decision made and reason: 50, not 30. The case for lowering at all is that (a) the bar was written against a 90-day window and this view now runs on 30 days, so it silently tripled in strictness, and (b) nothing this gate controls risks money — `trustworthy` only ever permits an elimination, and an elimination only means "stop spending Dune budget"; the gate that protects capital is `computeCopyCandidates`, which is untouched and still requires the full 100. The case for stopping at 50 rather than 30 is that the column reads "Trustworthy" and a reader can carry that word further than this view intends: at 50 the thinnest wallets (`FxdjTh` 17 trades, `9774G8` 23 trades, both showing triple-digit copy medians) stay excluded, which is exactly the "+819% winner on four trades" failure mode this project has already hit. Dropping to 30 would have admitted only ~4 more wallets while letting those two back in.
+- Test guards the fork explicitly: asserts `ELIMINATION_MIN_TRADES < RULES.minTrades` (so it cannot silently drift back into matching the shared constant) AND `>= 50` (so it cannot be quietly lowered into the thin-sample regime), plus behavioural checks one trade under and exactly at the bar.
+- **Measured effect on the live cohort:** trustworthy 7 -> **13**; eliminated 17 -> **19**; surviving 81 -> 79. Cumulative across today's three gate changes (window 90->30, coverage 100->90 + risk clause, trades 100->50): trustworthy 0 -> 13, eliminated 0 -> 19. The view went from deciding nothing to deciding 32 of 98 wallets.
+- Files changed: `src/copytrade/eliminationFilter.ts`, `tests/copytrade-elimination-filter.test.ts`.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 359/359 passing (+1). `npm run build` clean. Live-verified in the browser: "98 wallets checked / 19 eliminated / 79 surviving / 49 survivors still need Dune coverage", 13 rows reading Trustworthy = Yes, sorted to the top, with `7JFSAQ` (69 trades, 99% coverage, +140.3% copy median) now visible in the top three — a wallet the old bar refused to judge.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: 50 is a judgment call anchored to the thin-sample failure mode, not calibrated against realized outcomes — as are the 90% coverage floor, the 10-round-trip minimum, the 24h staleness window, and the 10pp/3pp hidden-loss bars. Every threshold in this view is reasoned but none is outcome-calibrated; that remains the honest caveat on the whole feature.
+- Next step: the triage view is now doing its job. The open question worth more than further threshold tuning is whether the 13 trustworthy wallets hold up under the Scrutiny panel's per-wallet checks, which is the view designed to interrogate exactly these.
+
+2026-08-22 - Fixed two follow-up review findings: stale UI text, and an undercounted "needs Dune" set
+- Trigger: review flagged (1) the panel text still claiming "100% Dune coverage" after the gate moved to 90%, and (2) wallets above the coverage floor but with a non-negligible hidden-loss reading being excluded from "survivors still need Dune coverage", understating both the count and the time estimate. Verified both against the code; both correct.
+- **Fix 1 — stale text.** `ui/main.tsx` intro rewritten to state the actual gate: complete/not-failed GMGN history, >=50 trades, >=90% Dune coverage over a real round-trip sample, AND a negligible hidden-loss reading. Also reframed the safety sentence, since "a wallet with missing coverage is never eliminated" stopped being literally true once the floor dropped below 100 — it now says coverage need not be perfect, but what is missing must be shown not to flatter the wallet. Deliberately did NOT touch the other "100% Dune coverage" string in the same file (`ui/main.tsx:3765`): that one describes the Winners feature, which genuinely still requires `sim.coverageRatePercent === 100` in `copyCandidates.ts:258`. Checked before editing rather than pattern-replacing.
+- **Fix 2 — needs-Dune definition.** The filter tested only `duneCoveragePercent < TRUSTED_DUNE_COVERAGE_PERCENT`, which was wrong in both directions, not just the one reported. It missed wallets above the floor whose hidden-loss reading is not yet negligible — those are Dune-resolvable too, since fetching the outstanding matches shrinks the unmeasured population and therefore the understatement. It also *counted* a wallet more Dune cannot help: `DP7G43` sits at 100% coverage with zero missing targets and is still not trustworthy, because its blocker is trade count. Replaced with the definition that actually matches the label — not trustworthy AND has outstanding Dune targets — which fixes both directions at once and keeps the time estimate honest either way.
+- **Measured effect:** survivors needing Dune 49 -> **55**; targets 13,607 -> **13,644**; estimate 4.8h (unchanged at this precision). Seven wallets above the 90% floor are now correctly included (four `moderate`-risk, three `negligible` but with outstanding targets), and the one wallet with nothing left to fetch is correctly excluded. Small in absolute terms — 0.3% of targets — but the logic was wrong and would misreport more as coverage improves across the cohort.
+- Files changed: `src/copytrade/eliminationFilter.ts`, `ui/main.tsx`, `tests/copytrade-elimination-filter.test.ts` (+3 tests).
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 362/362 passing (+3). `npm run build` clean. New tests cover all three cases: a risk-blocked wallet above the floor is counted, a wallet with nothing left to fetch is not, and a trustworthy wallet is never counted even with targets outstanding. Live-verified: panel reads "98 checked / 19 eliminated / 79 surviving / 55 survivors still need Dune coverage", estimate "4.8h for 13,644 known Dune targets", and the intro no longer contains the string "100%".
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: unchanged from the previous entry — every threshold in this view (50 trades, 90% coverage, 10 round trips, 24h staleness, 10pp/3pp hidden-loss) is reasoned but none is calibrated against a realized outcome.
+- Next step: unchanged — run the 13 trustworthy wallets through the Scrutiny panel, which exists to interrogate individual candidates in depth.
+
+2026-08-22 - Implemented a canonical decision structure per user proposal (partial: wallet-stats tab only)
+- Trigger: user proposed a 4-part restructure of the CopyTrade tab — a final decision panel, one canonical table, a details drawer, and everything else collapsed under "Advanced diagnostics" — because the tab currently answers "which wallets passed our tests" via several competing, unranked views (Winners, wallet-stats decision table, elimination triage, Scrutiny, Pattern Discovery) rather than one clear answer.
+- Scope decision, stated plainly rather than silently narrowed: implemented parts 1, 2, and 4 for the wallet-stats sub-tab, which already contained the closest thing to a canonical table and a details drawer (`openStatsDetail`, pre-existing). Did NOT merge Winners, Scrutiny, and Pattern Discovery — those are separate top-level sub-tabs with materially different data shapes (Winners is portfolio-simulation output, Scrutiny is a per-wallet deep-dive, Pattern Discovery is a shared-engine export), and folding them into one accordion is a real navigation redesign, not a same-session change. Flagging this now rather than presenting a partial restructure as the complete one.
+- Asked the user to choose the decision vocabulary before building, since every threshold behind it (50 trades, 90% coverage, 10pp hidden-loss, the 15s copy delay) is a reasoned judgment call, none calibrated against a realised outcome, and this project's boundary is descriptive research only. User picked "Passed all tests / Watch / Rejected / Needs more data" over "Copy now / Do not copy" specifically because the latter reads as an instruction the evidence does not support.
+- **Part 1 — final decision panel.** New `copytrade-final-decision-panel`: four state tiles (counts computed from the existing six-value verdict via a new `decisionStateFor` collapse, kept separate from the underlying verdict so the finer reason is still available on hover), "Last updated <time> · 30-day period", and a fixed warning line "Passed tests, not guaranteed profit." Renders above the existing "30-Day Decision Winner" hero card, which was left in place since it already serves a purpose the plan's spec didn't ask to remove.
+- **Part 2 — canonical table.** The existing `copytrade-decision-table` already had Rank/Trader/GMGN link/PnL/$100-after-copy/Evidence/Typical hold. Added the two columns the plan called for that were missing: **Decision** (renamed from "Verdict", now shows the 4-state label with the original six-value reason still in the hover tooltip) and **Data freshness** (new `freshnessLabel` helper — age of the GMGN snapshot the row's verdict was computed from, flagged as stale past 24h).
+- **Part 4 — collapse.** Moved the elimination-triage panel (previously rendered ABOVE this table, which the user specifically called out as wrong: "a research-maintenance tool, not a recommendation view") into a new collapsed-by-default `<details className="copytrade-advanced-diagnostics">` positioned AFTER the canonical table. Scrutiny and Pattern Discovery remain separate sub-tabs, not yet folded in — see scope decision above.
+- **Real bug found and fixed while doing this, not a styling nit.** After moving the elimination panel inside `<details>` with no `open` attribute, it stayed fully visible and expanded (5106px tall) instead of collapsing. Root cause, confirmed by creating a bare `<details><summary/><div/></details>` directly in the live page and finding its child still computed `display: block`: **this browser environment does not apply the UA stylesheet's default `details:not([open]) > *:not(summary) { display: none; }` rule.** Relying on native `<details>` collapse behavior is not safe here. Fixed by adding that rule explicitly to `styles.css` rather than relying on the browser default. Also found and removed a second, unrelated defect this surfaced: an earlier CSS route-visibility rule, `.routed-view.page-copytrade #copytrade-elimination { display: block }`, was left over from when that id belonged to a standalone top-level section — with the id now on a plain `<div>` nested inside `<details>`, that rule was force-overriding the (correctly written) collapse rule. Removed it and the matching now-meaningless `:not(#copytrade-elimination)` exclusion clause in the adjacent `.focused-view` rule.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 362/362 passing (UI-only change; no test count delta). `npm run build` clean. Live-verified the full toggle cycle in the browser, not just that it compiles: created a bare details/div pair to isolate the environment bug before touching the real markup; after the fix, confirmed closed state renders `display: none` / height 0, then `summary.click()` opens it to `display: block` / height 5106 — both directions exercised, not just the closed state. Confirmed via `get_page_text` that the final decision panel reads "3 Passed all tests / 0 Watch / 9 Rejected / 86 Needs more data / Last updated Today · 30-day period / Passed tests, not guaranteed profit." and the table's top three rows show "Passed all tests | 1h ago" in the new columns, with "Advanced diagnostics" now appearing after the table instead of before it.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: Winners, Scrutiny, and Pattern Discovery remain separate sub-tabs rather than being folded under the same accordion — the plan's part 4 is only fully realized for the wallet-stats tab. The details-collapse environment bug found here may affect any other `<details>` in this codebase that relies on the native default rather than an explicit one; not audited beyond the one instance fixed here.
+- Next step: decide whether Winners/Scrutiny/Pattern Discovery should be folded into "Advanced diagnostics" too, or whether they stay as their own sub-tabs with only the wallet-stats-local diagnostics collapsed — these are different information architectures, not just a styling choice, and worth deciding deliberately rather than defaulting.
+
+2026-08-22 - Wired the elimination triage into the actual Dune fetch scope (was diagnosis-only until now)
+- Trigger: user asked, correctly suspecting the answer was no: does clicking "Fetch Dune" respect the triage's eliminated/surviving split, or does it eliminate/refetch automatically? Verified by reading `researchWalletAddresses`, `screenTopWallets`, and `approveAndResearch` directly. Confirmed: the fetch scope only ever depended on `historyFailed` and the manual screening checkboxes — `eliminationReport` was referenced nowhere outside its own panel. Nothing was automatic in either direction: triage never auto-ran, and its output never fed the fetch scope.
+- Step completed: added an opt-in checkbox, "Skip wallets triage rejected (N)", next to the Dune fetch controls. When checked, the wallets in the last `eliminationReport.eliminated` fold into the same `excludedScreeningWalletSet` the manual per-row checkboxes already use — same set, same override path. A triage-rejected row is now tagged inline ("· rejected by triage") in the activity table, and re-checking that row's own box overrides the triage exclusion exactly like it already overrode a manual one, with no new code path for that case.
+- Decision made and reason: opt-in and NOT persisted, unlike the manual exclusion lists which do persist. Every triage threshold (50 trades, 90% coverage, the 10pp hidden-loss bar) is a reasoned judgment call, not calibrated against a realised outcome — silently and permanently skipping wallets on that basis, surviving across sessions, would let an unreviewed threshold quietly keep shrinking what gets fetched. Re-deriving it fresh each render from the current `eliminationReport` (rather than writing eliminated wallets into `excludedScreeningWallets` itself) also means it automatically tracks the *latest* triage run — re-running triage after new data lands changes what gets skipped without any migration or stale-list cleanup.
+- Files changed: `ui/main.tsx` only (`skipEliminatedInDune` state, `triageEliminatedWalletSet`/`triageExcludedFromDuneCount` derivations, the checkbox, and the activity-table tag).
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 362/362 (no backend change, no test delta). `npm run build` clean. Live-verified the full behavior against the real saved triage report, not just that it renders: checkbox read "Skip wallets triage rejected (19)" matching the saved report; toggling it dropped "98 selected for Dune" to "79 selected for Dune" with a new "19 excluded (19 by triage)" note; opened the activity table and confirmed a real row (`#5Cupsey`) carried the "· rejected by triage" tag and was unchecked; re-checking that one row's box moved the counts to "80 selected for Dune" / "18 excluded (18 by triage)" — a single override affecting exactly one wallet, confirming the per-row escape hatch works.
+- Agent name and model: Claude Sonnet 5, Claude Code.
+- Errors or unresolved items: this only wires the Dune-fetch scope. "Fetch top 100" (the GMGN roster/history refresh) is intentionally untouched — it fetches the full top 100 by design, since triage needs that data to exist before it can eliminate anything; scoping it down would be circular. The checkbox is disabled with an explanatory tooltip when no triage has been run yet or nothing was eliminated.
+- Next step: none identified; this closes the gap the user's question surfaced.
+
+2026-08-22 - Closed the 30-day decision audit findings
+- Removed the silent 30-day-to-unbounded simulation fallback. The wallet-stats decision now uses only the explicit 30-day Dune simulation and reports missing evidence instead of producing a mixed-window verdict.
+- Added one shared copy-evidence gate for candidate and triage paths: at least 90% Dune coverage, 30 round trips, and complete gas accounting. Candidate ranking uses the fixed-$100 portfolio result whenever a simulation exists; it no longer falls back to a median for a partially populated full-model record.
+- Made freshness exact: the decision uses the fetched 30-day GMGN statistic, and displays separate GMGN-30d and Dune-30d timestamps. A stale required component prevents a candidate verdict.
+- Triage exclusions are now refreshed from the backend before a Dune fetch when the saved browser result is stale, so localStorage cannot silently skip wallets after another session changed the data.
+- Coverage-gap elimination tracks both hidden downside and hidden upside; fully covered wallets are treated as having no hidden-upside gap, while unknown or material gaps remain non-trustworthy.
+- Verification: `npm test` 362/362 passing; server and UI production builds clean.
+
+2026-08-22 - Fixed two follow-up false-rejection defects
+- `hiddenUpsideBias` now uses the same coverage-weighted gap as hidden-loss risk. A raw 100pp difference from two unmatched trades can no longer reject a wallet with otherwise high coverage; the raw gap remains visible for diagnostics, while the weighted gap drives safety classification.
+- `survivedDelay` now uses the shared 90% coverage and 30-round-trip evidence floor instead of the stale 100% check, so wallets with valid 90–99% coverage can reach the 30-day candidate verdict.
+- Added regression tests for both high-coverage tiny-tail upside noise and low-coverage material upside bias.
+- Verification: `npm test` 363/363 passing; server and UI production builds clean.
+
+2026-08-22 - Repaired existing database resume-state migration
+- Existing databases could already have `PRAGMA user_version` at the latest value while still missing `copytrade_fetch_runs.resume_disabled`, causing the fetch-status API to fail and leaving the wallet table empty.
+- Added an idempotent repair migration and applied it to the local database; the column now exists and the schema is at version 41.
+- Verification: server build clean; database migration completed successfully.
+
+2026-08-22 - Removed adjustable evidence filters from the decision table
+- Removed the “Min copied trades” and “Min Dune coverage %” controls, reset button, tooltip, and all row-filtering effects tied to them.
+- The decision table now shows every row, or only positive-copy rows when that remaining checkbox is enabled. Candidate verdict safety gates remain unchanged.
+
+2026-08-22 - Moved fetch controls above the decision table
+- Added visible GMGN screening and Dune copy-test controls directly above the wallet decision table, including current saved-data status and resume-aware button labels.
+- Detailed progress and maintenance controls remain available in Advanced diagnostics.
+
+2026-08-22 - Added export action below top fetch controls
+- Added “Export full table” directly below the visible fetch controls and kept the selected-Dune wallet count beside it.
+
+2026-08-22 - Added persistent stop/resume progress controls for GMGN and Dune
+- GMGN top-100 fetch now exposes a trade-weighted progress bar, current wallet, wallet/trade counts, and ETA. Stop keeps every saved page; Resume starts a new run from the saved per-wallet cursor rather than discarding the partial snapshot.
+- Added a reset-resume action that forgets only the resumable cursor and marks the snapshot non-resumable; saved trades remain in SQLite.
+- Added matching Dune progress and stop controls. A partial/stopped Dune run is labeled Resume, and the existing persisted target results are reused so only missing eligible targets are requested.
+- Added database migration for the explicit resume-disabled marker and server endpoints for resume/reset.
+- Verification: `npm test` 363/363 passing; server and UI production builds clean.
+
+2026-08-22 - Fixed four GMGN-fetch UI issues the user found from a live screenshot
+- Trigger: user shared a screenshot of the live GMGN wallet-stats tab showing "305,814 / 303,737 stored trades" (stored exceeding the stated total) and reported: the roster's silent HTTP-403/network fallback should be shown, not hidden; the status bar/remaining-time readout is wrong; and the GMGN and Dune fetch controls should each be a single Resume/Pause-style button instead of separate start/stop/resume buttons.
+- **Root cause of "stored > total" (confirmed live, not assumed):** `expected_trades_total` (`src/copytrade/fetch.ts`) is a pre-fetch estimate — the sum of each wallet's cached 30-day GMGN stats buy+sell count, defaulting to 0 for any wallet with no cached stats row. It undercounts whenever stats are stale or missing, or a wallet keeps trading during the fetch. Confirmed on the real run: `expectedTradesTotal: 303737` vs `storedTradesTotal: 309590` — real data exceeded the estimate by ~6,000 trades. Because `totalTradeProgressPercent` was `Math.min(100, stored/expected*100)`, this also explains the "0s remaining" / 100%-while-still-fetching complaint: the percent pins at 100% the moment the (too-low) estimate is exceeded, regardless of real remaining work.
+- First attempt was wrong and self-corrected before shipping: flooring `expectedTradesTotal` at `storedTradesTotal` fixes the display but makes the percent read 100% *permanently* from that point on, hiding remaining work for wallets not yet reached — worse than the original bug, not better.
+- **Actual fix:** added `estimateExceeded: boolean` to `readFetchRunState`'s return (`fetch.ts`). Once `storedTradesTotal > expectedTradesTotal`, `totalTradeProgressPercent` and `remainingTradesTotal` become `null` — honestly "unknown" rather than a number computed from a denominator already proven wrong — instead of a floored value that implies false completion. `estimatedRemainingSeconds` already had a wallet-count-based fallback (`estimateRemainingSeconds` in `estimate.ts`) for exactly a null `totalEstimatedRemainingSeconds`, so nothing goes blank; it degrades to a coarser but honest ETA. `ui/main.tsx`'s two progress displays (the `copyTradeStatus`/`rosterFetchStatus` cards) now render "309,590 stored trades · estimate exceeded" instead of a stored/expected fraction that looks broken, and "Remaining trades unknown — estimate exceeded" instead of a false "0 remaining".
+- **Silent fallback fix:** `rosterRefreshMessage`/`rosterRefreshError` (`ui/main.tsx`) were computed on every roster refresh — including the HTTP-403/network-failure fallback-to-saved-snapshot path — but never rendered anywhere; the only visible trace was a transient global toast (`setMessage`) that the next fetch stage immediately overwrote. Added a persistent banner (warning-styled for the fallback/error case) directly under the GMGN screening controls.
+- **Button consolidation:** the GMGN screening row previously rendered up to three separate buttons (Fetch top 100 / Stop GMGN fetch / Resume GMGN fetch) depending on state. Replaced with one primary button that swaps label and handler by state — "Pause GMGN fetch" while running, "Resume GMGN fetch" when a resumable run exists, "Fetch top 100" otherwise — mirroring the pattern the Dune fetch button already used (it only ever needed this fix in the GMGN row). "Reset resume snapshot" stays as its own small secondary action, deliberately not folded into the primary button: it is a distinct, uncommon action (forget the cursor, not part of the start/pause/resume cycle) and combining it would overload one control with a fourth meaning.
+- Files changed: `src/copytrade/fetch.ts` (`estimateExceeded` field, corrected percent/remaining logic, both return sites), `ui/main.tsx` (progress text for both fetch-status cards, the button collapse, the new fallback banner, `CopyTradeFetchStatus` type).
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 363/363 passing (no test changes needed — this is UI/status-shape only, no new business logic to unit test). `npm run build` clean. Live-verified against the real completed run (id 63): `GET /api/copytrade/fetch/status` now returns `estimateExceeded: true, remainingTradesTotal: null, totalTradeProgressPercent: null` for the exact real data that previously showed the broken fraction; the button row renders exactly one button ("Fetch top 100", since this run is completed with `resumeAvailable: false`); the progress card text reads "309,590 stored trades · estimate exceeded" and "Saved progress retained".
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: `estimateExceeded` only fixes the TOTAL-across-all-wallets figure. The per-wallet estimate (`currentWalletExpectedTrades`, from the same stats-snapshot source) can suffer the identical problem and was not touched — a wallet whose own cached stats undercount its true trade count would still show a currentWallet percent/ETA computed from a bad denominator (though `Math.max(0, ...)` already floors its remaining at 0, so it degrades to "0s remaining" rather than a negative number, same class of issue as the total had). Deferred rather than fixed in this pass since the user's screenshot and report centered on the total, not the per-wallet figure. The Dune fetch button was already a single-button pattern before this change; only GMGN needed the consolidation.
+- Next step: consider the same estimateExceeded treatment for currentWalletProgressPercent/currentWalletEstimatedRemainingSeconds if the per-wallet ETA is ever reported as wrong the same way the total was.
+
+2026-08-22 - Decluttered the GMGN wallet-stats tab: moved fetch controls into Advanced diagnostics
+- Trigger: user shared a screenshot of the live tab (their own browser tab) saying "confusing ui with too much noise" — the screenshot showed the GMGN screening card, its progress bar, a saved-result summary with an embedded triage checkbox and activity table, the Dune copy test card, THEN the actual decision panel and table, all stacked above the fold.
+- Root cause: this directly contradicted a structure the user specified and I'd already agreed to earlier in this session — "Final decision panel" + "One canonical table" visible by default, with "Fetch controls" (among other things) moved under an "Advanced diagnostics" accordion. That accordion existed and already held the elimination triage/scrutiny content, but the two workflow-step fetch-control cards (GMGN screening, Dune copy test) had never been moved into it — they were still sitting above the decision panel, which is the majority of what made the page feel noisy.
+- Step completed: moved the entire fetch-controls block (GMGN screening card, Dune copy test card, both buttons, both progress displays, the roster fallback banner added earlier today, the triage-skip checkbox, the activity table, the live-fetch-status banner, the step-by-step update-progress list, and the "last research update" summary) into the Advanced diagnostics accordion under a new "Fetch controls" heading. Also removed the "30-Day Decision Winner" hero card — it duplicated what the Final decision panel + table's own #1 row already show, and was pure redundancy above the fold.
+- Decision made and reason: collapsing fetch controls could hide an ACTIVELY RUNNING fetch from the user with no visible sign anything was happening. Added a `diagnosticsOpen` state that a `useEffect` forces to `true` the moment a GMGN or Dune fetch starts running (`researchUpdateBusy || rosterFetchStatus?.running || copySimulationRunStatus?.running`), while manual toggling (open or closed) works normally the rest of the time. So: idle = clean by default, active = automatically visible, never silently hidden.
+- Removing the hero winner card was a judgment call, not something explicitly requested — flagging it clearly here in case the user wants it restored. It read as redundant with the Final decision panel's own top-ranked row, but it did have a specific, larger visual presentation the table doesn't replicate.
+- Files changed: `ui/main.tsx` only — a structural move (no logic changes to the moved blocks themselves) plus the new `diagnosticsOpen` state/effect and the hero-card removal.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 363/363 (no test changes — UI structure only). `npm run build` clean.
+- Live verification hit a real scare worth recording: after rebuilding, the browser showed a hard crash (`ReferenceError: Cannot access 'rosterFetchStatus' before initialization`) on every reload, including a forced fresh navigation. Investigated rather than assumed: `tsc` was clean, the source ordering was textually correct (declaration at line 3288, all uses after it), and a Vite console line read `invalidate /main.tsx: Could not Fast Refresh` plus dozens of accumulated `createRoot() called twice` warnings across this multi-hour session pointed at a corrupted long-running dev-server/HMR module graph rather than a real source bug. Restarted the `npm run dev` process (PID had been running since 13:43, hours of continuous hot-reloads) — confirmed via `get_page_text` and a direct DOM check (`RENDERED_OK`, no error-boundary fallback text) that the page renders correctly post-restart. The `read_console_messages` tool continued replaying the same old errors by their original (pre-restart) timestamps afterward, confirmed stale by posting a timestamped marker log and finding no new error after it — a tool-history artifact, not a live recurrence. Restarting a local dev server mid-session is a normal, low-risk, easily-reversible development action, done without asking first.
+- Live-verified the actual change on the restarted server: decision panel and table now render immediately with no fetch-control chrome above them (`29 Passed all tests / 11 Watch / 13 Rejected / 45 Needs more data`, table starting right below); the Advanced diagnostics accordion is closed by default and contains a "Fetch controls" heading with `Fetch top 100`, `Reset resume snapshot`, `Fetch Dune (98)`, `Export full table`, and `Run triage` all present and functional; manually clicking the summary opens it correctly.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: the hero winner card removal is a judgment call the user did not explicitly request — say so if it should come back. The filter row (Show positive gains / Min copied trades / Min Dune coverage %) and the "98/98 summaries fresh" line remain visible above the table; not moved, since they directly configure what the table shows rather than being fetch/diagnostic tooling — flagging in case the user considers these noise too.
+- Next step: none identified unless the user wants the hero card restored or the filter row also tucked away.
+
+2026-08-22 - Fixed "clicking Resume has no effect" — a regression from the diagnostics-collapse change
+- Trigger: user clicked Resume and saw nothing happen, correctly guessing it was either a no-op (nothing new to fetch) or a failure, and asked for clear success/failure feedback with details in a collapsible view.
+- Root cause, found by reading the actual code rather than guessing: this was mostly a self-inflicted regression from the "declutter the tab" change earlier today. Two compounding gaps:
+  1. The roster fetch-progress card (now living inside the collapsed Advanced diagnostics accordion) never rendered `rosterFetchStatus.message` — the exact field the backend already computes with the honest outcome (`"Fetched 0 new trades across 100 wallets."`, or an error string on failure). The card showed wallet counts and byte totals but never the one sentence that actually answers "what happened."
+  2. The accordion's auto-open effect only reacted to `.running` becoming true via polling. A resume that finds nothing new to fetch can complete in well under one poll interval (GMGN's own per-wallet catch-up walk is fast when there's nothing new) — so `running` could flip true and false between polls, the effect never firing, and the whole section — including the one place the honest completion message lives — stayed collapsed the entire time. From the user's side, clicking Resume looked like it did nothing at all, even on a fully successful run.
+- Fix: (1) added the completed-state `rosterFetchStatus.message` to the roster progress card (mirrors the Dune card, which already showed its own `.message`). (2) `setDiagnosticsOpen(true)` now runs synchronously inside the click handlers themselves (`resumeCopyTradeFetch`, `resetCopyTradeFetch`, `screenTopWallets`, `approveAndResearch`) rather than relying solely on the reactive `.running`-watching effect — the section opens the instant the button is clicked, regardless of how fast the underlying operation finishes.
+- Files changed: `ui/main.tsx` only.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 363/363 (no logic change, UI-only). `npm run build` clean. Live-verified against a real run, not a synthetic one: clicked "Fetch top 100" on the restarted dev server, confirmed the Advanced diagnostics accordion flipped from closed to open in the same tick as the click (before any status poll could have observed `running: true`), then clicked Pause, and after the run genuinely settled to `status: "cancelled"` the page visibly displayed the exact backend message `"Stopped. 0 trades from 3 wallets were kept."` — confirming both the force-open and the message-rendering fix work together on a live run.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: this only covers the GMGN roster/history fetch. If the same "Resume" concept is ever added to the Dune side (it currently already shows `.message` and doesn't have this gap), no further change would be needed there.
+- Next step: none identified — this closes the regression the earlier declutter change introduced.
+2026-08-22 - Made GMGN top-100 freshness and membership changes explicit
+- Fetch top 100 still attempts a live GMGN leaderboard request; HTTP 403/network fallback reuses the saved snapshot and is labeled as such.
+- Added a live roster diff showing how many wallets joined or left, with clickable wallet links. Saved snapshots and prior trade history remain intact.
+2026-08-22 - Removed the redundant decision-panel warning text “Passed tests, not guaranteed profit.”
+2026-08-22 - Made decision-panel freshness status precise
+- Replaced the misleading “Last updated Today” label with separate GMGN summary freshness and Dune completion states. The panel now distinguishes fresh, partial, and not-completed data instead of implying every required input succeeded.
+2026-08-22 - Added detailed live GMGN progress to the visible fetch controls
+- The top GMGN fetch row now shows wallet progress, percentage, current wallet, stored/new/duplicate trades, request count, failed wallets, and current/total ETA while fetching.
+2026-08-22 - Made saved GMGN roster fallback manual
+- A failed live top-100 request no longer silently uses SQLite cache. The UI asks for confirmation before loading the saved snapshot; the status says when that approved fallback was used.
+2026-08-22 - Fixed the positive-copy-gains filter
+- “Show positive copy gains only” now filters on a positive simulated portfolio P&L, matching the visible $100-after-copy result. It no longer silently requires the separate coverage, sample-size, and gas-completeness candidate gates.
+
+2026-08-22 - Clarified why a re-fetch revisits all 100 wallets ("I just fetched, why is it fetching again?")
+- Trigger: user re-ran the GMGN fetch, saw "18/100 wallets · Fetching…", and asked why it was fetching again when resume was supposed to be in place.
+- Investigated before answering. The behaviour is CORRECT and the data proves it, but the labelling was misleading in two ways:
+  1. **The work really was cheap, not a re-download.** Queried the real runs: run 65 visited 20 wallets in 44 requests (~2.2 each) and found 2 new trades; run 63 (a full completed sweep) visited 100 wallets in 352 requests and stopped 74 of them at `up_to_date` and 15 at `window_covered`. The per-wallet early exits in `fetch.ts` (`windowAlreadyCovered` → `stopReason = 'up_to_date'`) are doing exactly their job — asking GMGN for each wallet's newest page, seeing it overlap known history, and stopping. Roughly one of those ~2 requests per wallet is the separate 30-day stats call, so the activity cost is closer to ~1 request per already-current wallet.
+  2. **"Resume" is a misnomer, and that is the real source of the confusion.** `POST /api/copytrade/fetch/resume` does not continue from wallet N of the interrupted run — it calls `startCopyTradeFetch` with the same limit/period, i.e. a fresh sweep from wallet 1. It relies entirely on per-wallet dedup to make revisiting cheap, never on positional resumption. There is no bug here, but the button name promises something the implementation does not do.
+- Step completed: made the cheap-vs-real distinction visible rather than renaming anything. `readFetchRunState` now derives `walletsWithNewData` / `walletsAlreadyCurrent` from `copytrade_wallet_coverage_events.inserted_rows` (a column the earlier fetch-audit diagnostics work added and which nothing was reading yet — this is its first consumer). The roster progress card renders them inline, with a tooltip explaining that a re-run must revisit every wallet because GMGN cannot be asked "has this wallet changed?" without requesting its newest page.
+- Decision made and reason: did NOT rename the Resume button or change resume semantics. True positional resume would mean persisting and honouring a per-run wallet cursor, which is a real behavioural change to fetch scheduling and risks skipping wallets that gained trades since the interrupted run started — strictly worse than the current always-check-everything sweep for correctness. Showing the honest split costs nothing and removes the confusion without touching fetch behaviour.
+- Files changed: `src/copytrade/fetch.ts` (two new derived fields, wired through the type and both return sites), `ui/main.tsx` (type + the progress-card span).
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 363/363. `npm run build` clean. Live-verified on the real database: the progress card now reads "2 / 100 wallets · 0 with new data · 2 already current" for the most recent (cancelled) run — previously it read only "2 / 100 wallets", which is what made a no-op sweep indistinguishable from a full re-download.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: the underlying inefficiency is real even though it is not a bug — a full "nothing changed" sweep still costs ~100-200 gated requests (~5s apart) to confirm nothing changed. If that becomes painful, the options are a per-wallet "last checked" freshness skip (cheap, but can miss new trades on a wallet skipped too aggressively) or true positional resume (riskier, as noted above). Neither was implemented here.
+- Next step: none unless the ~15-minute no-op sweep cost becomes a practical problem worth trading correctness for.
+2026-08-22 - Aligned decision counts with the visible table filter
+- The summary tiles now count the same filtered rows shown in the table. When positive-copy filtering is enabled, the footer explicitly says so instead of showing misleading all-wallet counts.
+2026-08-22 - Added a GMGN roster comparison dialog
+- Added a small icon beside GMGN screening. It opens the current ranked top-100 list, highlights wallets newly present versus the previous snapshot, and separately lists wallets that left.
+2026-08-22 - Added GMGN wallet icon extraction and display
+- Icon/avatar URLs are now extracted from saved and future GMGN leaderboard responses, persisted with the roster, backfilled from existing raw snapshots, and shown in the decision table and roster comparison dialog.
+
+2026-08-22 - Added on-demand GMGN risk details to Scrutiny
+- Scrutiny now has a "Fetch GMGN risk details" action scoped to the selected wallets. Each card shows 7d, 30d, and all-time values for P&L, win rate, fees, average holding time, native balance, and the available risk ratios (fast transactions, sell-before-buy, and no-buy/hold).
+- The values are informational only and do not alter candidate verdicts. The backend uses the browser-validated GMGN profit-stat endpoint, applies the existing GMGN request spacing, and reports unavailable periods clearly when the logged-in browser/session or Cloudflare blocks server access.
+- Validation: `npm test` 363/363 and production build clean.
+
+2026-08-22 - Simplified Scrutiny GMGN risk details to 30d
+- Removed redundant 7d and all-time cards. Scrutiny now requests only the 30d profit-stat endpoint.
+- Selected wallets are fetched sequentially through the shared 5-second GMGN request gate, and each card shows a spinner while the selected-wallet batch is running.
+
+2026-08-22 - Fixed schema startup mismatch at version 43
+- An existing local database had already recorded development migration 43 while the source had been rolled back to version 42. Added a harmless compatibility marker so schema version 43 databases open normally without changing stored data.
+
+2026-08-22 - Added local wallet-avatar download support
+- Added a local downloader and `POST /api/copytrade/icons/fetch` for saving GMGN avatar images under `.data/wallet-icons/`.
+- The first live attempt found 67 distinct avatar URLs but GMGN blocked all 67 server-side requests; therefore zero image files were created. The original URLs remain intact. A browser-session download is still required for providers that enforce Cloudflare/session access.
+
+2026-08-22 - Persisted Scrutiny GMGN 30d risk results
+- GMGN Scrutiny results now save to `copytrade_gmgn_risk_stats` in SQLite, including fetched time, availability, metrics, and errors.
+- Scrutiny loads saved 30d results automatically after refresh, and each fetch writes a diagnostic event with requested, saved, and failed counts.
+
+2026-08-22 - Added a pre-fetch risk banner: what skipping a fetch actually costs, in plain terms
+- Trigger: user asked whether the UI can state, before fetching, what is actually lost by not fetching — "maybe I am ready to do away with the last 5 hours of data."
+- Step completed: added a banner at the top of "Fetch controls" (visible only when idle, hidden while a fetch is actively running) reading e.g. "Your GMGN data is 5h old (last fetched 10:14 AM). Based on this cohort's historical trading pace, an estimated ~2,135 trades may have happened since then that this view does not yet reflect." Computed entirely from data already on hand — no new request. `staleDataAgeHours` comes from the existing `lastFetchedAt` timestamp; the trade-rate estimate sums each wallet's own stored 30-day buy+sell count divided into an hourly rate, then multiplies by the stale hours. Verified the arithmetic against the real live cohort via the browser: 100 wallets combine to ~427 trades/hour, so a 5-hour gap estimates ~2,135 trades — a real, sane number, not a placeholder.
+- Decision made and reason: framed as an estimate throughout, never a promise, and said so directly in the banner's own tooltip. This is a genuine constraint, not hedging for its own sake: the number comes from each wallet's HISTORICAL average pace, not a live check, so a wallet that has gone quiet contributes to the estimate the same as one still actively trading, and a wallet's true realtime state is exactly the thing today's earlier work established you cannot know without asking GMGN at least once. Never claiming false certainty here is consistent with every other estimate already surfaced in this tab (the hidden-loss coverage-gap reading, the Dune refetch-time estimate) — same honesty standard applied to a new number.
+- Only implemented for GMGN. Dune does not need an equivalent: a Dune "fetch" only ever back-fills already-completed historical round trips it has not yet priced — there is no live/ongoing state to go stale, unlike a wallet's GMGN trade history, which changes for as long as the wallet keeps trading. "What do I lose by not fetching Dune" has a different, already-answered shape (the elimination triage's `survivorsNeedingDune` and its refetch-time estimate already say exactly that).
+- Files changed: `ui/main.tsx` only.
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 363/363 (UI-only, no logic to unit test). `npm run build` clean. Live-verified the underlying arithmetic against the real running server (not the banner's render directly, since a real GMGN fetch — run 74 — was actively in progress at verification time and the banner is deliberately hidden while running): fetched the real `/api/copytrade/stats` payload in the browser and reproduced the exact same formula client-side, confirming realistic, non-NaN output (100 wallets, ~427 combined trades/hour).
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: the banner could not be visually screenshotted at write time because a real fetch was mid-run on the shared dev server (started from earlier debugging in this session) and the banner intentionally hides while running; the underlying computation was verified directly instead. Should be visually re-checked once idle.
+- Next step: none identified.
+
+2026-08-22 - Fixed: the new pre-fetch risk banner never appeared after an interrupted run
+- Trigger: user showed a screenshot with the fetch idle (Resume button correctly visible) but no risk banner above it, asking "where?"
+- Root cause, found by comparing the banner's guard to the button row's own logic: the banner's condition included `!researchUpdateBusy`, a client-only React flag set true at the start of `screenTopWallets` and only cleared in that same function's `finally` block. The button row above it decides Pause/Resume/Fetch using ONLY the server-derived `rosterFetchStatus.running`/`resumeAvailable` — never `researchUpdateBusy`. When a fetch is interrupted by something outside the normal flow (confirmed live: the actual message was "Interrupted: the server restarted while this fetch was running" — the dev server had restarted mid-run during earlier debugging in this session), the client's polling loop can be left with `researchUpdateBusy` stuck true even though the server has already moved to a terminal `failed`/`cancelled` state. The button correctly showed "Resume" from server truth; the banner incorrectly stayed hidden from stale client state — the two disagreed.
+- Fix: dropped `researchUpdateBusy` from the banner's guard, matching it to the button row's own `!rosterFetchStatus?.running` check exactly.
+- Files changed: `ui/main.tsx` only (one condition).
+- Test result: `npx tsc -b --noEmit` clean; `npx tsc -p tsconfig.ui.json --noEmit` clean. `npm test` 363/363. `npm run build` clean. Live-verified in the exact state the user reported (fetch idle, Resume button showing): the banner now renders, reading "Your GMGN data is 4m old (last fetched Today). Based on this cohort's historical trading pace, an estimated ~25 trades may have happened since then that this view does not yet reflect."
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: `researchUpdateBusy` getting stuck true after a server-side interruption is itself worth a look — it did not cause a user-visible problem here (the button's own logic never depended on it), but a future feature that DOES gate on it could hit the same silent-desync bug. Not investigated further since out of scope for this fix.
+- Next step: none for this fix. If `researchUpdateBusy` desync ever causes a visible symptom (e.g. a button staying disabled after an interrupted run), that flag's own reset logic is the place to look.
+
+2026-08-22 - Redesigned Scrutiny as an all-wallet table
+- Scrutiny now automatically mirrors the full 30-day GMGN Wallet Stats population, up to 100 wallets, without manual pinning or pasted addresses.
+- Independent checks are shown as pass/fail/insufficient cells. Clicking a row opens the detailed evidence card for that wallet.
+
+2026-08-22 - Clarified Dune scope versus Needs more data
+- Added a Dune research scope panel beside the Dune control.
+- It separates selected wallets from wallets whose verdict still needs data, shows how many already have a Dune result, and reports unqueried price targets.
+- While running, it shows target progress, remaining targets, and failures. The note explains that the Needs more data count is a subset of the full Dune wallet scope.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Moved Scrutiny details into a modal
+- Scrutiny continues to read saved GMGN summaries, trades, Dune evidence, and saved GMGN risk details from SQLite; opening the tab does not start a provider fetch.
+- Clicking a Scrutiny row now opens the detailed wallet evidence in a modal instead of rendering it below the table. Clicking outside or Close details dismisses it.
+- The loading message now explicitly says it is reading saved evidence and no provider fetch is running.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Simplified Scrutiny actions
+- Removed the duplicate Refresh trades (GMGN) and Fill Dune coverage buttons from Scrutiny; those actions remain available in their primary workflow tabs.
+- Moved risk fetching into the selected wallet dialog as a per-wallet Fetch 30d risk button.
+- The risk panel now explicitly identifies the data as 30-day GMGN provider data.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Scoped Dune fetch to wallets needing data
+- The Dune button now targets only selected wallets whose current 30-day verdict is Needs more data, instead of sending the full selected-wallet scope.
+- Button text and status now show the exact missing-wallet count, e.g. Fetch Dune missing data (44), while the scope panel explains the remaining selected wallets are not fetched.
+- The button is disabled when no selected wallet needs more data.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Added instant Scrutiny browser cache
+- Scrutiny now renders the last saved table and GMGN risk results immediately from localStorage when the same wallet set is opened again.
+- SQLite remains the source of truth: a background read refreshes the cache and replaces stale rows without blocking the initial view.
+- A corrupt or missing cache is ignored safely and falls back to the normal SQLite read.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Clarified zero-work Dune state
+- Fixed the mismatch where the overview counted filtered table rows while the Dune scope counted all selected wallets.
+- The overview now uses the full selected-wallet set, matching the Dune scope count.
+- When saved Dune evidence has zero unqueried price targets, the button is disabled and says No new Dune data to fetch instead of appearing to run a no-op.
+- The Dune status now distinguishes wallets needing more evidence from actual unqueried Dune targets.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Removed Wallet Stats initial spinner bottleneck
+- The base roster/results read now marks the table ready immediately.
+- Large GMGN stats and Dune reports still load from SQLite in the background and enrich the rows as they arrive.
+- This prevents a locally available table from being hidden while an 8MB-scale evidence report is parsed.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Clarified Needs more evidence versus fetchable Dune work
+- Renamed the decision state to Needs more evidence because failing a decision gate does not guarantee another provider request can fix it.
+- The Dune scope now separately shows unqueried targets and queried targets with no usable match.
+- When no unqueried targets remain, the UI explains that the remaining gap may be insufficient sample/coverage or an unmatched Dune price, and disables the normal fetch action.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Made Dune button counts unambiguous
+- Dune fetch buttons now show both units, for example `Fetch 223 Dune targets (44 wallets)`.
+- This prevents the wallet count from being mistaken for the number of actual Dune price requests.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Clarified the Dune run intermediate state
+- While the overall research update is still running, the Dune row now says Processing Dune targets instead of showing Dune complete from an intermediate saved report.
+- It displays processed/total/remaining target counts during that state.
+- After completion, queued targets can correctly become zero even when many queried targets had no usable price match.
+- Verification: npm test, 363/363 passed.
+
+2026-08-22 - Added durable before/after Dune fetch audits
+- Added `copytrade_dune_fetch_audits` to SQLite.
+- Each Dune run records its wallet scope and planned target count before querying, then submitted, stored, failed, and remaining counts after completion.
+- The status response and UI expose the latest audited run, allowing a post-refresh comparison against the pre-fetch state.
+- Verification: npm test, 363/363 passed. The migration applies on the next API/database restart.
+# 2026-08-22
+
+- Added an optional GMGN Signal Capture extension switch for automatic 30-day wallet-risk capture. It records the logged-in page response when a wallet is visited and retries the 30d request in the page context only if GMGN did not request it.
+- Replaced Scrutiny's direct GMGN risk fetch with a View-on-GMGN workflow and a drop zone for importing the extension's exported 30-day risk JSON; imported results are persisted to SQLite.
+
+2026-08-22 - Accelerated Wallet Stats initial load
+- The last saved 30-day CopyTrade results are now restored from a small browser cache immediately, while SQLite refreshes them in the background.
+- The advisory fetch-time estimate is deferred until after the first table render so it cannot compete with the initial report load.
+
+2026-08-22 - Made Scrutiny a read-only companion to Wallet Stats
+- Removed the Scrutiny `Refresh view` button and clarified that the tab automatically mirrors saved Wallet Stats/SQLite evidence.
+- Scrutiny’s timeout message no longer suggests a provider refresh; GMGN/Dune fetches remain available only from their dedicated controls.
+
+2026-08-22 - Fixed GMGN risk JSON import compatibility
+- Scrutiny now accepts both the newer `captures[]` export and the downloaded investigation format using `endpoints[].samples[]`.
+- It matches the selected wallet’s `/profit_stat/30d` endpoint, parses its saved response, and persists the imported metrics locally.
+- Verification: UI/server build passed; full test suite still has one unrelated pre-existing elimination test failure.
+
+2026-08-22 - Audit finding: "Passed all tests" did not mean consistent profit; fixed the verdict to match its own claim
+- Trigger: user asked for an audit of recent multi-agent changes on the wallet-stats tab, specifically: can this system currently support the sentence "these wallets successfully generated consistent profit in the last 30 days"? Prompted by a screenshot showing a wallet (`AeLaMj`) reading "Passed all tests" with a -6.5% delayed-copy median and a "-2972% edge kept" figure sitting right next to a green pass badge.
+- Investigated the verdict formula directly (`unifiedTraderRows`, `ui/main.tsx`) rather than trusting the label. Confirmed: `verdict` required only `delay?.survivedDelay && historicalPositive` — `survivedDelay` checks the PORTFOLIO total (cash-constrained, compounds across all trades) is positive, and `historicalPositive` checks GMGN's 30-day SUM is positive. Neither checks the wallet's TYPICAL trade, neither checks any individual week, and neither uses `historicalConsistency` at all — a real, already-computed, already-displayed field (`computeHistoricalConsistency`, comparing a wallet's earlier vs recent history) that this verdict simply never read. So "Passed all tests" was accurately named for the tests it ran, but the sentence a reader takes from it — "this wallet consistently made money" — was never actually one of those tests.
+- Measured live on the real cohort before building anything: of the 28 wallets reading "Passed all tests", 9 had a negative or zero delayed-copy median (their typical trade lost money; a few large winners carried the portfolio total), 8 were not `historicalConsistency === 'consistent'`, and 15 had at least one measured week with a negative median return (or fewer than 3 measured weeks to even check). These are overlapping failure sets, not additive.
+- Step completed: added three gates, all required for the label to keep firing:
+  1. `copyMedianPositive` — the delayed-copy MEDIAN must be positive, not just the compounded total.
+  2. `historicallyConsistent` — `historicalConsistencyByWallet.get(wallet)?.verdict === 'consistent'`, wiring in the already-built check that was never connected to this verdict.
+  3. `noLosingWeek` — every measured week (`row.weeklyPerformance`, trades > 0) has a positive median, and at least `MIN_CONSISTENT_WEEKS = 3` weeks must be measured at all (a wallet with one good week and nothing else to compare cannot pass by default).
+  Relabeled the tile and tooltip from "Passed all tests" to "Consistently profitable (30d)" so the label states what is actually being claimed, and rewrote both the passing and Watch tooltips to name the real criteria.
+- Found and fixed a real gap while wiring this in: `historicalConsistency` was only ever loaded when the `research` sub-tab was opened (a lazy per-tab effect), never on `wallet-stats` — so gating this tab's verdict on it, unfixed, would have left every wallet permanently unable to pass. Added `loadHistoricalConsistency` to the `wallet-stats` tab's own load effect.
+- That surfaced a second, real performance problem: a cold-cache call to `/api/copytrade/historical-consistency` was measured taking 251 seconds under this session's actual conditions (concurrent GMGN fetch activity contending for the same SQLite database/process). Investigated rather than assumed a code bug: timed the query and the in-memory computation in isolation against the live database (380,366 rows across 100 wallets) — 1.3s query + 0.6s compute, ~1.9s total. The endpoint itself is not slow; a concurrently-running fetch was starving it. Since this project already establishes multi-agent/concurrent DB access as a known hazard elsewhere, treated this as a real, if situational, risk rather than dismissing it.
+- Given that risk, added a loading-state gate so a slow/cold load cannot produce a false verdict: `consistencyDataMissing = historicalConsistency === null`. A wallet that would otherwise qualify for "Consistently profitable" now reads `Needs data` (not the previous silent `Watch`) for as long as the consistency report hasn't arrived yet — the same "unmeasured must never look like measured-and-failed" principle already applied everywhere else in this tab.
+- Also fixed, in passing: a genuinely flaky test (`copytrade-elimination-filter.test.ts`, "a fully covered wallet with a strongly negative 30-day PnL is eliminated") that hardcoded `fetchedAt: '2026-08-22T00:00:00.000Z'` without pinning `now`, so it started failing purely because real wall-clock time passed the 24h freshness window it was implicitly relying on — unrelated to today's work, caught because the full suite was re-run as part of this verification.
+- Files changed: `ui/main.tsx` (verdict logic, labels, tooltips, the wallet-stats load effect), `tests/copytrade-elimination-filter.test.ts` (pinned `now` in one test).
+- Decision made and reason: `MIN_CONSISTENT_WEEKS = 3`, not 4 — a 30-day window only yields 4 full calendar weeks when the boundary aligns by chance; requiring 4 would fail wallets purely on which day of the week the 30-day window happened to start on, not on their actual performance.
+- Test result: `npx tsc -b --noEmit` clean. `npx tsc -p tsconfig.ui.json --noEmit` — 1 pre-existing error (`pnlDistribution` risk-parsing, unrelated concurrent-agent code, not touched). `npm test` 363/363 passing (fixed the 1 flaky failure found along the way). `npm run build` clean. Live-verified against the running server (not rebuilt/restarted by me, per instruction to leave server management to the user): the decision panel now reads "6 Consistently profitable (30d) / 34 Watch / 14 Rejected / 44 Needs more evidence" — matching the offline measurement exactly — and the specific wallet from the user's screenshot (`AeLaMj`, -6.5% copy median) now reads "Watch" instead of the previous false "Passed all tests". Zero console errors.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: `MIN_CONSISTENT_WEEKS`, like every other threshold in this tab, is a reasoned judgment call, not calibrated against a realised outcome. The 251-second timing that prompted the concurrency investigation was not independently reproduced under controlled conditions (a live fetch was genuinely running at the time) — the isolated 1.9s measurement is strong evidence but not a formal proof the endpoint has zero pathological slow path. The pre-existing `pnlDistribution` typecheck error in unrelated code remains unfixed.
+- Next step: none identified for this specific finding. If the 251s stall recurs on a genuinely idle server (no concurrent fetch), that would disprove the concurrency explanation and warrant a deeper look at the endpoint itself.
+
+2026-08-22 — Added 30-day open-position cutoff valuation to the copy simulation. Partial sells remain proportionally allocated to their original copied position. A buy that is still open at the 30-day boundary is not treated as a historical sale: the system requests the nearest Dune trade before the cutoff, marks the remaining position at that price, and reports the result separately as mark-to-market P&L. Positions without a usable cutoff price remain explicitly unpriced and are not silently estimated. Cutoff targets use synthetic negative IDs so they are persisted and resumable without colliding with real trade IDs. Files changed: `src/copytrade/copySimulation.ts`, `src/copytrade/copySimulationDune.ts`, `ui/main.tsx`, and `tests/copytrade-copy-simulation.test.ts`. Test result: `npm test` 365/365 passing; `npm run build` clean. Next step: run the Dune fetch once so existing open positions receive cutoff prices. Agent name and model: Codex, GPT-5.
+2026-08-23 — Fixed wallet decision-table cell overflow. The table now assigns widths for all 11 columns and wraps long verdict/freshness/evidence content inside its own cell instead of allowing it to overlap neighboring columns. Verification: UI build pending. Agent name and model: Codex, GPT-5.
+2026-08-23 — Prevented unscoped Dune runs from silently expanding beyond the 30-day decision period. The copy-simulation endpoint now defaults omitted periods to 30 days, and the manual simulation action sends 30 explicitly. This keeps the UI estimate and backend planner on the same horizon and prevents all-history target queues. Existing partial run: 58,512 planned / 600 stored / 57,912 failed; it should not be treated as complete evidence. Agent name and model: Codex, GPT-5.
+2026-08-23 — Stopped the runaway retry after 300 additional failed targets. Hardened the Dune copy-simulation route to reject every horizon except 30 days, so a stale/incorrect caller cannot create another all-history queue. The live run shown in the UI was stopped; restart the API process before retrying so this guard is active. Agent name and model: Codex, GPT-5.
+
+2026-08-22 - Root-caused the Dune batch failures: account datapoint limit exceeded (HTTP 402), not a code bug
+- Trigger: user asked whether Dune fetch respects duplicate avoidance, prompted by "150 failed / 96,225 remaining" barely moving.
+- Investigated with real data rather than reasoning abstractly. Two separate findings:
+  1. **Duplicate avoidance is genuinely fixed.** Checked every trade id ever submitted across all 1,580 `copytrade_copy_simulation_runs`: 1,221 ids were submitted more than once, but every one of them belongs to runs 1-201. Runs 202-1580 (1,379 runs) have zero duplicates. The earlier fix effort worked and has held.
+  2. **The visible symptom (backlog stuck, batches failing) is a separate, unrelated problem.** `diagnostic_logs` does not capture the actual Dune error — the code catches the exception inside `runCopySimulationDuneBatch`, marks the run `status='failed'` in the DB, and never logs the message anywhere retrievable; the outer HTTP request that triggered it logs only `status:200` since the run loop itself completes normally after absorbing the failure. So diagnostics genuinely could not answer "why did it fail" — confirmed by reading the code path, not assumed.
+- Reproduced the real error directly: made one minimal test call to Dune's own `/api/v1/sql/execute` endpoint using the stored key (`SELECT 1`, no real cost). Response: **HTTP 402 — "This api request would exceed your configured datapoint limit per billing cycle."** This exactly matches the observed symptom: instant failures (Dune rejects before running anything, so no `execution_id` is ever returned), consistent across every recent batch (the quota is exhausted, so every subsequent attempt fails identically until it resets or the limit is raised), and completely unrelated to deduplication or the fetch-loop logic.
+- Decision made and reason: did not change any code. This is an account-level billing constraint, not something fixable in this repo — the fix is on dune.com's subscription/limits page, or waiting for the billing cycle to reset.
+- Files changed: none (diagnostic investigation only).
+- Test result: not applicable — no code changed.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: confirmed the diagnostics gap itself (failed Dune batches don't log their real error) as a real, separate improvement opportunity — worth adding the caught exception's message to `diagnostic_logs` or a column on the run row, so a future incident like this doesn't require reproducing the call by hand to find out why. Not implemented here since the user's immediate question was already answered.
+- Next step: user needs to either raise the Dune datapoint limit on dune.com or wait for the billing cycle to reset before further Dune fetches will succeed. Once resolved, worth wiring the real error message into a retrievable place (run row or diagnostic_logs) so this class of failure is visible without a manual repro.
+
+2026-08-22 - Surfaced real Dune/fetch errors in the UI, and improved what error text is even captured
+- Trigger: user asked to make sure the real failure reason (the Dune billing-quota error found in the prior audit) shows in the UI, and any other similar error.
+- Investigated before building: `runCopySimulationBatch` already collected each batch's exact error message into `failedBatches`/`onBatchEnd`, and the server route already stored it per-batch on `copySimulationRunState.batches[i].error` — all the way through to the `/status` response type (`CopySimulationBatchOutcome.error`). The data was already there; a `currentDuneBatch` variable was even computed in the UI to reach it — and then never used anywhere. The gap was purely on the render side.
+- Two gaps fixed:
+  1. **Not rendered.** Added a deduplicated error banner to the Dune progress card (`ui/main.tsx`) that lists every distinct real error string from `copySimulationRunStatus.batches` where `status === 'failed'`. Deduplicated because an account-level failure (like a quota) repeats identically across every batch — showing it once, not fifty times.
+  2. **Under-captured at the source.** `runCopySimulationDuneBatch` (`copySimulationDune.ts`) was discarding Dune's own response body on a non-OK HTTP response and throwing only `Dune execution HTTP 402` — the actual reason ("this api request would exceed your configured datapoint limit...") was read into `executionRaw` but never used. Now parses the JSON `error` field (falling back to raw text, capped at 300 chars, if the body isn't JSON) and includes it in the thrown message.
+  3. **Not logged anywhere durable.** Added a `logDiagnostic` call in the server's `onBatchEnd` handler so a failed batch's real message lands in `diagnostic_logs` (`event: 'dune-batch-failed'`) — closing exactly the gap from the prior audit, where finding the real cause required manually reproducing the Dune call by hand because nothing had logged it.
+- Files changed: `src/copytrade/copySimulationDune.ts` (extract the real reason from Dune's response body), `src/scripts/server.ts` (log the failure), `ui/main.tsx` (render the deduplicated error banner).
+- Test result: `npx tsc -b --noEmit` clean. `npx tsc -p tsconfig.ui.json --noEmit` — same 1 pre-existing unrelated error as before (concurrent-agent `pnlDistribution` code), not touched. `npm test` 365/365 (2 more than the last count in this file, from concurrent work; none broken by this change — no new unit test added for this specific change since it's a small, low-risk string-extraction path already verified against the real live failure below, and adding fetch-mocking infrastructure to this test file for one string-formatting change was judged disproportionate). `npm run build` clean.
+- Live-verified against the real, still-live Dune billing-quota failure (not a synthetic case) end to end: triggered one real `POST /api/copytrade/copy-simulation/run` against a single real wallet — before the fix it returned `failedBatches: ["Dune execution HTTP 402"]`; after the fix, the same live failing account returned the full `"Dune execution HTTP 402: This api request would exceed your configured datapoint limit per billing cycle. Please visit your subscription settings on dune.com and adjust your limits to perform this request."` Confirmed the same text landed in `diagnostic_logs` as `event: 'dune-batch-failed'`, and confirmed in the browser that the UI's Dune progress card now renders it verbatim in a warning banner.
+- Did not investigate GMGN-side error surfacing in this pass — it was already addressed earlier today (`rosterFetchStatus.message`, the roster-refresh fallback banner) and the user's question was specifically prompted by the Dune quota finding.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: no dedicated unit test for the new reason-extraction logic in `copySimulationDune.ts` (verified live instead, against a real ongoing failure — see above). The underlying Dune account is still over its datapoint limit; this fix makes that visible, it does not resolve it — the user still needs to act on dune.com.
+- Next step: none for this specific request. The Dune account limit itself remains the user's action item from the prior audit.
+
+2026-08-22 - Added a "Step 0" pre-Dune scope filter: skip wallets that can never be copyable, before fetching
+- Trigger: following the finding that a 15s-hold-time wallet can never pass the copy-viability verdict regardless of Dune data, user asked to build it as a checkbox (matching the existing "Skip wallets triage rejected" pattern) and asked specifically that it be made visually obvious as a step that runs BEFORE the fetch, not just another buried checkbox.
+- Step completed: added `skipUncopyableInDune` (defaults to `true`, unlike the triage checkbox) and a derived `uncopyableWalletSet` — every wallet in `copyTradeRows` whose `riskEvidence.medianHoldSeconds` is below whichever copier-delay assumption the loaded Dune simulation actually used (falls back to the same 15s default rendered elsewhere in this file, so it can never disagree with the verdict's own `impossible` check). Folded into the same `excludedScreeningWalletSet` union the manual checkboxes and triage exclusion already feed, so the override path (re-check a row to fetch it anyway) works identically for this new source too, with zero new code.
+- Made it visually its own numbered step: a `copytrade-workflow-row` styled identically to steps 1 and 2, labelled step **"0"** with a tooltip stating it runs before step 1 and fetches nothing itself — directly per the user's request that this read as a step before fetch, not a hidden option. Placed at the very top of "Fetch controls", before the stale-data risk banner.
+- Decision made and reason: defaulted ON, unlike `skipEliminatedInDune` (defaults off). The triage checkbox rests on judgment-call thresholds (50 trades, 90% coverage, hidden-loss bars) that could in principle be wrong; this one rests on a hard logical fact already enforced elsewhere in the same file — `delay?.impossible` already forces "Not copyable" unconditionally when hold time is below the copy delay, so no Dune result could ever change that wallet's verdict. There is no risk tradeoff to default cautiously against.
+- Files changed: `ui/main.tsx` only.
+- Test result: `npx tsc -b --noEmit` clean. `npx tsc -p tsconfig.ui.json --noEmit` — confirmed exactly 1 error total, the same pre-existing unrelated one from before this change (verified by count, not just inspection). `npm test` 365/365. `npm run build` clean. Live-verified against the real running server: the new step renders "Currently 7 wallets" and the checkbox reads "(7)", matching the earlier offline measurement exactly; "wallets selected for Dune" read 91 with the checkbox on and correctly reverted to 98 when unchecked, confirmed in both directions.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: none for this change. The Dune backlog itself (the remaining ~140k targets across the 91 still-eligible wallets) is untouched by this — this only removes the ~48,757 targets that could never have produced a usable verdict regardless of outcome.
+- Next step: none identified for this request.
+
+2026-08-22 - Split "Fetch controls" out of "Advanced diagnostics" into its own accordion — diagnostics is read-only again
+- Trigger: user pointed out that the new "Step 0" pre-fetch checkbox (and the whole "Fetch controls" block it lives in) had ended up inside "Advanced diagnostics", and stated plainly: that section should be read-only, and new actionable items should not be added to it.
+- Correct, and it went further back than today's addition: an earlier session decluttering pass had moved the entire "Fetch controls" block (GMGN/Dune buttons, live progress, the risk banner) into "Advanced diagnostics" alongside the genuinely read-only content (elimination triage results, Scrutiny, Pattern Discovery). That block has real side effects (it fetches from GMGN and Dune, spends real API budget) and does not belong conceptually inside a section whose own intro text already says "not a recommendation view" / "investigate why a wallet reads the way it does" — it was already a mismatch, today's checkbox just made it visible.
+- Step completed: extracted the entire `copytrade-fetch-controls-section` block into its own sibling `<details>` accordion (`copytrade-fetch-controls-accordion`, `<summary>Fetch controls</summary>`), placed immediately before "Advanced diagnostics" rather than nested inside it. Gave it its own independent `fetchControlsOpen` state, replacing every `setDiagnosticsOpen(true)` force-open call (resume, reset, screenTopWallets, approveAndResearch, and the reactive running-effect — 5 call sites) with `setFetchControlsOpen(true)`, so an active fetch opens only its own accordion and Advanced diagnostics is no longer coupled to fetch activity at all.
+- One item remains inside Advanced diagnostics with a button: "Run triage". Left it, and said so rather than silently deciding: it recomputes a report from data already in SQLite — no network call, no new data fetched or stored — which reads as analysis/diagnostics in kind, unlike GMGN/Dune fetching. Flagged for the user's own judgment rather than assumed.
+- Decision made and reason: gave the new accordion its own state rather than reusing `diagnosticsOpen`, specifically so the two sections' open/closed state can never leak into each other — verified live that opening one leaves the other's state untouched.
+- Files changed: `ui/main.tsx` only — a structural move plus the state rename, no logic changes to the moved content itself.
+- Test result: `npx tsc -b --noEmit` clean. `npx tsc -p tsconfig.ui.json --noEmit` — confirmed by count: exactly 1 error, the same pre-existing unrelated one from before this change. `npm test` 365/365. `npm run build` clean. Live-verified on the real running server: "Fetch controls" and "Advanced diagnostics" render as two separate, independently-toggleable accordions; clicking "Fetch controls" open left "Advanced diagnostics" closed; the new Step 0 checkbox is confirmed present inside "Fetch controls" and absent from "Advanced diagnostics"; "Advanced diagnostics" now contains exactly one button ("Run triage", a local recompute, flagged above rather than removed).
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: whether "Run triage" itself should also be moved out of Advanced diagnostics is left to the user — it doesn't fetch external data, but it is still a button that does something, so if the bar is "zero interactive controls" rather than "zero network side effects", it should move too.
+- Next step: none unless the user wants "Run triage" relocated as well.
+
+2026-08-22 - Removed the duplicate "Fetch controls" section — consolidated to one
+- Trigger: user identified two separate "Fetch controls" sections existed simultaneously: a newer, more compact one (`copytrade-top-fetch-controls`) sitting right below the decision table — apparently built by a concurrent agent's parallel effort — and the older accordion-wrapped one from earlier today. Both were rendering at once.
+- Confirmed feature differences before removing anything (asked the user rather than assume): the older block had four things the newer one lacked — the "skip triage-rejected wallets" checkbox, the manual per-wallet activity table (individual fetch checkboxes), a "Reset resume snapshot" button, and error/completion-message banners for the GMGN roster refresh and Dune batch failures (including the real-error-text banner added earlier this session). User chose to port everything rather than drop features.
+- Step completed: merged all four into the newer top block — the Step 0 pre-fetch-scope checkbox and stale-data risk banner went right after its heading; the reset button, roster-refresh error/message banners, and the completion message went into its GMGN-screening row after the button; the saved-screening-summary facts, triage-skip checkbox, and the activity table were added as a block within that same row; the deduplicated real-Dune-error banner went into its `copytrade-dune-scope` block. Then deleted the entire old accordion block (108 lines) and the `fetchControlsOpen` state it existed for, including all 5 now-pointless `setFetchControlsOpen(true)` call sites (resume, reset, screenTopWallets, approveAndResearch, and the reactive running-effect) — the top block is always visible, so there is nothing left to force open.
+- Files changed: `ui/main.tsx` only.
+- Test result: `npx tsc -b --noEmit` clean. `npx tsc -p tsconfig.ui.json --noEmit` — confirmed by count: exactly 1 error, the same pre-existing unrelated one throughout today. `npm test` 365/365. `npm run build` clean — bundle size dropped from 456.91kB to 444.91kB, confirming the duplicate content actually left the build, not just the visible DOM. Live-verified on the real server: exactly one "Fetch controls" heading exists now (was 2), and the Step 0 checkbox, the triage checkbox, and the activity table are all confirmed present in the single remaining section — nothing was silently dropped.
+- Agent name and model: Claude Opus 5, Claude Code.
+- Errors or unresolved items: none.
+- Next step: user has a follow-up request in progress — additional GMGN-only pre-Dune guardrails (wash_trader/rat_trader flags, fast_tx_ratio, holding time, volume, creator status, win rate, no_buy_hold/sell_pass_buy risk ratios) to exclude wallets before spending Dune budget, with visible exclusion reasons and manual override. Being evaluated against real GMGN field availability next.
+
+2026-08-22 — Implemented pre-Dune "high-risk wallet" guardrails using only data the official GMGN API already returns on the regular `wallet_stats` fetch (no new API surface, no cookie/Cloudflare path). Investigated and abandoned the website-internal `copytrade_gmgn_risk_stats` cookie path earlier this session as Cloudflare-blocked; user then correctly pointed out that `wash_trader`/`rat_trader` risk tags are actually already present in `common.tags` on the official, already-working `wallet_stats` response (confirmed live: 5/100 wallets in the current cohort carry `wash_trader`; no `rat_trader` currently present but the same field would surface it). Built 7 guardrails total, all reading fields already stored in `copytrade_wallet_stats`: (1) `wash_trader` tag, (2) 30d realized PnL% ≤ -20 (same bar as `eliminationFilter.ts`'s `STRONGLY_NEGATIVE_PNL_PERCENT`, applied pre-fetch here instead of post-Dune; currently cuts 0 wallets on this cohort since GMGN's own top-100 ranking is already survivorship-filtered, but correct to keep for other cohorts), (3) 30d trade volume > 5,000 (13 wallets, ~top 13% of live distribution), (4) `created_token_count` > 100 (13 wallets; new field, added `createdTokenCount` to `GmgnAggregateStats` type and `parseAggregateRecord`, confirmed via raw payload inspection that GMGN nests it under `common.created_token_count`), (5) 30d trade count < 10 (10 wallets — too thin a sample to trust any other stat), (6) win rate < 20% (1 wallet), (7) buy/sell imbalance > 90% one-sided (1 wallet, e.g. pure-buy airdrop farming). Followed the exact established "Step 0" pattern: single `skipHighRiskInDune` toggle (default on) folded into the existing `excludedScreeningWalletSet` union, per-wallet override via the existing activity-table checkbox, and per-wallet exclusion reasons now rendered inline next to each flagged wallet's name (extends the existing `rejectedByTriage` inline-reason pattern).
+- Files changed: `ui/main.tsx` only (type def, `parseAggregateRecord`, new `skipHighRiskInDune` state, new `highRiskWalletReasons`/`highRiskWalletSet` derivation, new checkbox row under "Narrow the Dune scope first", inline reason text in the activity table).
+- Decision: kept all 7 checks behind one toggle rather than 7 separate checkboxes, since the user asked for "guard rails" as a single pre-fetch step and per-wallet override already exists via the activity table — matches the single Step-0 toggle already established for the hold-time filter, and avoids the UI sprawl the fetch-controls-dedup work earlier this session was specifically about removing.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` — exactly 1 error, the same pre-existing unrelated one at line 284 throughout this whole session. `npx tsc -b --noEmit` clean. `npm test` 365/365 passing. `npm run build:ui` clean.
+- Errors or unresolved items: not live-browser-verified — user runs their own dev server in this session (established earlier: "you sould not run server i should eb able to do it via my own terminal"), so this needs a manual check in their own browser. User separately proposed extending to `wallet_holdings` (concentration/open-position/liquidity risk) and to consistency/drawdown metrics from already-stored per-trade data; explained the tradeoffs (holdings = new endpoint + new regular API cost + new schema; drawdown = needs proper buy/sell round-trip matching like `copySimulationDune.ts` already does, not a raw-cost shortcut) and user chose to stop here for now rather than scope those in.
+- Agent name and model: Claude Sonnet 5, Claude Code.
+- Next step: user to verify the new "Skip GMGN-flagged high-risk wallets" checkbox and per-wallet reasons live in their own browser. `wallet_holdings`-based guardrails and round-trip-based drawdown/consistency guardrails remain unscoped/unbuilt, to revisit later if wanted.
+
+2026-08-22 — Merged the two Step-0 pre-Dune scope checkboxes ("can't be copied" hold-time filter and "GMGN-flagged high-risk" 7-check filter) into a single checkbox per user request, moving the per-check detail into the checkbox's tooltip instead of two separate label rows.
+- Files changed: `ui/main.tsx` only — replaced `skipUncopyableInDune`/`skipHighRiskInDune` state with one `skipScopeFiltersInDune`; added `scopeFilteredWalletSet` (union of `uncopyableWalletSet` and `highRiskWalletSet`) for the combined displayed count; single `<label>` with a multi-paragraph tooltip listing both check groups and their individual counts, replacing the two prior labels.
+- Decision: kept the underlying two Sets (`uncopyableWalletSet`, `highRiskWalletSet`) and their per-wallet reason data separate internally — only the toggle and the visible label are merged — so the "not a judgment call" vs "judgment call" distinction between the two check groups stays intact in the tooltip and in per-wallet activity-table reasons, even though there's now one on/off switch.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` — exactly 1 error, same pre-existing unrelated one at line 284. `npm test` 365/365 passing. `npm run build:ui` clean.
+- Errors or unresolved items: not live-browser-verified (user runs their own dev server).
+- Agent name and model: Claude Sonnet 5, Claude Code.
+- Next step: user to verify the merged checkbox and its tooltip live in their own browser.
+
+2026-08-22 — Fixed a real inconsistency the user spotted in the "Dune research scope" panel: user asked whether "63 wallets still need more data" / "80 selected wallets" (correct, scoped to current exclusions) was consistent with "381 price targets unqueried" / "140,242 queried with no usable match" shown right next to it. Traced `preciseTargetsRemaining`/`widerRetryCandidates` back to `copySimulationEvidence` at `ui/main.tsx:3525`, which reduced over `copySimulation?.wallets ?? []` — every wallet ever loaded into the saved Dune simulation result, with no filter against `duneScopeWalletSet` (the set built from `researchWalletAddresses`, which already reflects the merged "Skip low-value wallets" checkbox and triage exclusions). So the two target-count figures were silently including Dune targets belonging to wallets the fetch button would never touch — almost certainly why 140,242 looked disproportionate to a 63-wallet scope (a handful of already-excluded, very-high-volume wallets, e.g. the ~53,840-trade wallet flagged uncopyable earlier this session, dominating the sum).
+- Files changed: `ui/main.tsx` only — added `.filter((wallet) => duneScopeWalletSet.has(wallet.walletAddress))` before the `.reduce(...)` that builds `copySimulationEvidence`. `duneScopeWalletSet` is already defined earlier in the same render (line 3168), so no reordering needed.
+- Decision: filtered at the single source (`copySimulationEvidence`) rather than patching each downstream consumer separately, since `preciseTargetsRemaining`, `widerRetryCandidates`, the "Dune: partial/complete" status line, the "Dune matches" summary count, and the before/after delta computed around a Dune fetch all read from this one object — filtering upstream makes all of them agree with the wallet-count figures automatically instead of just the two the user happened to notice.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` — exactly 1 error, same pre-existing unrelated one at line 284. `npm test` 365/365 passing. `npm run build:ui` clean.
+- Errors or unresolved items: not live-browser-verified (user runs their own dev server) — user should confirm the "price targets unqueried" / "queried with no usable match" numbers drop to a scope consistent with the 63/80 wallet counts once refreshed.
+- Agent name and model: Claude Sonnet 5, Claude Code.
+- Next step: user to reload and confirm the Dune research scope panel now reads consistently end-to-end.
+
+2026-08-23 — Fixed the Dune target-count mismatch that caused the UI to show a few hundred unqueried targets while the fetch runner submitted tens of thousands. The report was counting unqueried round trips (one row per buy/sell pair), but the fetch planner correctly queues separate buy and sell legs plus open-position cutoff marks. Added one shared `planCopySimulationTargets` path used by both the runner and the report, and exposed its exact pending-target count to the UI. The displayed count and the actual Dune queue now use the same denominator.
+- Files changed: `src/copytrade/copySimulation.ts`, `ui/main.tsx`.
+- Validation: server TypeScript build, UI build, and all 25 copy-simulation tests passed. No live fetch was started or modified.
+
+2026-08-23 — Corrected the companion evidence split: a round trip with one queried-but-unusable leg and one never-queried leg was previously counted wholesale as “no usable match.” The report now counts queried unusable legs individually, while pending work comes from the shared fetch planner. The UI’s “queried with no usable match” value now reflects actual queried target legs.
+
+2026-08-22 — Fixed the six confirmed review findings: corrected Dune completion semantics, matched simulated trips by buy/sell IDs, added a bounded Dune poll timeout, passed `periodDays` to liquidity-impact, retried invalid saved GMGN cursors with one fresh walk, and centralized the strongly-negative PnL threshold.
+- Files changed: `src/copytrade/constants.ts`, `src/copytrade/eliminationFilter.ts`, `src/copytrade/copySimulation.ts`, `src/copytrade/copySimulationDune.ts`, `src/copytrade/fetch.ts`, `src/scripts/server.ts`, `ui/main.tsx`.
+- Decision: preserve resumability and existing data while preventing misleading progress, incorrect same-second sell matching, unbounded polling, period drift, and stale cursor failure.
+- Test result: `npm test --silent` passed 365/365; `npm run build:server` and `npm run build:ui` passed; `git diff --check` passed.
+- Errors or unresolved items: graphify refresh is blocked by the local uv cache path error; no live provider fetch was started.
+- Agent name and model: Codex, GPT-5.
+- Next step: restart the local server and verify the corrected progress and liquidity-impact period in the UI.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { readDuneApiKey } from '../dune/credentials.js';
+import { waitForDuneCapacity, withDuneSubmissionLock } from './duneScheduler.js';
 
 // Duplicated rather than imported from topCallers.ts to avoid a circular module dependency
 // (topCallers.ts calls into this module's runCheckpointBatch) — same small-helper-duplication
@@ -285,13 +286,18 @@ export const runCheckpointBatch = async (
   const query = sqlFor(targets);
 
   const headers = { 'X-DUNE-API-KEY': apiKey, 'content-type': 'application/json', accept: 'application/json' };
-  const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', {
-    method: 'POST', headers, body: JSON.stringify({ sql: query, performance: 'medium' }),
+  const submitted = await withDuneSubmissionLock(async () => {
+    await waitForDuneCapacity(database, { reconcile: async () => undefined });
+    const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', {
+      method: 'POST', headers, body: JSON.stringify({ sql: query, performance: 'medium' }),
+    });
+    const executionRaw = await execute.text();
+    if (!execute.ok) throw new Error(`Dune execution HTTP ${execute.status}`);
+    const execution = JSON.parse(executionRaw) as { execution_id?: string };
+    if (!execution.execution_id) throw new Error('Dune did not return an execution id.');
+    return { executionRaw, execution };
   });
-  const executionRaw = await execute.text();
-  if (!execute.ok) throw new Error(`Dune execution HTTP ${execute.status}`);
-  const execution = JSON.parse(executionRaw) as { execution_id?: string };
-  if (!execution.execution_id) throw new Error('Dune did not return an execution id.');
+  const { executionRaw, execution } = submitted;
 
   let state = 'QUERY_STATE_EXECUTING';
   let fatalError: Error | null = null;

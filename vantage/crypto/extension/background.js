@@ -10,6 +10,9 @@ const HEARTBEAT_GAP_MULTIPLIER = 3;
 const INVESTIGATION_KEY = 'gmgn_investigation_samples';
 const INVESTIGATION_ACTIVE_KEY = 'gmgn_investigation_active';
 const INVESTIGATION_STARTED_KEY = 'gmgn_investigation_started_at';
+const RISK_AUTO_KEY = 'gmgn_risk_auto_active';
+const RISK_CAPTURE_KEY = 'gmgn_risk_captures';
+const LAST_RISK_HEADERS_KEY = 'gmgn_last_risk_request_headers';
 const INVESTIGATION_MAX_ENDPOINTS = 500;
 const INVESTIGATION_MAX_SAMPLES_PER_ENDPOINT = 5;
 let investigationWriteQueue = Promise.resolve();
@@ -47,6 +50,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     investigationWriteQueue = investigationWriteQueue.then(() => handleInvestigation(message.sample)).catch((error) => console.debug('gmgn-signal-capture: investigation sample dropped', error));
     return false;
   }
+  if (message.type === 'GET_RISK_STATE') {
+    getRiskState().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'SET_RISK_AUTO') {
+    setRiskAuto(Boolean(message.active)).then(sendResponse);
+    return true;
+  }
+  if (message.type === 'GMGN_RISK_CAPTURE') {
+    appendRiskCapture(message.capture).catch((error) => console.debug('gmgn-signal-capture: risk sample dropped', error));
+    return false;
+  }
+  if (message.type === 'EXPORT_RISK') {
+    exportRisk().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'GET_RISK_EXPORT') {
+    exportRisk().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'GET_LAST_RISK_HEADERS') {
+    getLastRiskHeaders().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'CLEAR_RISK') {
+    clearRisk().then(sendResponse);
+    return true;
+  }
   if (message.type === 'EXPORT_INVESTIGATION') {
     exportInvestigation().then(sendResponse);
     return true;
@@ -68,6 +99,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onStartup.addListener(() => reconcileOnWake());
 chrome.runtime.onInstalled.addListener(() => reconcileOnWake());
 reconcileOnWake();
+
+// Capture only the latest authenticated GMGN risk-request headers for the explicit
+// clipboard action. Nothing is exported and the session value disappears with the
+// browser/extension session. This never blocks, rewrites, or forwards the request.
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    const headers = Object.fromEntries((details.requestHeaders || [])
+      .filter((header) => /^(cookie|authorization)$/i.test(header.name))
+      .map((header) => [header.name.toLowerCase(), header.value || '']));
+    if (!headers.cookie && !headers.authorization) return;
+    chrome.storage.session.set({
+      [LAST_RISK_HEADERS_KEY]: {
+        capturedAt: new Date().toISOString(),
+        url: details.url,
+        cookie: headers.cookie || null,
+        authorization: headers.authorization || null,
+      },
+    }).catch(() => {});
+  },
+  { urls: ['https://gmgn.ai/pf/api/v1/wallet/*/profit_stat/30d*'] },
+  ['requestHeaders', 'extraHeaders'],
+);
 
 async function getWindows() {
   const { [COVERAGE_KEY]: windows = [] } = await chrome.storage.local.get(COVERAGE_KEY);
@@ -189,6 +242,49 @@ async function broadcastInvestigationState(active) {
   }
 }
 
+async function broadcastRiskAutoState(active) {
+  try {
+    const tabs = await chrome.tabs.query({ url: ['https://gmgn.ai/*'] });
+    await Promise.all(tabs.map((tab) => tab.id == null ? Promise.resolve() : chrome.tabs.sendMessage(tab.id, { type: 'SET_RISK_AUTO', active }).catch(() => {})));
+  } catch (error) {
+    console.debug('gmgn-signal-capture: risk state broadcast skipped', error);
+  }
+}
+
+async function setRiskAuto(active) {
+  await chrome.storage.local.set({ [RISK_AUTO_KEY]: active });
+  await broadcastRiskAutoState(active);
+  return getRiskState();
+}
+
+async function getRiskState() {
+  const values = await chrome.storage.local.get([RISK_AUTO_KEY, RISK_CAPTURE_KEY]);
+  return { riskAutoActive: values[RISK_AUTO_KEY] === true, riskCaptureCount: (values[RISK_CAPTURE_KEY] || []).length };
+}
+
+async function getLastRiskHeaders() {
+  const values = await chrome.storage.session.get(LAST_RISK_HEADERS_KEY);
+  return values[LAST_RISK_HEADERS_KEY] || null;
+}
+
+async function appendRiskCapture(capture) {
+  if (!capture || typeof capture.walletAddress !== 'string') return;
+  const { [RISK_AUTO_KEY]: active = false, [RISK_CAPTURE_KEY]: captures = [] } = await chrome.storage.local.get([RISK_AUTO_KEY, RISK_CAPTURE_KEY]);
+  if (!active) return;
+  const next = captures.filter((item) => !(item.walletAddress === capture.walletAddress && item.period === '30d'));
+  next.push({ ...capture, capturedAt: capture.capturedAt || new Date().toISOString(), period: '30d' });
+  await chrome.storage.local.set({ [RISK_CAPTURE_KEY]: next.slice(-500) });
+}
+
+async function exportRisk() {
+  const values = await chrome.storage.local.get(RISK_CAPTURE_KEY);
+  return { formatVersion: 1, exportedAt: new Date().toISOString(), extensionVersion: chrome.runtime.getManifest().version, source: 'gmgn-browser-risk-capture', period: '30d', captures: values[RISK_CAPTURE_KEY] || [] };
+}
+
+async function clearRisk() {
+  await chrome.storage.local.set({ [RISK_CAPTURE_KEY]: [] });
+}
+
 async function setInvestigationActive(active) {
   const updates = { [INVESTIGATION_ACTIVE_KEY]: active };
   if (active) updates[INVESTIGATION_STARTED_KEY] = new Date().toISOString();
@@ -220,9 +316,9 @@ async function clearAll() {
 }
 
 async function getState() {
-  const { [ACTIVE_KEY]: active = false, [STORAGE_KEY]: captures = [], [INVESTIGATION_ACTIVE_KEY]: investigationActive = false, [INVESTIGATION_KEY]: investigation = [] } = await chrome.storage.local.get([ACTIVE_KEY, STORAGE_KEY, INVESTIGATION_ACTIVE_KEY, INVESTIGATION_KEY]);
+  const { [ACTIVE_KEY]: active = false, [STORAGE_KEY]: captures = [], [INVESTIGATION_ACTIVE_KEY]: investigationActive = false, [INVESTIGATION_KEY]: investigation = [], [RISK_AUTO_KEY]: riskAutoActive = false, [RISK_CAPTURE_KEY]: riskCaptures = [] } = await chrome.storage.local.get([ACTIVE_KEY, STORAGE_KEY, INVESTIGATION_ACTIVE_KEY, INVESTIGATION_KEY, RISK_AUTO_KEY, RISK_CAPTURE_KEY]);
   const windows = await getWindows();
-  return { active, count: captures.length, coverageWindowCount: windows.length, investigationActive, investigationCount: investigation.length, investigationHitCount: investigation.reduce((total, endpoint) => total + (endpoint.samples?.length || 0), 0) };
+  return { active, count: captures.length, coverageWindowCount: windows.length, investigationActive, investigationCount: investigation.length, investigationHitCount: investigation.reduce((total, endpoint) => total + (endpoint.samples?.length || 0), 0), riskAutoActive, riskCaptureCount: riskCaptures.length };
 }
 
 async function exportCaptures() {

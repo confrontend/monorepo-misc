@@ -709,6 +709,13 @@ export const MIN_CALLER_CAPTURE_DATES = 3;
 export const MIN_CALLER_MEASURED_CALLS = 30;
 export const MIN_CALLER_COVERAGE_PERCENT = 70;
 
+/** A caller whose measured edge comes almost entirely from repeatedly buying one token hasn't
+ *  shown a repeatable skill — they had one good coin. Verified live: wallet 98T65wc… showed a
+ *  headline +34.3% median at +5m, but that was 42 buys of a single token at +65.2% masking 39
+ *  buys across 24 other tokens at −5.2%. Above this share of a caller's measured buys landing on
+ *  one token, the pooled median is reported but never called reliable. */
+export const MAX_SINGLE_TOKEN_SHARE_PERCENT = 40;
+
 export type CallerEvaluationRow = {
   callerKey: string;
   callCount: number;
@@ -719,6 +726,17 @@ export type CallerEvaluationRow = {
   coverageSufficient: boolean;
   winRatePercent: number | null;
   medianReturnPercent: number | null;
+  /** Sell-side calls are excluded from every return figure above — see computeCallerCheckpointStats.
+   *  Reported so the exclusion is visible rather than silent. */
+  sellCallCount: number;
+  /** Share of measured BUY calls landing on this caller's single most-called token, and that
+   *  token's symbol — the concentration the reliability gate keys off. */
+  topTokenSharePercent: number | null;
+  topTokenSymbol: string | null;
+  /** Same population as medianReturnPercent, but one value per token (median of per-token
+   *  medians) so a single heavily-repeated coin counts once. Diverging sharply from
+   *  medianReturnPercent is the signature of a one-token result. */
+  medianReturnPercentByToken: number | null;
   reliable: boolean;
 };
 
@@ -731,30 +749,77 @@ export type CallerEvaluationReport = {
  *  on Dune" and "Dune looked and found nothing" and "not enough different days yet" into one
  *  unlabeled "not reliable." More than one can apply at once (e.g. still waiting AND too few
  *  dates); an empty array means genuinely reliable. */
-export type CallerReliabilityReason = 'awaiting_dune_fetch' | 'insufficient_coverage' | 'awaiting_more_capture_dates' | 'no_callouts';
+export type CallerReliabilityReason = 'awaiting_dune_fetch' | 'insufficient_coverage' | 'awaiting_more_capture_dates' | 'single_token_concentration' | 'no_callouts';
 
 const computeCallerCheckpointStats = (
   database: DatabaseSync, callerKey: string, checkpoint: string,
   callouts: Array<{ id: number; callTimestamp: number }>,
 ): Omit<CallerEvaluationRow, 'callerKey'> & { reasons: CallerReliabilityReason[] } => {
-  if (callouts.length === 0) {
-    return { callCount: 0, measuredCallCount: 0, waitingCallCount: 0, unavailableCallCount: 0, coverageRatePercent: null, coverageSufficient: false, winRatePercent: null, medianReturnPercent: null, reliable: false, reasons: ['no_callouts'] };
-  }
+  const empty = {
+    callCount: 0, measuredCallCount: 0, waitingCallCount: 0, unavailableCallCount: 0,
+    coverageRatePercent: null, coverageSufficient: false, winRatePercent: null,
+    medianReturnPercent: null, sellCallCount: 0, topTokenSharePercent: null,
+    topTokenSymbol: null, medianReturnPercentByToken: null, reliable: false,
+  };
+  if (callouts.length === 0) return { ...empty, reasons: ['no_callouts'] };
 
   const placeholders = callouts.map(() => '?').join(',');
+  // Join through to the callout so each outcome carries its side and token. Measuring "price went
+  // up after this call" only means something for a BUY — the identical move after a SELL means the
+  // caller exited before a rally, which is the opposite of a win. Verified live: wallet 98T65wc…
+  // had 52 of 148 calls on the sell side, dragging a real buy signal and meaningless sell noise
+  // into one number. Sells are counted (sellCallCount) but never scored.
   const outcomeRows = database.prepare(
-    `SELECT status, measured_return_pct AS measuredReturnPct FROM top_caller_outcomes
-     WHERE checkpoint = ? AND callout_id IN (${placeholders})`,
-  ).all(checkpoint, ...callouts.map((c) => c.id)) as unknown as Array<{ status: string; measuredReturnPct: number | null }>;
+    `SELECT o.status AS status, o.measured_return_pct AS measuredReturnPct,
+            c.token_address AS tokenAddress, c.token_symbol AS tokenSymbol, c.raw_payload AS rawPayload
+     FROM top_caller_outcomes o
+     JOIN top_caller_callouts c ON c.id = o.callout_id
+     WHERE o.checkpoint = ? AND o.callout_id IN (${placeholders})`,
+  ).all(checkpoint, ...callouts.map((c) => c.id)) as unknown as Array<{
+    status: string; measuredReturnPct: number | null; tokenAddress: string; tokenSymbol: string | null; rawPayload: string;
+  }>;
 
-  const returns = outcomeRows.filter((o) => o.status === 'measured').map((o) => o.measuredReturnPct).filter((v): v is number => v !== null);
-  const unavailableCallCount = outcomeRows.filter((outcome) => outcome.status === 'no_trade_in_window').length;
-  const waitingCallCount = Math.max(0, callouts.length - returns.length - unavailableCallCount);
-  const coverageRatePercent = callouts.length ? round((returns.length / callouts.length) * 100, 1) : null;
+  const sideOf = (rawPayload: string): string => {
+    try { return String((JSON.parse(rawPayload) as { side?: unknown }).side ?? '').toLowerCase(); }
+    catch { return ''; }
+  };
+  // A row with no recorded side is kept rather than dropped: the side field is only absent on
+  // older captures, and silently discarding them would understate coverage. Only an explicit
+  // 'sell' is excluded.
+  const isSell = (rawPayload: string): boolean => sideOf(rawPayload) === 'sell';
+
+  const buyRows = outcomeRows.filter((row) => !isSell(row.rawPayload));
+  const sellCallCount = outcomeRows.length - buyRows.length;
+
+  const measuredBuys = buyRows.filter((row) => row.status === 'measured' && row.measuredReturnPct !== null) as Array<
+    typeof buyRows[number] & { measuredReturnPct: number }
+  >;
+  const returns = measuredBuys.map((row) => row.measuredReturnPct);
+  const unavailableCallCount = buyRows.filter((row) => row.status === 'no_trade_in_window').length;
+  const buyCallCount = Math.max(0, callouts.length - sellCallCount);
+  const waitingCallCount = Math.max(0, buyCallCount - returns.length - unavailableCallCount);
+  const coverageRatePercent = buyCallCount ? round((returns.length / buyCallCount) * 100, 1) : null;
   const coverageSufficient = returns.length >= MIN_CALLER_MEASURED_CALLS && coverageRatePercent !== null && coverageRatePercent >= MIN_CALLER_COVERAGE_PERCENT;
   const wins = returns.filter((r) => r > 0).length;
   const distinctDates = new Set(callouts.map((c) => new Date(c.callTimestamp * 1000).toISOString().slice(0, 10))).size;
-  const reliable = coverageSufficient && returns.length >= MIN_RELIABLE_CALLER_SAMPLE && distinctDates >= MIN_CALLER_CAPTURE_DATES;
+
+  // Per-token grouping serves two purposes: the concentration gate, and a median-of-token-medians
+  // that counts each coin once regardless of how many times it was re-bought.
+  const byToken = new Map<string, { symbol: string | null; values: number[] }>();
+  for (const row of measuredBuys) {
+    const entry = byToken.get(row.tokenAddress) ?? { symbol: row.tokenSymbol, values: [] };
+    entry.values.push(row.measuredReturnPct);
+    byToken.set(row.tokenAddress, entry);
+  }
+  const tokenGroups = [...byToken.values()].sort((a, b) => b.values.length - a.values.length);
+  const topToken = tokenGroups[0] ?? null;
+  const topTokenSharePercent = topToken && returns.length ? round((topToken.values.length / returns.length) * 100, 1) : null;
+  const perTokenMedians = tokenGroups.map((group) => median(group.values)).filter((v): v is number => v !== null);
+  const medianReturnPercentByToken = median(perTokenMedians);
+  const tokenConcentrationOk = topTokenSharePercent === null || topTokenSharePercent <= MAX_SINGLE_TOKEN_SHARE_PERCENT;
+
+  const reliable = coverageSufficient && returns.length >= MIN_RELIABLE_CALLER_SAMPLE
+    && distinctDates >= MIN_CALLER_CAPTURE_DATES && tokenConcentrationOk;
 
   const reasons: CallerReliabilityReason[] = [];
   if (!reliable) {
@@ -765,6 +830,7 @@ const computeCallerCheckpointStats = (
     if (waitingCallCount > 0) reasons.push('awaiting_dune_fetch');
     if (!coverageSufficient && waitingCallCount === 0) reasons.push('insufficient_coverage');
     if (distinctDates < MIN_CALLER_CAPTURE_DATES) reasons.push('awaiting_more_capture_dates');
+    if (!tokenConcentrationOk) reasons.push('single_token_concentration');
   }
 
   return {
@@ -776,6 +842,10 @@ const computeCallerCheckpointStats = (
     coverageSufficient,
     winRatePercent: returns.length ? round((wins / returns.length) * 100, 1) : null,
     medianReturnPercent: median(returns),
+    sellCallCount,
+    topTokenSharePercent,
+    topTokenSymbol: topToken?.symbol ?? null,
+    medianReturnPercentByToken,
     reliable,
     reasons,
   };

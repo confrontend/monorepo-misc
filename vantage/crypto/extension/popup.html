@@ -12,6 +12,7 @@
   button:hover { background: #20352b; }
   #toggle.active { background: #72d8aa; color: #112118; border-color: #72d8aa; font-weight: 600; }
   #investigate.active { background: #e5bd67; color: #211a0c; border-color: #e5bd67; font-weight: 700; }
+  #riskAuto.active { background: #72d8aa; color: #112118; border-color: #72d8aa; font-weight: 600; }
   .route-stats { margin-top: 9px; color: #c4d9ce; font-size: 12px; font-variant-numeric: tabular-nums; }
   small { display: block; margin-top: 10px; color: #71877c; line-height: 1.4; }
   .route-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -45,6 +46,15 @@
       <button id="exportInvestigation">Export investigation JSON</button>
       <button id="clearInvestigation">Clear investigation data</button>
       <div id="investigation-stats" class="route-stats">0 unique endpoints · 0 sampled hits</div>
+    </details>
+    <details class="route-card">
+      <summary><h2>Wallet risk details</h2></summary>
+      <p>When enabled, fetches and saves only GMGN’s 30-day JSON risk data when you visit a wallet page. Cookies are never saved or exported.</p>
+      <button id="riskAuto">Enable 30d risk capture</button>
+      <button id="copyCookie">Copy latest GMGN Cookie header</button>
+      <button id="exportRisk">Export 30d risk JSON</button>
+      <button id="clearRisk">Clear risk data</button>
+      <div id="risk-stats" class="route-stats">0 wallet risk response(s)</div>
     </details>
   </div>
   <small>These routes are independent. Investigation sampling is opt-in and does not alter normal signal storage. Nothing leaves your machine except the file you choose to export.</small>
