@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node \"C:/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage/8a84d430-6574-47b4-9251-b832a81b250c/scratchpad/peek.mjs\")",
+      "Bash(node \"C:/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage/8a84d430-6574-47b4-9251-b832a81b250c/scratchpad/peek2.mjs\")"
+    ]
+  }
+}

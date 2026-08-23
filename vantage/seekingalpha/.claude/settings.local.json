@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node scripts/check-readme.mjs)",
+      "Bash(node -e ' *)",
+      "Bash(node \"/c/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage-seekingalpha/99858b83-cfda-4afe-9996-49171d7c4e3a/scratchpad/path-check.mjs\")",
+      "Bash(git lfs *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(node /c/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage-seekingalpha/99858b83-cfda-4afe-9996-49171d7c4e3a/scratchpad/make-fixtures.mjs /c/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage-seekingalpha/99858b83-cfda-4afe-9996-49171d7c4e3a/scratchpad/consolidate-sandbox/vantage/seekingalpha/backtest/input/3-year/single)",
+      "Read(//c/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage-seekingalpha/99858b83-cfda-4afe-9996-49171d7c4e3a/scratchpad/consolidate-sandbox/vantage/seekingalpha/backtest/input/3-year/single/**)",
+      "Read(//c/Users/hamed/AppData/Local/Temp/claude/C--Code-monorepo-misc-vantage-seekingalpha/99858b83-cfda-4afe-9996-49171d7c4e3a/scratchpad/consolidate-sandbox/vantage/seekingalpha/backtest/**)",
+      "Bash(node scripts/consolidate-single-data.mjs)",
+      "Bash(echo \"EXIT CODE: $?\")",
+      "Bash(xargs -I{} ls -la --time-style=full-iso {})",
+      "Bash(sort -k6,7)",
+      "Bash(where python *)",
+      "Bash(py -3.12 -m pytest test_etf_pipeline.py -q)",
+      "Bash(\"/c/Users/hamed/AppData/Local/Programs/Python/Python313/python.exe\" -m pytest research/test_etf_pipeline.py -q)",
+      "Bash(sqlite3 .data/vantage.sqlite \".schema tickers\")",
+      "Bash(sqlite3 .data/vantage.sqlite \".tables\")",
+      "Bash(python3 -c ' *)",
+      "Bash(py -3 -c \"import pandas, numpy, scipy; print\\('ok'\\)\")",
+      "Bash(py -0p)",
+      "Bash(py -3.11 -c \"import pandas, numpy, scipy; print\\('ok', pandas.__version__\\)\")",
+      "Bash(py -3.13 -m pip install --quiet pandas numpy scipy)",
+      "Bash(npm.cmd run *)",
+      "Bash(node --experimental-sqlite -e ' *)",
+      "Read(//c/Code/monorepo-misc/vantage/crypto/**)"
+    ]
+  }
+}

@@ -85,15 +85,6 @@ type PatternDiscoveryReport = { project: 'crypto'; patterns: Array<{ source?: st
 type PatternDiscoveryExecution = { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string };
 type PatternDiscoveryRunResponse = { report: PatternDiscoveryReport; execution?: PatternDiscoveryExecution };
 
-const patternDiscoveryReportStorageKey = (periodDays: number): string => `vantage.crypto.pattern-discovery-report.${periodDays}d`;
-
-const readStoredPatternDiscoveryReport = (periodDays: number): PatternDiscoveryReport | null => {
-  try {
-    const stored = window.localStorage.getItem(patternDiscoveryReportStorageKey(periodDays));
-    return stored ? JSON.parse(stored) as PatternDiscoveryReport : null;
-  } catch { return null; }
-};
-
 const patternFeatureLabel = (feature: string | undefined): string => ({
   prior_wallet_trade_count: 'Previous wallet trades',
   prior_token_trade_count: 'Previous trades for this token',
@@ -143,18 +134,6 @@ type GmgnLeaderboardMetric = { pnl1d: unknown; pnl7d: unknown; pnl30d: unknown; 
 type CopyTradeRow = { walletAddress: string; name: string | null; iconUrl?: string | null; trades: number | null; winRatePercent: number | null; medianReturnPercent: number | null; averageReturnPercent: number | null; endingCapitalUsd: number | null; endingCapitalUsdCompounded: number | null; coveredDays: number | null; capitalPath?: Array<{ day: string; capitalUsd: number }>; verdict: 'screen_pass' | 'no' | 'thin' | 'flagged' | 'descriptive_only'; comparable: boolean; riskFlags: string[]; gmgnTags?: string[]; failedRules: string[]; truncated?: boolean; historyFailed?: boolean; riskEvidence?: { medianHoldSeconds: number | null; walletAgeDays: number | null; under15SecondsPercent?: number | null; under15SecondsCount?: number; pairedTradeCount?: number }; profitConcentration: CopyTradeConcentration; weeklyPerformance: CopyTradePeriod[]; monthlyPerformance: CopyTradePeriod[]; rankHistory: CopyTradeRankHistory; representativeSampled?: boolean; representativePopulationTrades?: number; representativeSampleTrades?: number; gmgnAggregate?: GmgnAggregateStats };
 type CopyTradeResults = { computedAt: string; startingCapitalUsd: 100; periodDays: number | null; rows: CopyTradeRow[]; overall: CopyTradeOverallRow; overallByWallet: CopyTradeOverallRow; rules: { minTrades: number | null; minDays: number | null; requiresPositiveMedian: boolean }; representativeSampling?: { method: string; maxSellsPerWallet: number | null; sampledWallets: number; populationTrades: number; selectedTrades: number }; scope?: { rosterSnapshotId: number | null; rosterProvenance: { capturedAt: string; window: string | null; orderby: string | null; requestPath: string | null; requestQuery: Record<string, unknown> } | null }; walletPerformance?: { status: 'available'; description: string }; copySimulation?: { status: 'not_available'; description: string; requiredInputs: string[] } };
 
-const walletStatsResultsStorageKey = 'vantage.crypto.wallet-stats-results.v1';
-
-const readStoredWalletStatsResults = (): CopyTradeResults | null => {
-  try {
-    const raw = window.localStorage.getItem(walletStatsResultsStorageKey);
-    if (!raw) return null;
-    const stored = JSON.parse(raw) as { periodDays?: unknown; results?: unknown };
-    return stored.periodDays === 30 && stored.results && typeof stored.results === 'object'
-      ? stored.results as CopyTradeResults
-      : null;
-  } catch { return null; }
-};
 type CopyTradeOverallRow = { trades: number | null; winRatePercent: number | null; medianReturnPercent: number | null; averageReturnPercent: number | null; endingCapitalUsd: number | null; weighting: 'trade-weighted' | 'wallet-weighted'; wallets: number | null };
 type CopyTradeSortKey = 'name' | 'trades' | 'winRatePercent' | 'medianReturnPercent' | 'averageReturnPercent' | 'endingCapitalUsd' | 'verdict';
 type DecisionSortKey = 'default' | 'rank' | 'name' | 'verdict' | 'gmgnPnl' | 'copyResult' | 'copyCapital' | 'coverage' | 'activity';
@@ -314,7 +293,6 @@ const freshnessLabel = (fetchedAt: string | null | undefined): { text: string; s
   return { text: `${Math.round(hours / 24)}d ago`, stale: true };
 };
 
-const ELIMINATION_REPORT_STORAGE_KEY = 'vantage.crypto.elimination-report';
 const COPY_EVIDENCE_MIN_COVERAGE_PERCENT = 90;
 const COPY_EVIDENCE_MIN_ROUND_TRIPS = 30;
 /** Weeks of the wallet's own history that must be measured, and all positive, before the verdict
@@ -324,17 +302,6 @@ const COPY_EVIDENCE_MIN_ROUND_TRIPS = 30;
  *  trading outcome. */
 const MIN_CONSISTENT_WEEKS = 3;
 
-/** A restored report is a snapshot of whatever the database held when it was computed, not a
- *  live read — so `generatedAt` is always rendered beside it. The shape check is deliberate:
- *  a report saved before a field was added would otherwise crash the table on restore. */
-const readStoredEliminationReport = (): EliminationReport | null => {
-  try {
-    const stored = window.localStorage.getItem(ELIMINATION_REPORT_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored) as EliminationReport;
-    return Array.isArray(parsed?.surviving) && Array.isArray(parsed?.eliminated) && parsed?.duneEstimate ? parsed : null;
-  } catch { return null; }
-};
 type DuneRefetchEstimate = { targetsNeeded: number; secondsPerTarget: number; estimatedSeconds: number; basis: 'measured' | 'seeded'; runsCounted: number };
 type EliminationReport = {
   generatedAt: string; totalWallets: number; eliminated: WalletEliminationEntry[]; surviving: WalletEliminationEntry[];
@@ -1024,7 +991,7 @@ function App() {
   const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [copyTradeSummary, setCopyTradeSummary] = useState<CopyTradeSummary | null>(null);
   const [copyTradeStatus, setCopyTradeStatus] = useState<CopyTradeFetchStatus | null>(null);
-  const [copyTradeResults, setCopyTradeResults] = useState<CopyTradeResults | null>(() => readStoredWalletStatsResults());
+  const [copyTradeResults, setCopyTradeResults] = useState<CopyTradeResults | null>(null);
   const [copyTradeRosters, setCopyTradeRosters] = useState<CopyTradeRosterCatalog | null>(null);
   const [selectedRosterSnapshotId, setSelectedRosterSnapshotId] = useState<number | null>(null);
   const [copyTradeLimit, setCopyTradeLimit] = useState(100);
@@ -1043,7 +1010,7 @@ function App() {
   const [gmgnLeaderboardMetrics, setGmgnLeaderboardMetrics] = useState<Record<string, GmgnLeaderboardMetric>>({});
   const [gmgnStatsBusy, setGmgnStatsBusy] = useState(false);
   const [gmgnStatsLoading, setGmgnStatsLoading] = useState(false);
-  const [walletStatsReady, setWalletStatsReady] = useState(() => readStoredWalletStatsResults() !== null);
+  const [walletStatsReady, setWalletStatsReady] = useState(false);
   const [rosterSyncBusy, setRosterSyncBusy] = useState(false);
   const [rosterRefreshMessage, setRosterRefreshMessage] = useState<string | null>(null);
   const [rosterRefreshError, setRosterRefreshError] = useState<string | null>(null);
@@ -1055,7 +1022,7 @@ function App() {
   const [patternDiscoveryExport, setPatternDiscoveryExport] = useState<PatternDiscoveryExport | null>(null);
   const [patternDiscoveryLoading, setPatternDiscoveryLoading] = useState(false);
   const [patternDiscoveryError, setPatternDiscoveryError] = useState<string | null>(null);
-  const [patternDiscoveryReport, setPatternDiscoveryReport] = useState<PatternDiscoveryReport | null>(() => readStoredPatternDiscoveryReport(30));
+  const [patternDiscoveryReport, setPatternDiscoveryReport] = useState<PatternDiscoveryReport | null>(null);
   const [patternDiscoveryExecution, setPatternDiscoveryExecution] = useState<PatternDiscoveryExecution | null>(null);
   const [patternDiscoveryRunLoading, setPatternDiscoveryRunLoading] = useState(false);
   const [patternDiscoveryRunError, setPatternDiscoveryRunError] = useState<string | null>(null);
@@ -1128,7 +1095,7 @@ function App() {
       return Array.isArray(parsed) ? parsed.filter((wallet): wallet is string => typeof wallet === 'string') : [];
     } catch { return []; }
   });
-  const [eliminationReport, setEliminationReport] = useState<EliminationReport | null>(readStoredEliminationReport);
+  const [eliminationReport, setEliminationReport] = useState<EliminationReport | null>(null);
   const [eliminationLoading, setEliminationLoading] = useState(false);
   const [eliminationError, setEliminationError] = useState<string | null>(null);
   const [scrutinyResponse, setScrutinyResponse] = useState<ScrutinyResponse | null>(null);
@@ -1248,17 +1215,12 @@ function App() {
     }
   };
 
-  const loadPatternDiscoveryExport = async (periodDays = copyTradePeriodDays, preserveStoredReport = false) => {
+  const loadPatternDiscoveryExport = async (periodDays = copyTradePeriodDays) => {
     setPatternDiscoveryLoading(true);
     setPatternDiscoveryError(null);
     setPatternDiscoveryRunError(null);
     setPatternDiscoveryExecution(null);
-    if (preserveStoredReport) {
-      setPatternDiscoveryReport(readStoredPatternDiscoveryReport(periodDays));
-    } else {
-      try { window.localStorage.removeItem(patternDiscoveryReportStorageKey(periodDays)); } catch { /* Persistence is best effort. */ }
-      setPatternDiscoveryReport(null);
-    }
+    setPatternDiscoveryReport(null);
     try {
       setPatternDiscoveryExport(await api<PatternDiscoveryExport>(`/api/copytrade/pattern-discovery/export?periodDays=${periodDays}`));
     } catch (error: unknown) {
@@ -1277,8 +1239,6 @@ function App() {
       );
       setPatternDiscoveryReport(result.report);
       setPatternDiscoveryExecution(result.execution ?? null);
-      try { window.localStorage.setItem(patternDiscoveryReportStorageKey(copyTradePeriodDays), JSON.stringify(result.report)); }
-      catch { /* Persistence is best effort. */ }
     } catch (error: unknown) {
       setPatternDiscoveryRunError(error instanceof Error ? error.message : String(error));
     } finally { setPatternDiscoveryRunLoading(false); }
@@ -1310,13 +1270,12 @@ function App() {
   const loadElimination = async (rosterSnapshotId = selectedRosterSnapshotId): Promise<EliminationReport | null> => {
     setEliminationLoading(true);
     setEliminationError(null);
+    setEliminationReport(null);
     try {
       const params = new URLSearchParams({ limit: '100' });
       if (rosterSnapshotId) params.set('snapshotId', String(rosterSnapshotId));
       const report = await api<EliminationReport>(`/api/copytrade/elimination?${params.toString()}`);
       setEliminationReport(report);
-      try { window.localStorage.setItem(ELIMINATION_REPORT_STORAGE_KEY, JSON.stringify(report)); }
-      catch { /* Persistence is best effort; the in-memory report stays usable either way. */ }
       return report;
     } catch (error: unknown) { setEliminationError(error instanceof Error ? error.message : String(error)); return null; }
     finally { setEliminationLoading(false); }
@@ -1335,20 +1294,7 @@ function App() {
     const controller = new AbortController();
     scrutinyLoadAbortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 45_000);
-    const cacheKey = wallets.join('|');
-    let cached = false;
-    try {
-      const raw = window.localStorage.getItem('vantage.crypto.scrutiny-cache.v1');
-      if (raw) {
-        const saved = JSON.parse(raw) as { walletKey?: string; response?: ScrutinyResponse; risk?: GmgnRiskResponse };
-        if (saved.walletKey === cacheKey && saved.response) {
-          setScrutinyResponse(saved.response);
-          if (saved.risk) setGmgnRiskResults(Object.fromEntries(saved.risk.results.map((result) => [`${result.walletAddress}|${result.period}`, result])));
-          cached = true;
-        }
-      }
-    } catch { /* A corrupt cache is ignored; SQLite remains the source of truth. */ }
-    setScrutinyLoading(!cached);
+    setScrutinyLoading(true);
     setScrutinyError(null);
     try {
       const params = new URLSearchParams({ wallets: wallets.join(',') });
@@ -1357,7 +1303,6 @@ function App() {
       const savedRisk = await api<GmgnRiskResponse>(`/api/copytrade/scrutiny/gmgn-risk?wallets=${encodeURIComponent(wallets.join(','))}`, { signal: controller.signal });
       setScrutinyResponse(response);
       setGmgnRiskResults(Object.fromEntries(savedRisk.results.map((result) => [`${result.walletAddress}|${result.period}`, result])));
-      try { window.localStorage.setItem('vantage.crypto.scrutiny-cache.v1', JSON.stringify({ walletKey: cacheKey, response, risk: savedRisk, savedAt: new Date().toISOString() })); } catch { /* Cache is best effort. */ }
     } catch (error: unknown) {
       if (scrutinyLoadAbortRef.current === controller) {
         setScrutinyError(error instanceof DOMException && error.name === 'AbortError' ? 'Reading saved Scrutiny evidence timed out. No provider request was made.' : error instanceof Error ? error.message : String(error));
@@ -1598,13 +1543,6 @@ function App() {
       ]);
       setCopyTradeSummary(summary);
       setCopyTradeResults(results);
-      try {
-        window.localStorage.setItem(walletStatsResultsStorageKey, JSON.stringify({
-          periodDays: results.periodDays,
-          savedAt: new Date().toISOString(),
-          results,
-        }));
-      } catch { /* Browser cache is best effort; SQLite remains the source of truth. */ }
       setCopyTradeStatus(status);
       setCopySimulationRunStatus(duneStatus);
       // Wallet-stats uses the full selected table scope, not only the default screen-pass
@@ -1959,7 +1897,7 @@ function App() {
 
   useEffect(() => {
     // The estimate is advisory and can never improve the first render. On the wallet-stats
-    // tab, let the cached/results table render first; otherwise a slow estimate request can
+    // tab, let the database-backed results table render first; otherwise a slow estimate request can
     // compete with the initial report read and make the page look stuck.
     if (WALLET_STATS_ONLY && copyTradeSubTab === 'wallet-stats' && !walletStatsReady) return;
     const timer = window.setTimeout(() => { void loadCopyTradeEstimate(copyTradeLimit, copyTradePeriodDays); }, WALLET_STATS_ONLY ? 1200 : 0);
@@ -1971,7 +1909,7 @@ function App() {
       setWalletStatsReady(false);
       void (async () => {
         try {
-          // Render the cached roster/report as soon as the base reads finish. GMGN stats and
+          // Render the database-backed roster/report as soon as the base reads finish. GMGN stats and
           // Dune evidence refresh in the background instead of blocking the table spinner.
           const pageResults = await loadCopyTradePage(false);
           const walletAddresses = pageResults?.rows.map((row) => row.walletAddress);
@@ -2014,8 +1952,12 @@ function App() {
     }
   }, [copyTradeSubTab, copyTradeLimit, selectedRosterSnapshotId, copyTradeRosters?.selectedByDefault]);
   useEffect(() => {
+    if (WALLET_STATS_ONLY || activeMenu !== 'copytrade' || copyTradeSubTab !== 'wallet-stats') return;
+    void loadElimination(selectedRosterSnapshotId ?? undefined);
+  }, [activeMenu, copyTradeSubTab, selectedRosterSnapshotId]);
+  useEffect(() => {
     if (copyTradeSubTab !== 'pattern-discovery') return;
-    void loadPatternDiscoveryExport(copyTradePeriodDays, true);
+    void loadPatternDiscoveryExport(copyTradePeriodDays);
   }, [copyTradeSubTab, copyTradePeriodDays]);
   useEffect(() => {
     if (copyTradeSubTab !== 'wallet-stats' || !gmgnStatsStatus?.running) return;
@@ -2483,6 +2425,7 @@ function App() {
   const duneHistoryFailedCount = copyTradeRows.filter((row) => row.historyFailed).length;
   const duneManuallyExcludedCount = (copyTradeRows.length > 0 ? copyTradeRows.map((row) => row.walletAddress) : visibleWalletScreenSummary?.activityLeaders.map((entry) => entry.wallet) ?? []).filter((wallet) => excludedScreeningWalletSet.has(wallet)).length;
   const duneSelectionNote = [duneHistoryFailedCount > 0 ? `${duneHistoryFailedCount} history incomplete` : null, duneManuallyExcludedCount > 0 ? `${duneManuallyExcludedCount} excluded` : null].filter(Boolean).join(' · ');
+  const activityWalletAddresses = visibleWalletScreenSummary?.activityLeaders.map((entry) => entry.wallet) ?? [];
   const toggleScreeningWallet = (wallet: string) => {
     if (excludedScreeningWalletSet.has(wallet)) {
       setExcludedScreeningWallets((current) => current.filter((entry) => entry !== wallet));
@@ -2491,6 +2434,14 @@ function App() {
       setIncludedScreeningWallets((current) => current.filter((entry) => entry !== wallet));
       setExcludedScreeningWallets((current) => current.includes(wallet) ? current : [...current, wallet]);
     }
+  };
+  const selectAllScreeningWallets = () => {
+    setIncludedScreeningWallets(activityWalletAddresses);
+    setExcludedScreeningWallets([]);
+  };
+  const deselectAllScreeningWallets = () => {
+    setIncludedScreeningWallets([]);
+    setExcludedScreeningWallets(activityWalletAddresses);
   };
 
   const fetchTop100GmgnHistoryAndWait = async (periodDays: number): Promise<CopyTradeFetchStatus> => {
@@ -3095,7 +3046,7 @@ function App() {
     if (researchUpdateBusy) return;
     const screeningSummary = visibleWalletScreenSummary;
     let approvedWalletAddresses = duneNeedsDataWalletAddresses;
-    // A localStorage triage result is only a hint. Before spending Dune budget, refresh it from
+    // A triage result is only a hint. Before spending Dune budget, refresh it from
     // the backend when its GMGN/Dune inputs are no longer current (including changes made in
     // another browser session), then derive the actual fetch list from that fresh report.
     if (skipEliminatedInDune && eliminationReport?.eliminated.length && !triageHasCurrentInputs) {
@@ -3181,6 +3132,7 @@ function App() {
   // the button will actually submit, the same way duneNeedsDataCount already scopes the wallet
   // count.
   const duneNeedsDataWalletSet = new Set(duneNeedsDataWalletAddresses);
+  const unifiedTraderRowByWallet = new Map(unifiedTraderRows.map((entry) => [entry.row.walletAddress, entry]));
   const scopedCopySimulationWallets = (copySimulation?.wallets ?? []).filter((wallet) => duneNeedsDataWalletSet.has(wallet.walletAddress));
   const sumWalletTargetField = (key: 'pendingDuneTargets' | 'duneNoMatchTargets' | 'duneMatchedTargets'): number =>
     scopedCopySimulationWallets.reduce((total, wallet) => total + (wallet[key] ?? 0), 0);
@@ -3580,6 +3532,15 @@ function App() {
             getRowKey={(report) => report.walletAddress}
             rowProps={(report) => ({ className: 'scrutiny-table-row', tabIndex: 0, role: 'button', onClick: () => setSelectedScrutinyWallet(report.walletAddress), onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedScrutinyWallet(report.walletAddress); } })}
             columns={[
+              {
+                key: 'rank',
+                header: 'Rank',
+                cellProps: () => ({ title: 'Current rank in the selected GMGN top-100 roster' }),
+                render: (report) => {
+                  const rank = copyTradeRows.find((row) => row.walletAddress === report.walletAddress)?.rankHistory.currentRank ?? null;
+                  return rank === null ? '—' : `#${rank}`;
+                },
+              },
               { key: 'wallet', header: 'Wallet', render: (report) => <><strong>{report.name?.trim() || shortAddress(report.walletAddress)}</strong><small title={report.walletAddress}>{shortAddress(report.walletAddress)}</small></> },
               ...Object.values(scrutinyResponse.reports[0].checks).map((firstCheck) => ({
                 key: firstCheck.key,
@@ -3717,7 +3678,7 @@ function App() {
                 <input type="checkbox" checked={skipEliminatedInDune} disabled={!triageHasCurrentInputs || eliminationReport?.eliminated.length === 0} onChange={(event) => setSkipEliminatedInDune(event.target.checked)} />
                 Skip wallets triage rejected{eliminationReport ? ` (${eliminationReport.eliminated.length})` : ''}{eliminationReport && !triageHasCurrentInputs ? ' · triage out of date' : ''}
               </label>
-              <details><summary>Show activity table ({visibleWalletScreenSummary.activityLeaders.length})</summary><div className="table-wrap copytrade-screening-activity-table"><table><thead><tr><th>Fetch?</th><th>Activity #</th><th>Rank</th><th>Trader</th><th>Trades</th><th>Net profit (30d)</th><th>Delay fit</th></tr></thead><tbody>{visibleWalletScreenSummary.activityLeaders.map((entry, index) => { const excluded = excludedScreeningWalletSet.has(entry.wallet); const rejectedByTriage = triageEliminatedWalletSet.has(entry.wallet); const highRiskReasons = highRiskWalletReasons.get(entry.wallet); const delayFit = entry.averageHoldSeconds === null ? 'Unknown' : entry.averageHoldSeconds < 60 ? 'Poor fit — fast trader' : 'Better fit — fetch'; return <tr key={entry.wallet} className={excluded ? 'copytrade-screening-excluded' : undefined}><td><input type="checkbox" checked={!excluded} onChange={() => toggleScreeningWallet(entry.wallet)} aria-label={`${excluded ? 'Include' : 'Exclude'} ${entry.name?.trim() || shortAddress(entry.wallet)} in Dune research`} /></td><td>{index + 1}</td><td>{entry.rank === null ? '—' : `#${entry.rank}`}</td><td>{entry.name?.trim() || shortAddress(entry.wallet)}{rejectedByTriage && <small className="copytrade-warning-text" title="The last triage run rejected this wallet. Check the box to fetch it anyway."> · rejected by triage</small>}{highRiskReasons && highRiskReasons.length > 0 && <small className="copytrade-warning-text" title="Check the box to fetch it anyway."> · {highRiskReasons.join(', ')}</small>}</td><td>{entry.trades.toLocaleString()}</td><td className={entry.netProfit !== null && entry.netProfit >= 0 ? 'positive' : entry.netProfit !== null ? 'negative' : undefined}>{formatUsd(entry.netProfit)}</td><td title="GMGN provides average holding time here; this is the best available delay-risk proxy.">{delayFit}<small>{entry.averageHoldSeconds === null ? 'No hold-time data' : `${formatHoldingTime(entry.averageHoldSeconds)} average hold`}</small></td></tr>; })}</tbody></table></div></details>{visibleWalletScreenSummary.missingStatsWallets > 0 && <small>{visibleWalletScreenSummary.missingStatsWallets} summaries missing</small>}
+              <details><summary>Show activity table ({visibleWalletScreenSummary.activityLeaders.length})</summary><div className="copytrade-activity-table-toolbar"><span><strong>{researchWalletAddresses.length}</strong> selected for Dune · yellow rows have Dune data to fetch</span><div><button type="button" className="quiet" onClick={selectAllScreeningWallets} disabled={activityWalletAddresses.length === 0}>Select all</button><button type="button" className="quiet" onClick={deselectAllScreeningWallets} disabled={activityWalletAddresses.length === 0}>Deselect all</button></div></div><div className="table-wrap copytrade-screening-activity-table"><table><thead><tr><th>Fetch?</th><th>Activity #</th><th>Rank</th><th>Trader</th><th>Trades</th><th>Net profit (30d)</th><th>Delay fit</th></tr></thead><tbody>{visibleWalletScreenSummary.activityLeaders.map((entry, index) => { const excluded = excludedScreeningWalletSet.has(entry.wallet); const decisionEntry = unifiedTraderRowByWallet.get(entry.wallet); const needsEvidence = decisionEntry ? decisionStateFor(decisionEntry.verdict) === 'needs_data' && (!decisionEntry.delay?.sim || (decisionEntry.delay?.sim?.pendingDuneTargets ?? 0) > 0) : false; const rejectedByTriage = triageEliminatedWalletSet.has(entry.wallet); const highRiskReasons = highRiskWalletReasons.get(entry.wallet); const delayFit = entry.averageHoldSeconds === null ? 'Unknown' : entry.averageHoldSeconds < 60 ? 'Poor fit — fast trader' : 'Better fit — fetch'; const duneSim = decisionEntry?.delay?.sim; const duneLegsTotal = duneSim ? (duneSim.pendingDuneTargets ?? 0) + (duneSim.duneNoMatchTargets ?? 0) + (duneSim.duneMatchedTargets ?? 0) : 0; const duneQueriedPercent = duneLegsTotal > 0 && duneSim ? Math.round(((duneSim.duneNoMatchTargets ?? 0) + (duneSim.duneMatchedTargets ?? 0)) / duneLegsTotal * 100) : null; const usableCoverage = decisionEntry?.coverage; const coverageText = usableCoverage === null || usableCoverage === undefined ? 'Dune usable coverage is not available.' : `Dune usable coverage is ${usableCoverage.toFixed(0)}% (${duneSim?.copiedTrades ?? 0} matched of ${duneSim?.roundTripsConsidered ?? 0} eligible round trips).`; const queryText = duneQueriedPercent === null ? 'Dune query coverage is not available.' : `Dune query coverage is ${duneQueriedPercent}%; ${duneQueriedPercent >= 100 ? 'all current trade legs were already queried, so another normal fetch cannot add unqueried Dune data.' : 'unqueried Dune legs may still be fetchable.'}`; const evidenceReason = decisionEntry && decisionStateFor(decisionEntry.verdict) === 'needs_data' ? `${decisionEntry?.decisionReasons.join(' ') ?? 'Required decision evidence is incomplete.'} ${coverageText} ${queryText}` : 'This wallet does not currently need more decision evidence.'; return <tr key={entry.wallet} className={[excluded ? 'copytrade-screening-excluded' : '', needsEvidence ? 'copytrade-screening-needs-data' : ''].filter(Boolean).join(' ') || undefined}><td><input type="checkbox" checked={!excluded} onChange={() => toggleScreeningWallet(entry.wallet)} aria-label={`${excluded ? 'Include' : 'Exclude'} ${entry.name?.trim() || shortAddress(entry.wallet)} in Dune research`} /></td><td>{index + 1}</td><td>{entry.rank === null ? '—' : `#${entry.rank}`}</td><td title={evidenceReason}>{entry.name?.trim() || shortAddress(entry.wallet)}{needsEvidence && <small className="copytrade-needs-data-label">Needs more evidence</small>}{rejectedByTriage && <small className="copytrade-warning-text" title="The last triage run rejected this wallet. Check the box to fetch it anyway."> · rejected by triage</small>}{highRiskReasons && highRiskReasons.length > 0 && <small className="copytrade-warning-text" title="Check the box to fetch it anyway."> · {highRiskReasons.join(', ')}</small>}</td><td>{entry.trades.toLocaleString()}</td><td className={entry.netProfit !== null && entry.netProfit >= 0 ? 'positive' : entry.netProfit !== null ? 'negative' : undefined}>{formatUsd(entry.netProfit)}</td><td title={`GMGN provides average holding time here; this is the best available delay-risk proxy. ${evidenceReason}`}>{delayFit}<small>{entry.averageHoldSeconds === null ? 'No hold-time data' : `${formatHoldingTime(entry.averageHoldSeconds)} average hold`}</small></td></tr>; })}</tbody></table></div></details>{visibleWalletScreenSummary.missingStatsWallets > 0 && <small>{visibleWalletScreenSummary.missingStatsWallets} summaries missing</small>}
             </div>}
           </div>
           <div className="copytrade-workflow-row">
@@ -4103,7 +4064,7 @@ function App() {
             .some((value) => Date.parse(value) > generatedMs);
           return newerData
             ? <p className="copytrade-status-warning">Out of date — GMGN or Dune data has been fetched since this triage ran ({formatFetchTime(eliminationReport.generatedAt)}). Run triage again before trusting these verdicts.</p>
-            : <p className="muted">Saved result from {formatFetchTime(eliminationReport.generatedAt)} over {eliminationReport.periodDays ?? 30} days of history — read from your browser, not recomputed.</p>;
+            : <p className="muted">Current result from {formatFetchTime(eliminationReport.generatedAt)} over {eliminationReport.periodDays ?? 30} days of history — computed from SQLite.</p>;
         })()}
         <div className="copytrade-screening-summary-facts">
           <span><strong>{eliminationReport.totalWallets}</strong> wallets checked</span>
