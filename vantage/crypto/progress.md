@@ -2785,3 +2785,19 @@ TODO
 - Errors or unresolved items: graphify refresh is blocked by the local uv cache path error; no live provider fetch was started.
 - Agent name and model: Codex, GPT-5.
 - Next step: restart the local server and verify the corrected progress and liquidity-impact period in the UI.
+
+2026-08-22 — Removed the permanently disabled GMGN continuous-watch UI instead of leaving dead controls visible. Deleted its UI state, polling/status calls, disabled start/stop controls, one-off capture path that only served that panel, and unused CSS. Existing active GMGN fetch workflows remain unchanged.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision: keep the server-side watch implementation untouched because this cleanup targets disabled UI code only.
+- Test result: `npm run build:ui`, `npm run build:server`, and `npm test --silent` passed; 365/365 tests passed.
+- Errors or unresolved items: Graphify refresh remains blocked by the local uv permissions/cache error.
+- Agent name and model: Codex, GPT-5.
+- Next step: none.
+
+2026-08-22 — Restricted the active UI navigation to the three supported CopyTrade tabs: GMGN wallet stats, Pattern Discovery, and Scrutiny. Removed unreachable navigation branches and permanently disabled GMGN watch-mode controls from the UI; direct routes to retired CopyTrade tabs now resolve to wallet stats.
+- Files changed: `ui/main.tsx`, `ui/styles.css`.
+- Decision: keep backend and storage code for retired workflows untouched; this change removes inaccessible UI paths without deleting stored research data.
+- Test result: `npm run build:ui`, `npm run build:server`, and `npm test --silent` passed; 365/365 tests passed; `git diff --check` passed.
+- Errors or unresolved items: Graphify refresh remains blocked by the local uv permissions/cache error.
+- Agent name and model: Codex, GPT-5.
+- Next step: none.

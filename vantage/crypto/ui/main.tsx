@@ -494,31 +494,6 @@ type GmgnArchiveSummary = {
   manifest: GmgnArchiveManifest | null;
 };
 
-type GmgnWatchLastPoll = {
-  at: string;
-  ok: boolean;
-  captured?: number;
-  stored?: number;
-  repeated?: number;
-  errors?: number;
-  gapDetected?: boolean;
-  message?: string;
-  rateLimited?: boolean;
-};
-
-type GmgnWatchStatus = {
-  running: boolean;
-  intervalSeconds: number;
-  nextPollAt: string | null;
-  lastPoll: GmgnWatchLastPoll | null;
-  totalPolls: number;
-  totalStored: number;
-  totalRepeated: number;
-  consecutiveFailures: number;
-  stoppedReason: string | null;
-  rateLimitedUntil: string | null;
-};
-
 type DiagnosticLog = {
   id: number;
   createdAt: string;
@@ -533,11 +508,6 @@ type DiagnosticLog = {
   detail: string | null;
 };
 
-
-// Disabled for now (kept in place, not removed): continuous polling needs more runway on the
-// manual one-off capture path first. Server also rejects POST /api/gmgn/watch/start while this
-// is off, so this flag just keeps the UI honest about it. Flip both back to re-enable.
-const GMGN_WATCH_MODE_ENABLED = false;
 
 const emptyStats: Stats = {
   tokenCount: 0,
@@ -859,16 +829,15 @@ const formatDuneResponse = (raw: string | null): string => {
   catch { return raw; }
 };
 const normalizeRoute = (route: string): string => route === 'birdeye-batch' ? 'dune-capture' : route === 'copy-trades' ? 'copytrade' : route;
-type CopyTradeSubTab = 'research' | 'wallet-stats' | 'pattern-discovery' | 'forward-validation' | 'top-callers' | 'scrutiny';
+type CopyTradeSubTab = 'wallet-stats' | 'pattern-discovery' | 'scrutiny';
 // Lightweight deployment mode: keep the other workflows and routes in source, but expose only
 // the aggregate GMGN wallet-stats reader until the broader research workspace is needed again.
 const WALLET_STATS_ONLY = true;
 // Lightweight mode still exposes Scrutiny alongside the wallet-stats reader — it's a read-only
 // interrogation view a reader may want without opening the full (heavier) research workspace.
-const WALLET_STATS_ONLY_VISIBLE_SUBTABS: CopyTradeSubTab[] = ['wallet-stats', 'pattern-discovery', 'scrutiny'];
 const parseCopyTradeRoute = (route: string): { menu: string; subTab: CopyTradeSubTab } => {
   const [rawMenu, rawSubTab] = route.split('/');
-  const subTab: CopyTradeSubTab = rawSubTab === 'fully-covered' ? 'wallet-stats' : rawSubTab === 'wallet-stats' || rawSubTab === 'pattern-discovery' || rawSubTab === 'forward-validation' || rawSubTab === 'top-callers' || rawSubTab === 'scrutiny' ? rawSubTab : 'research';
+  const subTab: CopyTradeSubTab = rawSubTab === 'pattern-discovery' || rawSubTab === 'scrutiny' ? rawSubTab : 'wallet-stats';
   return { menu: normalizeRoute(rawMenu || 'dune-capture'), subTab };
 };
 const copyAddress = async (address: string) => { try { await navigator.clipboard.writeText(address); } catch { /* clipboard access is optional */ } };
@@ -1031,12 +1000,10 @@ ORDER BY first_trade_time;
 };
 
 function App() {
-  const initialRoute = WALLET_STATS_ONLY
-    ? (() => {
-      const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
-      return { menu: 'copytrade', subTab: WALLET_STATS_ONLY_VISIBLE_SUBTABS.includes(parsed.subTab) ? parsed.subTab : 'wallet-stats' as CopyTradeSubTab };
-    })()
-    : parseCopyTradeRoute(window.location.hash.slice(1) || 'dune-capture');
+  const initialRoute = (() => {
+    const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
+    return { menu: 'copytrade', subTab: parsed.subTab };
+  })();
   const [activeMenu, setActiveMenu] = useState(initialRoute.menu);
   const [focusedView, setFocusedView] = useState(true);
   const [stats, setStats] = useState<Stats>(emptyStats);
@@ -1232,7 +1199,6 @@ function App() {
   const topCallerStopRequestedRef = useRef(false);
   const [imports, setImports] = useState<ImportSummary[]>([]);
   const [gmgnStatus, setGmgnStatus] = useState<GmgnStatus | null>(null);
-  const [capturingGmgn, setCapturingGmgn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [duneBusyFile, setDuneBusyFile] = useState<string | null>(null);
   const [lastDuneImport, setLastDuneImport] = useState<LastDuneImport | null>(null);
@@ -1254,9 +1220,6 @@ function App() {
   const [archives, setArchives] = useState<GmgnArchiveSummary[] | null>(null);
   const [loadingArchives, setLoadingArchives] = useState(false);
   const [expandedArchive, setExpandedArchive] = useState<string | null>(null);
-  const [watchStatus, setWatchStatus] = useState<GmgnWatchStatus | null>(null);
-  const [watchBusy, setWatchBusy] = useState(false);
-  const [watchIntervalMinutes, setWatchIntervalMinutes] = useState(5);
   const [message, setMessage] = useState('Ready. Data is saved locally in SQLite.');
   const [gmgnPayload, setGmgnPayload] = useState(`{
   "observed_at": "2026-08-09T12:00:00Z",
@@ -1270,12 +1233,11 @@ function App() {
   const refresh = async () => {
     setRefreshBusy(true);
     try {
-      const [nextStats, nextImports, nextQuality, nextGmgn, nextWatch, nextAnalysis, nextScoring, nextCandidates, nextMeasurementPlan, latestOutcomes, nextPatternReport, nextPatternSnapshots] = await Promise.all([
+      const [nextStats, nextImports, nextQuality, nextGmgn, nextAnalysis, nextScoring, nextCandidates, nextMeasurementPlan, latestOutcomes, nextPatternReport, nextPatternSnapshots] = await Promise.all([
       api<Stats>('/api/stats'),
       api<ImportSummary[]>('/api/imports'),
       api<DataQuality>('/api/quality'),
       api<GmgnStatus>('/api/gmgn/status'),
-      api<GmgnWatchStatus>('/api/gmgn/watch/status'),
       api<SnapshotAnalysis>('/api/analysis/snapshot'),
       api<SignalScoringReport>('/api/analysis/scores'),
       api<OutcomeCandidate[]>('/api/dune/candidates'),
@@ -1288,7 +1250,6 @@ function App() {
     setImports(nextImports);
     setQuality(nextQuality);
     setGmgnStatus(nextGmgn);
-    setWatchStatus(nextWatch);
     setAnalysis(nextAnalysis);
     setScoring(nextScoring);
     setOutcomeCandidates(nextCandidates);
@@ -2190,23 +2151,6 @@ function App() {
     setMessage('Stop requested. The current Dune batch will finish, then no further batches will be submitted.');
   };
 
-  const ensureGmgnReady = async (): Promise<void> => {
-    const status = await api<GmgnStatus>('/api/gmgn/status');
-    setGmgnStatus(status);
-    if (!status.configured) throw new Error(status.message);
-  };
-
-  const captureGmgnSignals = async () => {
-    setCapturingGmgn(true);
-    try {
-      await ensureGmgnReady();
-      const result = await api<{ captured: number; stored: number; repeated: number; errors: number; gapDetected: boolean; archivePath: string }>('/api/gmgn/capture', { method: 'POST' });
-      await refresh();
-      setMessage(`GMGN poll received ${result.captured}; stored ${result.stored}; repeated ${result.repeated}; issues ${result.errors}; gap ${result.gapDetected ? 'flagged' : 'not detected'}. ZIP archived.`);
-    } catch (error: unknown) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setCapturingGmgn(false); }
-  };
-
   const loadArchives = async () => {
     setLoadingArchives(true);
     try {
@@ -2215,44 +2159,6 @@ function App() {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setLoadingArchives(false);
-    }
-  };
-
-  const loadWatchStatus = async () => {
-    try {
-      setWatchStatus(await api<GmgnWatchStatus>('/api/gmgn/watch/status'));
-    } catch (error: unknown) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const startWatch = async () => {
-    setWatchBusy(true);
-    try {
-      await ensureGmgnReady();
-      const status = await api<GmgnWatchStatus>('/api/gmgn/watch/start', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ intervalSeconds: watchIntervalMinutes * 60 }),
-      });
-      setWatchStatus(status);
-      setMessage(`Watch mode started — polling every ${watchIntervalMinutes} min.`);
-    } catch (error: unknown) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setWatchBusy(false);
-    }
-  };
-
-  const stopWatch = async () => {
-    setWatchBusy(true);
-    try {
-      setWatchStatus(await api<GmgnWatchStatus>('/api/gmgn/watch/stop', { method: 'POST' }));
-      setMessage('Watch mode stopped.');
-    } catch (error: unknown) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setWatchBusy(false);
     }
   };
 
@@ -2266,12 +2172,6 @@ function App() {
     if (!copySimulationRunStatus || copySimulationRunStatus.outcome === 'idle') return;
     setCopySimulationRunReportOpen(copySimulationRunStatus.running);
   }, [copySimulationRunStatus?.running, copySimulationRunStatus?.outcome]);
-  useEffect(() => {
-    if (!watchStatus?.running) return;
-    const timer = window.setInterval(() => { void loadWatchStatus(); }, 4000);
-    return () => window.clearInterval(timer);
-  }, [watchStatus?.running]);
-
   useEffect(() => {
     if (WALLET_STATS_ONLY) return;
     void loadCopyTradeStatus();
@@ -2695,7 +2595,7 @@ function App() {
   useEffect(() => {
     if (WALLET_STATS_ONLY) {
       const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
-      const allowedSubTab = WALLET_STATS_ONLY_VISIBLE_SUBTABS.includes(parsed.subTab) ? parsed.subTab : 'wallet-stats';
+    const allowedSubTab = parsed.subTab;
       const canonicalHash = `#copytrade/${allowedSubTab}`;
       if (window.location.hash !== canonicalHash) window.history.replaceState({}, '', canonicalHash);
     }
@@ -2703,7 +2603,7 @@ function App() {
     const onLocationChange = () => {
       if (WALLET_STATS_ONLY) {
         const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
-        const allowedSubTab = WALLET_STATS_ONLY_VISIBLE_SUBTABS.includes(parsed.subTab) ? parsed.subTab : 'wallet-stats';
+        const allowedSubTab = parsed.subTab;
         setActiveMenu('copytrade');
         setCopyTradeSubTab(allowedSubTab);
         const canonicalHash = `#copytrade/${allowedSubTab}`;
@@ -3579,21 +3479,10 @@ function App() {
       <div className="status-pill"><span className="dot" /> SQLite connected</div>
     </header>
 
-    <nav className="section-nav" aria-label="Research desk sections">
-      {WALLET_STATS_ONLY ? <>
+    <nav className="section-nav" aria-label="CopyTrade sections">
       <button className={`nav-button ${copyTradeSubTab === 'wallet-stats' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('wallet-stats')}>CopyTrade · GMGN wallet stats</button>
       <button className={`nav-button ${copyTradeSubTab === 'pattern-discovery' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('pattern-discovery')}>CopyTrade · Pattern Discovery</button>
       <button className={`nav-button ${copyTradeSubTab === 'scrutiny' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('scrutiny')}>CopyTrade · Scrutiny</button>
-      </> : <>
-      <button className={`nav-button advanced-toggle ${focusedView ? 'active' : ''}`} onClick={() => setFocusedView((current) => !current)}>{focusedView ? 'Main workflow' : 'Show all sections'}</button>
-      <button className={`nav-button advanced-section ${activeMenu === 'overview' ? 'active' : ''}`} onClick={() => navigateTo('overview')}>Overview</button>
-      <button className={`nav-button ${signalMenuActive ? 'active' : ''}`} onClick={navigateSignal}>Signal</button>
-      <button className={`nav-button ${activeMenu === 'copytrade' ? 'active' : ''}`} onClick={() => navigateTo('copytrade')}>CopyTrade</button>
-      <button className={`nav-button advanced-section ${activeMenu === 'analysis' ? 'active' : ''}`} onClick={() => navigateTo('analysis')}>Snapshot Analysis</button>
-      <button className={`nav-button advanced-section ${activeMenu === 'scoring' ? 'active' : ''}`} onClick={() => navigateTo('scoring')}>Scoring</button>
-      <button className={`nav-button advanced-section ${activeMenu === 'evidence' ? 'active' : ''}`} onClick={() => navigateTo('evidence')}>Evidence</button>
-      <button className={`nav-button advanced-section ${activeMenu === 'diagnostics' ? 'active' : ''}`} onClick={() => navigateTo('diagnostics')}>Diagnostics</button>
-      </>}
     </nav>
     {!WALLET_STATS_ONLY && signalMenuActive && <nav className="subsection-nav" aria-label="Signal workspace">
       <span className="subsection-label">Signal</span>
@@ -3738,44 +3627,6 @@ function App() {
           {rawEndpointExpandedId === row.id && <tr className="raw-endpoint-json-row"><td colSpan={4}><pre>{JSON.stringify(row.rawPayload, null, 2)}</pre></td></tr>}
         </Fragment>)}</tbody></table></div>}
       </details>
-    </section>
-
-    <section className="menu-section panel watch-panel">
-      <div className="panel-heading">
-        <div><p className="eyebrow">GMGN WATCH MODE</p><h2>Continuous local polling</h2></div>
-        <span className={`tag ${watchStatus?.running ? 'tag-good' : ''}`}>{watchStatus?.running ? 'RUNNING' : 'STOPPED'}</span>
-      </div>
-      <p>Repeats the same one-off capture on a timer while this app stays open. No cloud service, no background task — polling stops the moment the local server stops, and stops itself after repeated failures.</p>
-      {/* GMGN_WATCH_MODE_ENABLED is false for now — continuous polling is disabled (code kept intact; server also rejects /watch/start). Use "Fetch once" in the meantime. */}
-      {!GMGN_WATCH_MODE_ENABLED && <p className="probe-result">Continuous polling is temporarily disabled. "Fetch once" still works below.</p>}
-      <div className="watch-controls">
-        <label>Interval
-          <select value={watchIntervalMinutes} disabled={!GMGN_WATCH_MODE_ENABLED || watchStatus?.running} onChange={(event) => setWatchIntervalMinutes(Number(event.target.value))}>
-            <option value={1}>1 minute</option>
-            <option value={5}>5 minutes</option>
-            <option value={15}>15 minutes</option>
-            <option value={30}>30 minutes</option>
-            <option value={60}>60 minutes</option>
-          </select>
-        </label>
-        <button className="secondary" disabled={capturingGmgn} onClick={() => void captureGmgnSignals()}>{capturingGmgn ? 'Fetching…' : 'Fetch once'}</button>
-        {watchStatus?.running
-          ? <button className="primary" disabled={watchBusy} onClick={() => void stopWatch()}>{watchBusy ? 'Stopping…' : 'Stop watching'}</button>
-          : <button className="primary" disabled={!GMGN_WATCH_MODE_ENABLED || watchBusy} onClick={() => void startWatch()}>{GMGN_WATCH_MODE_ENABLED ? (watchBusy ? 'Starting…' : 'Start watching') : 'Disabled for now'}</button>}
-      </div>
-      <div className="credential-status">
-        <span className={`status-dot ${watchStatus?.running ? 'good' : ''}`} />
-        <div>
-          <strong>{watchStatus?.running ? `Running — next poll ${formatTime(watchStatus.nextPollAt)}` : watchStatus?.stoppedReason ? `Stopped: ${watchStatus.stoppedReason}` : 'Not running'}</strong>
-          <small>{watchStatus?.lastPoll
-            ? `Last poll ${formatTime(watchStatus.lastPoll.at)}: ${watchStatus.lastPoll.ok
-              ? `+${watchStatus.lastPoll.stored ?? 0} new · ${watchStatus.lastPoll.repeated ?? 0} repeats · ${watchStatus.lastPoll.errors ?? 0} issues${watchStatus.lastPoll.gapDetected ? ' · gap flagged' : ''}`
-              : `failed — ${watchStatus.lastPoll.message ?? 'unknown error'}`}`
-            : 'No polls yet this session.'}</small>
-        </div>
-      </div>
-      {watchStatus && watchStatus.totalPolls > 0 && <p className="watch-totals">{watchStatus.totalPolls} polls this session · {watchStatus.totalStored} new signals · {watchStatus.totalRepeated} repeats · {watchStatus.consecutiveFailures} consecutive failures</p>}
-      {watchStatus?.rateLimitedUntil && <p className="probe-result">Rate-limited by GMGN — resuming at {formatTime(watchStatus.rateLimitedUntil)}</p>}
     </section>
 
     <section id="analysis" className="menu-section panel snapshot-analysis-panel">
@@ -3939,17 +3790,6 @@ function App() {
     <details className="outcome-results-details" open={false}><summary>Measured results ({outcomeTimelines.length})</summary><div className="outcome-results-controls"><label>Rows per page<select value={outcomePageSize} onChange={(event) => { const value = event.target.value; setOutcomePageSize(value === 'all' ? 'all' : Number(value)); setOutcomePage(0); }}><option value="25">25</option><option value="100">100</option><option value="1000">1,000</option><option value="all">All</option></select></label><button type="button" className="secondary" disabled={outcomePage === 0 || outcomePageSize === 'all'} onClick={() => setOutcomePage((page) => Math.max(0, page - 1))}>Previous</button><span>Page {Math.min(outcomePage + 1, outcomePageCount)} of {outcomePageCount}</span><button type="button" className="secondary" disabled={outcomePageSize === 'all' || outcomePage + 1 >= outcomePageCount} onClick={() => setOutcomePage((page) => Math.min(outcomePageCount - 1, page + 1))}>Next</button></div><div className="table-wrap outcome-table outcome-table-visible"><table><thead><tr>{outcomeColumns.map((column) => <th key={column.key} onClick={() => toggleOutcomeSort(column.key)} className="sortable-header" title="Click to sort">{column.label}{sortIndicator(column.key)}</th>)}</tr></thead><tbody>{visibleOutcomeTimelines.map((timeline) => { const base = timeline.checkpoints.find((checkpoint) => checkpoint.label === 'signal')?.result.priceUsd ?? null; return <tr key={timeline.signal.id}><td>#{timeline.signal.id}</td><td>{formatSignalType(timeline.signal.signalType)}</td>{CHECKPOINT_COLUMNS.map((label) => renderCheckpointCell(timeline, base, label))}<td><span className="token-cell" title={timeline.signal.tokenAddress}>{tokenDisplay(timeline.signal.symbol, timeline.signal.tokenAddress)} <button type="button" className="copy-address" aria-label={`Copy address ${timeline.signal.tokenAddress}`} onClick={() => void copyAddress(timeline.signal.tokenAddress)}>⧉</button></span></td></tr>; })}</tbody></table></div></details>
 
     <section id="copytrade" className="menu-section panel copytrade-panel">
-      <div className="panel-heading"><div><p className="eyebrow">COPYTRADE · RESEARCH</p><h2>Top-trader copy research</h2></div><span className="tag">$100 START</span></div>
-      <p className="compact-info-line"><span>Historical wallet research</span><InfoTip label="About CopyTrade research" text="Fetches GMGN trade history, preserves it in SQLite, and estimates what a $100 copy would have become. Results are descriptive research, not trading instructions." /></p>
-      {!WALLET_STATS_ONLY ? <nav className="subsection-nav copytrade-subnav" aria-label="CopyTrade sections">
-        <span className="subsection-label">CopyTrade</span>
-        <button className={`nav-button ${copyTradeSubTab === 'research' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('research')}>Top-trader copy research</button>
-        <button className={`nav-button ${copyTradeSubTab === 'wallet-stats' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('wallet-stats')}>GMGN wallet stats</button>
-        <button className={`nav-button ${copyTradeSubTab === 'pattern-discovery' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('pattern-discovery')}>Pattern Discovery</button>
-        <button className={`nav-button ${copyTradeSubTab === 'forward-validation' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('forward-validation')}>Forward validation</button>
-        <button className={`nav-button ${copyTradeSubTab === 'top-callers' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('top-callers')}>Top callers</button>
-        <button className={`nav-button ${copyTradeSubTab === 'scrutiny' ? 'active' : ''}`} onClick={() => navigateCopyTradeSubTab('scrutiny')}>Scrutiny</button>
-      </nav> : <p className="copytrade-stats-only-label">Lightweight mode · GMGN wallet stats, Pattern Discovery, and Scrutiny are visible and loaded.</p>}
       {copyTradeSubTab === 'research' && <div className={`copytrade-analysis-status ${copyTradeLoading ? 'running' : copyTradeResults ? 'complete' : 'idle'}`} role="status">
         {copyTradeLoading ? <span className="loading-spinner" aria-hidden="true" /> : <span className="copytrade-analysis-status-dot" aria-hidden="true" />}
         <div><strong>{copyTradeLoading ? 'Building CopyTrade report…' : copyTradeResults ? 'CopyTrade report ready' : 'CopyTrade report not loaded'}</strong>
