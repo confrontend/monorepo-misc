@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { Modal } from './components/Modal.js';
 import { DataTable } from './components/DataTable.js';
+import { Collapsible } from './components/Collapsible.js';
 import { normalizeGmgnProfitStat } from '../src/gmgn/normalize.js';
 import { assessWalletRiskGuardrails } from '../src/copytrade/scrutiny/walletRiskGuardrails.js';
 import { decideThirtyDayVerdict, explainThirtyDayDecision, thirtyDayDecisionPriority } from '../src/copytrade/scrutiny/decisionEngine.js';
@@ -3309,8 +3310,7 @@ function App() {
     </section>
 
     <section id="capture-raw-endpoints" className="menu-section panel raw-endpoint-panel">
-      <details className="signal-legend raw-endpoint-details" open={rawEndpointOpen} onToggle={(event) => { if (event.currentTarget.open !== rawEndpointOpen) void openRawEndpointSection(); }}>
-        <summary>Raw endpoint captures (radar / wallet rank / smart money / Twitter)</summary>
+      <Collapsible className="signal-legend raw-endpoint-details" open={rawEndpointOpen} onToggle={(open) => { if (open !== rawEndpointOpen) void openRawEndpointSection(); }} summary="Raw endpoint captures (radar / wallet rank / smart money / Twitter)">
         <p className="muted">Exploratory raw data captured alongside signals — GMGN&apos;s own trending-token radar, its public wallet leaderboard, per-wallet smart-money stats, and KOL/Twitter activity. Purely descriptive: nothing here is scored, ranked, or linked to captured signals.</p>
         {rawEndpointSummary && <div className="quality-grid raw-endpoint-summary-grid">
           <button type="button" className={`quality-metric raw-endpoint-tile ${rawEndpointType === 'radar' ? 'active' : ''}`} onClick={() => { setRawEndpointType('radar'); void loadRawEndpointDetails('radar'); }}><strong>{rawEndpointSummary.radar.count}</strong><span>radar snapshots</span><small>latest {formatTime(rawEndpointSummary.radar.latestCapturedAt)}</small></button>
@@ -3337,7 +3337,7 @@ function App() {
           </tr>
           {rawEndpointExpandedId === row.id && <tr className="raw-endpoint-json-row"><td colSpan={4}><pre>{JSON.stringify(row.rawPayload, null, 2)}</pre></td></tr>}
         </Fragment>)}</tbody></table></div>}
-      </details>
+      </Collapsible>
     </section>
 
     <section id="analysis" className="menu-section panel snapshot-analysis-panel">
@@ -3373,7 +3373,7 @@ function App() {
       <section className="outcome-inner">
       <div className="panel-heading"><div><p className="eyebrow">DUNE SIGNAL OUTCOME TIMELINE</p><h2>Measure captured GMGN signals</h2></div><span className="tag">DUNE PRICE HISTORY</span></div>
       <div className={`dune-activity ${duneActivity ? 'is-active' : 'is-idle'}`} role="status" aria-live="polite"><span className="activity-spinner" aria-hidden="true"></span><span>{duneActivityLabel}</span>{outcomeBatchProgress && outcomeBatchBusy && <small>{outcomeBatchProgress.completed}/{outcomeBatchProgress.total} signals · batch {Math.min(outcomeBatchProgress.current + 1, outcomeBatchProgress.batches)}/{outcomeBatchProgress.batches}</small>}</div>
-      <details className="signal-legend"><summary>Signal-type legend</summary><div className="signal-legend-grid">{Object.keys(SIGNAL_TYPE_LABELS).map((code) => <div key={code}><b>{code} · {SIGNAL_TYPE_LABELS[code]}</b><small>{SIGNAL_TYPE_DESCRIPTIONS[code]}</small></div>)}</div><small>Names and high-level meanings are from GMGNAI’s official gmgn-skills CLI documentation. GMGN does not publish every wallet-classification, amount, count, or time-window threshold here, so these labels are observations—not quality or profitability verdicts.</small></details>
+      <Collapsible className="signal-legend" summary="Signal-type legend"><div className="signal-legend-grid">{Object.keys(SIGNAL_TYPE_LABELS).map((code) => <div key={code}><b>{code} · {SIGNAL_TYPE_LABELS[code]}</b><small>{SIGNAL_TYPE_DESCRIPTIONS[code]}</small></div>)}</div><small>Names and high-level meanings are from GMGNAI’s official gmgn-skills CLI documentation. GMGN does not publish every wallet-classification, amount, count, or time-window threshold here, so these labels are observations—not quality or profitability verdicts.</small></Collapsible>
        <label className="select-all-row"><span>Signal type</span><select value={outcomeTypeFilter} onChange={(event) => setOutcomeTypeFilter(event.target.value)}><option value="all">All types</option>{outcomeTypeOptions.map((type) => <option key={type} value={type}>{type} · {formatSignalType(type)}</option>)}</select><small>{filteredOutcomeCandidates.length} captured signal{filteredOutcomeCandidates.length === 1 ? '' : 's'} in this filter</small></label>
        <p>Choose a signal type, then measure all matching signals. The app submits Dune-safe batches, skips complete outcomes, and retries only signals that are eligible for another measurement.</p>
       <div className="outcome-actions">
@@ -3387,8 +3387,7 @@ function App() {
          </div>
          {selectedMeasurementProgress && selectedMeasurementProgress.inFlight > 0 && <button className="secondary" disabled={reconcileBusy || outcomeBatchBusy} onClick={() => void reconcileStuckRuns()} title="Checks stuck Dune runs against Dune's real current state and finalizes any that have actually finished, without re-submitting them.">{reconcileBusy ? 'Reconciling…' : `Reconcile ${selectedMeasurementProgress.inFlight} in-flight signal${selectedMeasurementProgress.inFlight === 1 ? '' : 's'}`}</button>}
        </div>
-      {measurementPlan && prescreenCounts && <details className="measurement-explanation">
-        <summary>How this Dune pass works <small>{prescreenTotal} stored signals reviewed; nothing was deleted</small></summary>
+      {measurementPlan && prescreenCounts && <Collapsible className="measurement-explanation" summary={<>How this Dune pass works <small>{prescreenTotal} stored signals reviewed; nothing was deleted</small></>}>
         <p className="muted">The app sends only the next safe batch to Dune. Everything else stays in SQLite and can be reconsidered later.</p>
         <p className="measurement-plan-note"><strong>Why these signals are in or out of this Dune pass</strong> · {prescreenTotal} stored candidates evaluated; nothing was deleted.</p>
         <div className="prescreen-breakdown-grid">
@@ -3399,21 +3398,20 @@ function App() {
           <div><b>{prescreenCounts.already_measured} already measured ({prescreenPercent(prescreenCounts.already_measured)})</b><small>Has a completed/pending/in-flight/retry-protected Dune outcome; it is not submitted again now.</small></div>
           <div><b>{prescreenCounts.invalid_for_query} invalid ({prescreenPercent(prescreenCounts.invalid_for_query)})</b><small>Missing required token address, signal type, UTC observation time, or capture date.</small></div>
         </div>
-      </details>}
+      </Collapsible>}
       {measurementPlan && selectedMeasurementProgress && <>
         <p className="measurement-summary">
           <span className="status-good">{selectedMeasurementProgress.measured}</span> complete outcomes · <span className={selectedMeasurementProgress.retryEligibleSelected > 0 ? 'status-warn' : ''}>{selectedMeasurementProgress.retryEligibleSelected}</span> ready to re-fetch · <span className={selectedMeasurementProgress.unmeasured > 0 ? 'status-warn' : ''}>{selectedMeasurementProgress.unmeasured}</span> not complete
           {selectedMeasurementProgress.inFlight > 0 && <> · <span className="status-warn">{selectedMeasurementProgress.inFlight} stuck (use Reconcile above)</span></>}
           {selectedUpToDate && ' — up to date'}
         </p>
-        <details className="signal-legend">
-          <summary>Measurement details</summary>
+        <Collapsible className="signal-legend" summary="Measurement details">
           <div className="measurement-status-grid">
             <div><b>GMGN parsing</b><span className="status-good">COMPLETE</span><small>{selectedMeasurementProgress.captured} normalized signals stored</small><small>latest capture {formatTime(measurementPlan.latestCapturedAt)}</small></div>
             <div><b>Dune outcomes</b><span className={selectedUpToDate ? 'status-good' : 'status-warn'}>{selectedUpToDate ? 'COMPLETE' : 'PARTIAL'}</span><small>{selectedMeasurementProgress.measured} complete outcomes · {selectedMeasurementProgress.retryEligibleSelected} ready to re-fetch · {selectedWaitingCount} waiting</small><small>last completed run {formatTime(measurementPlan.latestDuneCompletedAt)}</small></div>
             <div><b>Next Dune work</b><span className={selectedUpToDate ? 'status-good' : selectedMeasurementProgress.inFlight > 0 && selectedMeasurementProgress.eligible === 0 ? 'status-warn' : 'status-warn'}>{selectedUpToDate ? 'UP TO DATE' : selectedMeasurementProgress.inFlight > 0 && selectedMeasurementProgress.eligible === 0 ? 'IN FLIGHT' : selectedWaitingCount > 0 && selectedMeasurementProgress.eligible === 0 ? 'WAITING' : 'PENDING'}</span><small>{selectedMeasurementProgress.newEligible} new · {selectedMeasurementProgress.retryEligibleSelected} retries · {selectedMeasurementProgress.eligible} total selected</small><small>{selectedMeasurementProgress.pending} waiting for target time · {selectedMeasurementProgress.complete} complete · {selectedMeasurementProgress.inFlight} in flight</small><small>Pre-screen: {measurementPlan.prescreen.byDisposition.eligible_core ?? 0} core · {measurementPlan.prescreen.byDisposition.eligible_audit ?? 0} audit · {(measurementPlan.prescreen.byDisposition.deferred_repeat ?? 0) + (measurementPlan.prescreen.byDisposition.deferred_budget ?? 0)} deferred · {measurementPlan.prescreen.byDisposition.too_fresh ?? 0} waiting for buffer</small></div>
           </div>
-        </details>
+        </Collapsible>
       </>}
       {outcomeBatchProgress && <p className="batch-progress">{outcomeBatchBusy ? 'Batch run in progress' : 'Batch run complete'} · {outcomeBatchProgress.completed}/{outcomeBatchProgress.total} signals · batch {Math.min(outcomeBatchProgress.current, outcomeBatchProgress.batches)}/{outcomeBatchProgress.batches}. Each batch is saved independently.</p>}
       {outcomeTimelines.map((timeline) => <div className="timeline-result" key={timeline.signal.id}><strong>Signal #{timeline.signal.id} · {timeline.signal.signalType ?? 'unknown'} · <span className="address-compact" title={timeline.signal.tokenAddress}>{timeline.signal.tokenAddress}</span></strong><div className="timeline-grid">{timeline.checkpoints.map((checkpoint) => <div key={checkpoint.label}><span>{checkpoint.label}</span><b>{checkpoint.result.priceUsd === null ? 'not available' : `$${checkpoint.result.priceUsd}`}</b><small>{checkpoint.result.status} · HTTP {checkpoint.result.priceHttpStatus ?? '—'}</small></div>)}</div><small>Missing checkpoints remain missing, never treated as zero.</small></div>)}
@@ -3467,11 +3465,10 @@ function App() {
         </table></div>}
         <p className="muted">Computed {formatTime(displayedPatternReport.computedAt)} from {displayedPatternReport.sourceRunIds.length} archived Dune run{displayedPatternReport.sourceRunIds.length === 1 ? '' : 's'} already stored locally — no new Dune query is issued to build this report.</p>
       </>}
-      {patternSnapshots.length > 0 && <details className="pattern-history"><summary>Saved snapshots ({patternSnapshots.length})</summary>
+      {patternSnapshots.length > 0 && <Collapsible className="pattern-history" summary={`Saved snapshots (${patternSnapshots.length})`}>
         <div className="pattern-history-list">{patternSnapshots.map((snapshot) => <div key={snapshot.id} className="pattern-history-row"><span>#{snapshot.id} · {formatTime(snapshot.computedAt)} · {snapshot.sourceRunIds.length} source run{snapshot.sourceRunIds.length === 1 ? '' : 's'}</span><button className="secondary" onClick={() => setViewingSnapshotId(snapshot.id)}>View</button></div>)}</div>
-      </details>}
-      <details className="pattern-subgroups" open={subgroupOpened} onToggle={(event) => { const open = event.currentTarget.open; setSubgroupOpened(open); if (open && !subgroupReport && !subgroupBusy) void loadSubgroupReport(subgroupProperty); }}>
-        <summary>Subgroup breakdown: signal type × property (exploratory)</summary>
+      </Collapsible>}
+      <Collapsible className="pattern-subgroups" open={subgroupOpened} onToggle={(open) => { setSubgroupOpened(open); if (open && !subgroupReport && !subgroupBusy) void loadSubgroupReport(subgroupProperty); }} summary="Subgroup breakdown: signal type × property (exploratory)">
         <p className="analysis-limitations"><strong>{subgroupReport?.disclaimer ?? 'Descriptive research only. This does not prove any signal type + property combination is profitable or predictive going forward.'}</strong></p>
         <p className="muted">Limited to properties fixed at signal time (launch platform, token age) — fast-moving fields like live liquidity or volume are query-time snapshots, not verified trigger-time facts, so they're deliberately excluded from this breakdown for now. No statistical correction is applied for testing multiple cells at once — the cell count below is shown so a good-looking cell can be weighed against how many were tested. This view picks its own best horizon independently of the main table above — a standout combination can peak at a different horizon than the aggregate picture.</p>
         <div className="outcome-actions">
@@ -3495,10 +3492,10 @@ function App() {
           </table></div>
         </>}
         {!subgroupBusy && subgroupReport && !displayedSubgroupHorizon && <p className="muted">No subgroup horizon currently passes all reliability gates (fresh sample, coverage, distinct tokens, and capture-date spread). The data remains stored for review.</p>}
-      </details>
+      </Collapsible>
     </section>
 
-    <details className="outcome-results-details" open={false}><summary>Measured results ({outcomeTimelines.length})</summary><div className="outcome-results-controls"><label>Rows per page<select value={outcomePageSize} onChange={(event) => { const value = event.target.value; setOutcomePageSize(value === 'all' ? 'all' : Number(value)); setOutcomePage(0); }}><option value="25">25</option><option value="100">100</option><option value="1000">1,000</option><option value="all">All</option></select></label><button type="button" className="secondary" disabled={outcomePage === 0 || outcomePageSize === 'all'} onClick={() => setOutcomePage((page) => Math.max(0, page - 1))}>Previous</button><span>Page {Math.min(outcomePage + 1, outcomePageCount)} of {outcomePageCount}</span><button type="button" className="secondary" disabled={outcomePageSize === 'all' || outcomePage + 1 >= outcomePageCount} onClick={() => setOutcomePage((page) => Math.min(outcomePageCount - 1, page + 1))}>Next</button></div><div className="table-wrap outcome-table outcome-table-visible"><table><thead><tr>{outcomeColumns.map((column) => <th key={column.key} onClick={() => toggleOutcomeSort(column.key)} className="sortable-header" title="Click to sort">{column.label}{sortIndicator(column.key)}</th>)}</tr></thead><tbody>{visibleOutcomeTimelines.map((timeline) => { const base = timeline.checkpoints.find((checkpoint) => checkpoint.label === 'signal')?.result.priceUsd ?? null; return <tr key={timeline.signal.id}><td>#{timeline.signal.id}</td><td>{formatSignalType(timeline.signal.signalType)}</td>{CHECKPOINT_COLUMNS.map((label) => renderCheckpointCell(timeline, base, label))}<td><span className="token-cell" title={timeline.signal.tokenAddress}>{tokenDisplay(timeline.signal.symbol, timeline.signal.tokenAddress)} <button type="button" className="copy-address" aria-label={`Copy address ${timeline.signal.tokenAddress}`} onClick={() => void copyAddress(timeline.signal.tokenAddress)}>⧉</button></span></td></tr>; })}</tbody></table></div></details>
+    <Collapsible className="outcome-results-details" open={false} summary={`Measured results (${outcomeTimelines.length})`}><div className="outcome-results-controls"><label>Rows per page<select value={outcomePageSize} onChange={(event) => { const value = event.target.value; setOutcomePageSize(value === 'all' ? 'all' : Number(value)); setOutcomePage(0); }}><option value="25">25</option><option value="100">100</option><option value="1000">1,000</option><option value="all">All</option></select></label><button type="button" className="secondary" disabled={outcomePage === 0 || outcomePageSize === 'all'} onClick={() => setOutcomePage((page) => Math.max(0, page - 1))}>Previous</button><span>Page {Math.min(outcomePage + 1, outcomePageCount)} of {outcomePageCount}</span><button type="button" className="secondary" disabled={outcomePageSize === 'all' || outcomePage + 1 >= outcomePageCount} onClick={() => setOutcomePage((page) => Math.min(outcomePageCount - 1, page + 1))}>Next</button></div><div className="table-wrap outcome-table outcome-table-visible"><table><thead><tr>{outcomeColumns.map((column) => <th key={column.key} onClick={() => toggleOutcomeSort(column.key)} className="sortable-header" title="Click to sort">{column.label}{sortIndicator(column.key)}</th>)}</tr></thead><tbody>{visibleOutcomeTimelines.map((timeline) => { const base = timeline.checkpoints.find((checkpoint) => checkpoint.label === 'signal')?.result.priceUsd ?? null; return <tr key={timeline.signal.id}><td>#{timeline.signal.id}</td><td>{formatSignalType(timeline.signal.signalType)}</td>{CHECKPOINT_COLUMNS.map((label) => renderCheckpointCell(timeline, base, label))}<td><span className="token-cell" title={timeline.signal.tokenAddress}>{tokenDisplay(timeline.signal.symbol, timeline.signal.tokenAddress)} <button type="button" className="copy-address" aria-label={`Copy address ${timeline.signal.tokenAddress}`} onClick={() => void copyAddress(timeline.signal.tokenAddress)}>⧉</button></span></td></tr>; })}</tbody></table></div></Collapsible>
 
     <section id="copytrade" className="menu-section panel copytrade-panel">
 
@@ -3678,7 +3675,7 @@ function App() {
                 <input type="checkbox" checked={skipEliminatedInDune} disabled={!triageHasCurrentInputs || eliminationReport?.eliminated.length === 0} onChange={(event) => setSkipEliminatedInDune(event.target.checked)} />
                 Skip wallets triage rejected{eliminationReport ? ` (${eliminationReport.eliminated.length})` : ''}{eliminationReport && !triageHasCurrentInputs ? ' · triage out of date' : ''}
               </label>
-              <details><summary>Show activity table ({visibleWalletScreenSummary.activityLeaders.length})</summary><div className="copytrade-activity-table-toolbar"><span><strong>{researchWalletAddresses.length}</strong> selected for Dune · yellow rows have Dune data to fetch</span><div><button type="button" className="quiet" onClick={selectAllScreeningWallets} disabled={activityWalletAddresses.length === 0}>Select all</button><button type="button" className="quiet" onClick={deselectAllScreeningWallets} disabled={activityWalletAddresses.length === 0}>Deselect all</button></div></div><div className="table-wrap copytrade-screening-activity-table"><table><thead><tr><th>Fetch?</th><th>Activity #</th><th>Rank</th><th>Trader</th><th>Trades</th><th>Net profit (30d)</th><th>Delay fit</th></tr></thead><tbody>{visibleWalletScreenSummary.activityLeaders.map((entry, index) => { const excluded = excludedScreeningWalletSet.has(entry.wallet); const decisionEntry = unifiedTraderRowByWallet.get(entry.wallet); const needsEvidence = decisionEntry ? decisionStateFor(decisionEntry.verdict) === 'needs_data' && (!decisionEntry.delay?.sim || (decisionEntry.delay?.sim?.pendingDuneTargets ?? 0) > 0) : false; const rejectedByTriage = triageEliminatedWalletSet.has(entry.wallet); const highRiskReasons = highRiskWalletReasons.get(entry.wallet); const delayFit = entry.averageHoldSeconds === null ? 'Unknown' : entry.averageHoldSeconds < 60 ? 'Poor fit — fast trader' : 'Better fit — fetch'; const duneSim = decisionEntry?.delay?.sim; const duneLegsTotal = duneSim ? (duneSim.pendingDuneTargets ?? 0) + (duneSim.duneNoMatchTargets ?? 0) + (duneSim.duneMatchedTargets ?? 0) : 0; const duneQueriedPercent = duneLegsTotal > 0 && duneSim ? Math.round(((duneSim.duneNoMatchTargets ?? 0) + (duneSim.duneMatchedTargets ?? 0)) / duneLegsTotal * 100) : null; const usableCoverage = decisionEntry?.coverage; const coverageText = usableCoverage === null || usableCoverage === undefined ? 'Dune usable coverage is not available.' : `Dune usable coverage is ${usableCoverage.toFixed(0)}% (${duneSim?.copiedTrades ?? 0} matched of ${duneSim?.roundTripsConsidered ?? 0} eligible round trips).`; const queryText = duneQueriedPercent === null ? 'Dune query coverage is not available.' : `Dune query coverage is ${duneQueriedPercent}%; ${duneQueriedPercent >= 100 ? 'all current trade legs were already queried, so another normal fetch cannot add unqueried Dune data.' : 'unqueried Dune legs may still be fetchable.'}`; const evidenceReason = decisionEntry && decisionStateFor(decisionEntry.verdict) === 'needs_data' ? `${decisionEntry?.decisionReasons.join(' ') ?? 'Required decision evidence is incomplete.'} ${coverageText} ${queryText}` : 'This wallet does not currently need more decision evidence.'; return <tr key={entry.wallet} className={[excluded ? 'copytrade-screening-excluded' : '', needsEvidence ? 'copytrade-screening-needs-data' : ''].filter(Boolean).join(' ') || undefined}><td><input type="checkbox" checked={!excluded} onChange={() => toggleScreeningWallet(entry.wallet)} aria-label={`${excluded ? 'Include' : 'Exclude'} ${entry.name?.trim() || shortAddress(entry.wallet)} in Dune research`} /></td><td>{index + 1}</td><td>{entry.rank === null ? '—' : `#${entry.rank}`}</td><td title={evidenceReason}>{entry.name?.trim() || shortAddress(entry.wallet)}{needsEvidence && <small className="copytrade-needs-data-label">Needs more evidence</small>}{rejectedByTriage && <small className="copytrade-warning-text" title="The last triage run rejected this wallet. Check the box to fetch it anyway."> · rejected by triage</small>}{highRiskReasons && highRiskReasons.length > 0 && <small className="copytrade-warning-text" title="Check the box to fetch it anyway."> · {highRiskReasons.join(', ')}</small>}</td><td>{entry.trades.toLocaleString()}</td><td className={entry.netProfit !== null && entry.netProfit >= 0 ? 'positive' : entry.netProfit !== null ? 'negative' : undefined}>{formatUsd(entry.netProfit)}</td><td title={`GMGN provides average holding time here; this is the best available delay-risk proxy. ${evidenceReason}`}>{delayFit}<small>{entry.averageHoldSeconds === null ? 'No hold-time data' : `${formatHoldingTime(entry.averageHoldSeconds)} average hold`}</small></td></tr>; })}</tbody></table></div></details>{visibleWalletScreenSummary.missingStatsWallets > 0 && <small>{visibleWalletScreenSummary.missingStatsWallets} summaries missing</small>}
+              <Collapsible summary={`Show activity table (${visibleWalletScreenSummary.activityLeaders.length})`}><div className="copytrade-activity-table-toolbar"><span><strong>{researchWalletAddresses.length}</strong> selected for Dune · yellow rows have Dune data to fetch</span><div><button type="button" className="quiet" onClick={selectAllScreeningWallets} disabled={activityWalletAddresses.length === 0}>Select all</button><button type="button" className="quiet" onClick={deselectAllScreeningWallets} disabled={activityWalletAddresses.length === 0}>Deselect all</button></div></div><div className="table-wrap copytrade-screening-activity-table"><table><thead><tr><th>Fetch?</th><th>Activity #</th><th>Rank</th><th>Trader</th><th>Trades</th><th>Net profit (30d)</th><th>Delay fit</th></tr></thead><tbody>{visibleWalletScreenSummary.activityLeaders.map((entry, index) => { const excluded = excludedScreeningWalletSet.has(entry.wallet); const decisionEntry = unifiedTraderRowByWallet.get(entry.wallet); const needsEvidence = decisionEntry ? decisionStateFor(decisionEntry.verdict) === 'needs_data' && (!decisionEntry.delay?.sim || (decisionEntry.delay?.sim?.pendingDuneTargets ?? 0) > 0) : false; const rejectedByTriage = triageEliminatedWalletSet.has(entry.wallet); const highRiskReasons = highRiskWalletReasons.get(entry.wallet); const delayFit = entry.averageHoldSeconds === null ? 'Unknown' : entry.averageHoldSeconds < 60 ? 'Poor fit — fast trader' : 'Better fit — fetch'; const duneSim = decisionEntry?.delay?.sim; const duneLegsTotal = duneSim ? (duneSim.pendingDuneTargets ?? 0) + (duneSim.duneNoMatchTargets ?? 0) + (duneSim.duneMatchedTargets ?? 0) : 0; const duneQueriedPercent = duneLegsTotal > 0 && duneSim ? Math.round(((duneSim.duneNoMatchTargets ?? 0) + (duneSim.duneMatchedTargets ?? 0)) / duneLegsTotal * 100) : null; const usableCoverage = decisionEntry?.coverage; const coverageText = usableCoverage === null || usableCoverage === undefined ? 'Dune usable coverage is not available.' : `Dune usable coverage is ${usableCoverage.toFixed(0)}% (${duneSim?.copiedTrades ?? 0} matched of ${duneSim?.roundTripsConsidered ?? 0} eligible round trips).`; const queryText = duneQueriedPercent === null ? 'Dune query coverage is not available.' : `Dune query coverage is ${duneQueriedPercent}%; ${duneQueriedPercent >= 100 ? 'all current trade legs were already queried, so another normal fetch cannot add unqueried Dune data.' : 'unqueried Dune legs may still be fetchable.'}`; const evidenceReason = decisionEntry && decisionStateFor(decisionEntry.verdict) === 'needs_data' ? `${decisionEntry?.decisionReasons.join(' ') ?? 'Required decision evidence is incomplete.'} ${coverageText} ${queryText}` : 'This wallet does not currently need more decision evidence.'; return <tr key={entry.wallet} className={[excluded ? 'copytrade-screening-excluded' : '', needsEvidence ? 'copytrade-screening-needs-data' : ''].filter(Boolean).join(' ') || undefined}><td><input type="checkbox" checked={!excluded} onChange={() => toggleScreeningWallet(entry.wallet)} aria-label={`${excluded ? 'Include' : 'Exclude'} ${entry.name?.trim() || shortAddress(entry.wallet)} in Dune research`} /></td><td>{index + 1}</td><td>{entry.rank === null ? '—' : `#${entry.rank}`}</td><td title={evidenceReason}>{entry.name?.trim() || shortAddress(entry.wallet)}{needsEvidence && <small className="copytrade-needs-data-label">Needs more evidence</small>}{rejectedByTriage && <small className="copytrade-warning-text" title="The last triage run rejected this wallet. Check the box to fetch it anyway."> · rejected by triage</small>}{highRiskReasons && highRiskReasons.length > 0 && <small className="copytrade-warning-text" title="Check the box to fetch it anyway."> · {highRiskReasons.join(', ')}</small>}</td><td>{entry.trades.toLocaleString()}</td><td className={entry.netProfit !== null && entry.netProfit >= 0 ? 'positive' : entry.netProfit !== null ? 'negative' : undefined}>{formatUsd(entry.netProfit)}</td><td title={`GMGN provides average holding time here; this is the best available delay-risk proxy. ${evidenceReason}`}>{delayFit}<small>{entry.averageHoldSeconds === null ? 'No hold-time data' : `${formatHoldingTime(entry.averageHoldSeconds)} average hold`}</small></td></tr>; })}</tbody></table></div></Collapsible>{visibleWalletScreenSummary.missingStatsWallets > 0 && <small>{visibleWalletScreenSummary.missingStatsWallets} summaries missing</small>}
             </div>}
           </div>
           <div className="copytrade-workflow-row">
@@ -3727,10 +3724,10 @@ function App() {
         {rosterChange.live
           ? <span>{rosterChange.joinedWallets.length} joined · {rosterChange.leftWallets.length} left · unchanged wallets remain in the saved history.</span>
           : <span>No new leaderboard was received, so no membership change was measured.</span>}
-        {(rosterChange.joinedWallets.length > 0 || rosterChange.leftWallets.length > 0) && <details><summary>Show wallet changes</summary><div className="copytrade-roster-change-lists">
+        {(rosterChange.joinedWallets.length > 0 || rosterChange.leftWallets.length > 0) && <Collapsible summary="Show wallet changes"><div className="copytrade-roster-change-lists">
           {rosterChange.joinedWallets.length > 0 && <div><b>Joined</b>{rosterChange.joinedWallets.map((wallet) => <a key={`joined-${wallet}`} href={`https://gmgn.ai/sol/address/${wallet}`} target="_blank" rel="noreferrer" title={wallet}>{shortWalletAddress(wallet)} ↗</a>)}</div>}
           {rosterChange.leftWallets.length > 0 && <div><b>Left</b>{rosterChange.leftWallets.map((wallet) => <a key={`left-${wallet}`} href={`https://gmgn.ai/sol/address/${wallet}`} target="_blank" rel="noreferrer" title={wallet}>{shortWalletAddress(wallet)} ↗</a>)}</div>}
-        </div></details>}
+        </div></Collapsible>}
       </div>}
       <div className="copytrade-table-overview">
         <span>{gmgnStatsFreshRows} / {copyTradeRows.length} summaries fresh · {duneMatchedTargets.toLocaleString()} usable Dune target legs</span>
@@ -3739,12 +3736,11 @@ function App() {
         <label className="copytrade-filter-toggle"><input type="checkbox" checked={showDelaySurvivorsOnly} onChange={(event) => setShowDelaySurvivorsOnly(event.target.checked)} /> Show positive copy gains only</label>
         <span>{walletStatsTableLoading ? 'Loading…' : `${visibleDecisionRows.length} shown`}</span>
       </div>
-      <details className="copytrade-column-picker" open={decisionColumnsOpen} onToggle={(event) => setDecisionColumnsOpen(event.currentTarget.open)}>
-        <summary>Columns</summary>
+      <Collapsible className="copytrade-column-picker" open={decisionColumnsOpen} onToggle={setDecisionColumnsOpen} summary="Columns">
         <div className="copytrade-column-picker-options">
           {DECISION_COLUMNS.map(({ key, label }) => <label key={key}><input type="checkbox" checked={decisionColumns[key]} onChange={() => toggleDecisionColumn(key)} /> {label}</label>)}
         </div>
-      </details>
+      </Collapsible>
       <div className="table-wrap copytrade-table-wrap copytrade-decision-table-wrap" onClickCapture={(event) => { const target = event.target as HTMLElement; if (target.closest('a,button')) return; const row = target.closest('tr.copytrade-decision-row') as HTMLElement | null; const walletAddress = row?.dataset.walletAddress; if (walletAddress) openStatsDetail(walletAddress); }}><table className="copytrade-table copytrade-decision-table"><thead><tr>
         {decisionColumns.rank && <th onClick={() => toggleDecisionSort('rank')} className="sortable-header" title="Sort by current GMGN rank">Rank{decisionSortIndicator('rank')}</th>}
         {decisionColumns.gmgn && <th title="Open this wallet on GMGN">GMGN</th>}
@@ -3820,7 +3816,7 @@ function App() {
         })}
         {sortedUnifiedTraderRows.length === 0 && <tr><td colSpan={DECISION_COLUMNS.filter(({ key }) => decisionColumns[key]).length + 1} className="muted">{walletStatsTableLoading ? <span className="copytrade-loading-inline"><span className="loading-spinner" aria-hidden="true" /> Loading roster and GMGN summaries…</span> : 'Load a roster and fetch GMGN summaries to build the candidate list.'}</td></tr>}
       </tbody></table></div>
-      <details className="copytrade-maintenance" open={maintenanceOpen || statsDetailWallet !== null} onToggle={(event) => setMaintenanceOpen(event.currentTarget.open)}><summary>Trader evidence</summary>
+      <Collapsible className="copytrade-maintenance" open={maintenanceOpen || statsDetailWallet !== null} onToggle={setMaintenanceOpen} summary="Trader evidence">
       {statsDetailWallet && (() => {
         const periods = gmgnStatsByWallet.get(statsDetailWallet);
         const detail7d = periods?.get('7d') ?? null;
@@ -4033,10 +4029,9 @@ function App() {
             </>}
         </Modal>}
       </div>
-      </details>
+      </Collapsible>
     </section>}
-    {copyTradeSubTab === 'wallet-stats' && <details className="copytrade-advanced-diagnostics" open={diagnosticsOpen} onToggle={(event) => setDiagnosticsOpen(event.currentTarget.open)}>
-      <summary>Advanced diagnostics</summary>
+    {copyTradeSubTab === 'wallet-stats' && <Collapsible className="copytrade-advanced-diagnostics" open={diagnosticsOpen} onToggle={setDiagnosticsOpen} summary="Advanced diagnostics">
       <p className="muted">Research-maintenance tooling, not a recommendation view. Use the canonical table above to decide who to follow; use this to investigate why a wallet reads the way it does.</p>
       <div id="copytrade-elimination" className="copytrade-temp-panel">
       <div className="panel-heading"><div><p className="eyebrow">TEMPORARY · PRE-SIMULATION TRIAGE</p><h2>Which wallets can we stop chasing?</h2></div><span className="tag">EXPERIMENTAL</span></div>
@@ -4079,8 +4074,7 @@ function App() {
             {eliminationReport.survivorsNeverSimulatedCount > 0 && <small className="warning"> Lower bound only — {eliminationReport.survivorsNeverSimulatedCount} survivor(s) have never been simulated at all, so their Dune workload isn't counted above.</small>}
           </div>
         </div>
-        <details open>
-          <summary>Surviving wallets ({eliminationReport.surviving.length})</summary>
+        <Collapsible open summary={`Surviving wallets (${eliminationReport.surviving.length})`}>
           <div className="table-wrap">
             <table><thead><tr><th>Trader</th><th>Trades</th><th>Dune coverage</th><th>Does the gap matter?</th><th>30d P&amp;L</th><th>Delayed-copy median</th><th>Trustworthy?</th></tr></thead>
               <tbody>{eliminationReport.surviving.map((entry) => { const gap = entry.coverageGap; const riskLabel = HIDDEN_LOSS_LABELS[gap?.hiddenLossRisk ?? 'unknown']; return <tr key={entry.walletAddress}>
@@ -4100,9 +4094,8 @@ function App() {
               </tr>; })}</tbody>
             </table>
           </div>
-        </details>
-        <details>
-          <summary>Eliminated wallets ({eliminationReport.eliminated.length})</summary>
+        </Collapsible>
+        <Collapsible summary={`Eliminated wallets (${eliminationReport.eliminated.length})`}>
           <div className="table-wrap">
             <table><thead><tr><th>Trader</th><th>Trades</th><th>Dune coverage</th><th>30d P&amp;L</th><th>Delayed-copy median</th><th>Reason(s)</th></tr></thead>
               <tbody>{eliminationReport.eliminated.map((entry) => <tr key={entry.walletAddress}>
@@ -4115,10 +4108,10 @@ function App() {
               </tr>)}</tbody>
             </table>
           </div>
-        </details>
+        </Collapsible>
       </>}
       </div>
-    </details>}
+    </Collapsible>}
 
     {copyTradeSubTab === 'pattern-discovery' && <section id="copytrade-pattern-discovery" className="menu-section panel copytrade-research-route pattern-discovery-panel">
       <div className="panel-heading"><div><p className="eyebrow">GMGN COPYTRADE · SHARED ENGINE EXPORT</p><h2>Pattern Discovery</h2></div><span className="tag">100% OUTCOME COVERAGE</span></div>
@@ -4128,7 +4121,7 @@ function App() {
       <div className="copytrade-coverage-controls"><label>Selected period (days)<input type="number" min={1} max={90} step={1} value={copyTradePeriodDays} onChange={(event) => setCopyTradePeriodDays(Math.min(90, Math.max(1, Number(event.target.value) || 1)))} /></label><button type="button" className="secondary" disabled={patternDiscoveryLoading} onClick={() => void loadPatternDiscoveryExport(copyTradePeriodDays)}>{patternDiscoveryLoading ? 'Reading…' : 'Refresh outcome export'}</button>{patternDiscoveryExport && <button type="button" className="secondary" onClick={() => saveJson(patternDiscoveryExport, `crypto-pattern-discovery-${patternDiscoveryExport.metadata.period_days}d.json`)}>Download normalized export</button>}<button type="button" className="primary" disabled={patternDiscoveryRunLoading || patternDiscoveryLoading || !patternDiscoveryExport?.metadata.exported_rows} onClick={() => void runPatternDiscovery()}>{patternDiscoveryRunLoading ? 'Running shared discovery…' : 'Run shared discovery'}</button></div>
       {patternDiscoveryError && <p className="error-text">{patternDiscoveryError}</p>}
       {patternDiscoveryLoading && <div className="copytrade-analysis-status running" role="status"><span className="loading-spinner" aria-hidden="true" /><div><strong>Reading saved copy-simulation outcomes…</strong><small>No GMGN or Dune request is made.</small></div></div>}
-      {patternDiscoveryExport && !patternDiscoveryLoading && <><div className="copytrade-table-overview"><span><strong>{patternDiscoveryExport.metadata.selected_wallet_count}</strong> wallets</span><span><strong>{patternDiscoveryExport.metadata.exported_rows}</strong> normalized events</span><span><strong>{patternDiscoveryExport.metadata.excluded_wallets_not_exactly_100_percent}</strong> excluded below exact coverage</span></div><details className="copytrade-info-panel pattern-discovery-source-data" open={patternDiscoverySourceOpen} onToggle={(event) => setPatternDiscoverySourceOpen(event.currentTarget.open)}><summary>Source data · {patternDiscoveryExport.metadata.exported_rows} events</summary><DataTable
+      {patternDiscoveryExport && !patternDiscoveryLoading && <><div className="copytrade-table-overview"><span><strong>{patternDiscoveryExport.metadata.selected_wallet_count}</strong> wallets</span><span><strong>{patternDiscoveryExport.metadata.exported_rows}</strong> normalized events</span><span><strong>{patternDiscoveryExport.metadata.excluded_wallets_not_exactly_100_percent}</strong> excluded below exact coverage</span></div><Collapsible className="copytrade-info-panel pattern-discovery-source-data" open={patternDiscoverySourceOpen} onToggle={setPatternDiscoverySourceOpen} summary={`Source data · ${patternDiscoveryExport.metadata.exported_rows} events`}><DataTable
                 wrapClassName="table-wrap copytrade-table-wrap"
                 tableClassName="copytrade-table fully-covered-table"
                 rows={patternDiscoveryExport.rows.slice(0, 100)}
@@ -4141,7 +4134,7 @@ function App() {
                   { key: 'copyOutcome', header: 'Copy outcome', cellProps: (row) => ({ className: row.net_return_after_costs >= 0 ? 'positive' : 'negative' }), render: (row) => `${row.net_return_after_costs.toFixed(2)}%` },
                   { key: 'coverage', header: 'Coverage', render: () => '100%' },
                 ]}
-              /><p className="muted">{patternDiscoveryExport.metadata.coverage_semantics}</p></details><details className="copytrade-info-panel"><summary>Configured shared-engine fallback</summary><p>The browser view only exports JSON. From the Vantage workspace, run the JSON-only adapter and then the isolated Python report command:</p><pre className="pattern-discovery-command">python -m shared_pattern_discovery.exporters.gmgn --project crypto --input &lt;downloaded-export.json&gt; --output runs/crypto/gmgn-pattern-discovery.json{`\n`}python -m shared_pattern_discovery.cli --project crypto --input runs/crypto/gmgn-pattern-discovery.json --output runs/crypto/pattern-discovery-report.json --min-n 10</pre><p className="muted">The shared engine reads this normalized JSON only; it never opens the crypto SQLite database.</p></details></>}
+              /><p className="muted">{patternDiscoveryExport.metadata.coverage_semantics}</p></Collapsible><Collapsible className="copytrade-info-panel" summary="Configured shared-engine fallback"><p>The browser view only exports JSON. From the Vantage workspace, run the JSON-only adapter and then the isolated Python report command:</p><pre className="pattern-discovery-command">python -m shared_pattern_discovery.exporters.gmgn --project crypto --input &lt;downloaded-export.json&gt; --output runs/crypto/gmgn-pattern-discovery.json{`\n`}python -m shared_pattern_discovery.cli --project crypto --input runs/crypto/gmgn-pattern-discovery.json --output runs/crypto/pattern-discovery-report.json --min-n 10</pre><p className="muted">The shared engine reads this normalized JSON only; it never opens the crypto SQLite database.</p></Collapsible></>}
       {!patternDiscoveryLoading && patternDiscoveryExport?.metadata.exported_rows === 0 && <p className="muted">No exact-100% outcome-coverage rows exist for this period, so shared discovery is unavailable until an eligible export exists.</p>}
       {!patternDiscoveryLoading && patternDiscoveryExport && !patternDiscoveryReport && !patternDiscoveryRunLoading && !patternDiscoveryRunError && <p className="muted">Normalized export loaded. The shared Python engine has not run yet; click “Run shared discovery” to generate the report.</p>}
       {patternDiscoveryRunError && <p className="error-text">{patternDiscoveryRunError}</p>}
@@ -4153,7 +4146,7 @@ function App() {
         <p className="pattern-discovery-explainer"><strong>Read this as:</strong> a behavior that appeared often enough in the selected data to test again.</p>
         {patternDiscoveryReport.patterns.filter((pattern) => pattern.validationStatus === 'insufficient data').map((pattern, index) => <p className="copytrade-outcome-coverage-warning" key={`insufficient-${index}`}><strong>Why a rule was not shown:</strong> {pattern.reason ?? 'There was not enough usable data.'}</p>)}
         <div className="pattern-discovery-results"><div className="pattern-discovery-results-heading"><h4>Rules found</h4><span>{patternDiscoveryReport.status_counts['validation survivor'] ?? 0} repeated</span></div>{patternDiscoveryReport.patterns.filter((pattern) => pattern.validationStatus === 'discovered candidate' || pattern.validationStatus === 'validation survivor').map((pattern, index) => { const effect = pattern.effect ?? null; const status = pattern.validationStatus === 'validation survivor' ? 'repeated' : 'candidate'; const isCorrelation = pattern.kind === 'correlation'; return <article className={`pattern-discovery-rule ${effect !== null && effect >= 0 ? 'positive-rule' : 'negative-rule'}`} key={`${pattern.feature ?? 'pattern'}-${index}`}><div className="pattern-discovery-rule-title"><strong>{patternFeatureLabel(pattern.feature)}</strong><span className={status}>{status === 'repeated' ? 'REPEATS' : 'CANDIDATE'}</span></div><div className="pattern-discovery-rule-main"><div><small>RULE</small><p>{patternConditionText(pattern.feature, pattern.conditions)}</p></div><div className={`pattern-discovery-effect ${effect !== null && effect >= 0 ? 'positive' : 'negative'}`}><small>{isCorrelation ? 'CORRELATION' : 'OUTCOME DIFFERENCE'}</small><b>{effect === null ? '—' : `${effect >= 0 ? '+' : ''}${formatPatternNumber(effect)}${isCorrelation ? '' : ' pts'}`}</b></div></div><div className="pattern-discovery-rule-meta"><span>Older data <b>{pattern.discovery_sample_size ?? 0}</b></span><span>Newer data <b>{pattern.validation?.sample_size ?? 0}</b></span></div></article>; })}{patternDiscoveryReport.patterns.filter((pattern) => pattern.validationStatus === 'discovered candidate' || pattern.validationStatus === 'validation survivor').length === 0 && <p className="muted">No rules found yet.</p>}</div>
-        <details className="pattern-discovery-details"><summary>Technical details</summary><p>Features come from wallet and token history available before each event. The final holdout is reserved for a later check.</p>{patternDiscoveryExecution && <p className="muted">Report file: {patternDiscoveryExecution.outputPath}</p>}</details>
+        <Collapsible className="pattern-discovery-details" summary="Technical details"><p>Features come from wallet and token history available before each event. The final holdout is reserved for a later check.</p>{patternDiscoveryExecution && <p className="muted">Report file: {patternDiscoveryExecution.outputPath}</p>}</Collapsible>
       </div>}
     </section>}
 

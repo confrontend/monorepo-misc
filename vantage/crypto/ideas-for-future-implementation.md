@@ -6,7 +6,7 @@
   - **DataTable** (6 copies: scrutiny-table, decision-table, history-table, combined-stats-table, trade-detail-table, fully-covered-table) — each wraps its own `table-wrap` div and hand-writes `<thead>`/`.map()` rows. Highest-value target alongside Modal — most duplication, most behavior, and the kind of copy-drift that already caused real bugs this session.
   - **Panel / Section** (10+ copies) — every top-level content area is `<section className="menu-section panel X-panel">` with the same header shape.
   - **SortableHeader** (18 references) — every table re-implements its own sortable-header + sort-arrow-indicator + click-to-toggle logic.
-  - **Collapsible** (12 `<details>` wrappers) — same open/summary/toggle-state pattern repeated per section.
+  - **Collapsible** (12 `<details>` wrappers) — same open/summary/toggle-state pattern repeated per section. — DONE 2026-08-23: extracted to `ui/components/Collapsible.tsx`, 17 of 17 call sites migrated (the real count as of the extraction was 17, not 12; none were left inline).
   - **StatTile** (seen once so far, `copytrade-decision-state-tile`: `<div className="X-tile tone-Y"><strong>{count}</strong><span>{label}</span></div>` — worth checking other dashboards for the same shape before assuming it's only used once).
   - **StatusBanner** (12 copies) — `copytrade-status-warning` / `muted` one-line message boxes.
   - **WorkflowStep** (12 copies) — the numbered "0/1/2" circular step badges in Fetch controls.
