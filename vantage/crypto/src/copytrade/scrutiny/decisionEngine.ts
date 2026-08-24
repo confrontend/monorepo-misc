@@ -27,6 +27,15 @@ export type ThirtyDayDecisionDetails = ThirtyDayDecisionEvidence & {
   minimumMeasuredWeeks?: number;
 };
 
+/** Both required 30-day evidence sources use the same freshness window. */
+export const THIRTY_DAY_DECISION_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+
+export const isThirtyDayDecisionEvidenceFresh = (fetchedAt: string | null | undefined, now = Date.now()): boolean => {
+  if (!fetchedAt) return false;
+  const age = now - Date.parse(fetchedAt);
+  return Number.isFinite(age) && age >= 0 && age <= THIRTY_DAY_DECISION_FRESHNESS_MS;
+};
+
 export const decideThirtyDayVerdict = (evidence: ThirtyDayDecisionEvidence): ThirtyDayDecision => {
   if (evidence.historyIncomplete) return 'Needs data';
   if (evidence.impossibleToCopy) return 'Not copyable';

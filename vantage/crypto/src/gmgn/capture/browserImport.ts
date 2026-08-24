@@ -118,7 +118,7 @@ export const importGmgnBrowserCapture = (
     let otherCaptures = 0;
     try {
       const capturesArray = (JSON.parse(existing.rawSource) as Partial<BrowserExport>).captures;
-      if (Array.isArray(capturesArray)) otherCaptures = capturesArray.filter((capture) => capture && !isRecognizedCapture(capture as BrowserCapture)).length;
+      if (Array.isArray(capturesArray)) otherCaptures = capturesArray.filter((capture) => capture && !isRecognizedCapture(capture)).length;
     } catch { /* already validated on first import; a parse failure here would be unexpected, not fatal */ }
     // Persisted at the end of the original import (see the UPDATE below) so a duplicate-file
     // re-upload reports the same real breakdown, not a recomputed approximation. Batches

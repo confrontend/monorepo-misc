@@ -59,13 +59,13 @@ test('robust report computes a bootstrap CI, a sign-test p-value, and Holm corre
     const report = computeRobustPatternReport(database, new Date('2026-03-10T00:00:00Z'), { bootstrapIterations: 500 });
     const group = report.groups.find((g) => g.key === '7' && g.horizon === '+1h');
     assert.ok(group, 'a 15-token, consistently-positive group must appear');
-    assert.equal(group!.n, 15);
-    assert.ok(group!.medianReturnPct! > 0);
-    assert.ok(group!.bootstrap, 'bootstrap CI must be present for a group at/above the sample floor');
-    assert.ok(group!.bootstrap!.lower <= group!.bootstrap!.median && group!.bootstrap!.median <= group!.bootstrap!.upper, 'CI must bracket the point estimate');
-    assert.ok(group!.signTest.pValue < 0.05, 'an all-positive 15-sample group should reject the zero-median null at the uncorrected level');
-    assert.ok(group!.holmAdjustedPValue !== null);
-    assert.equal(group!.holmAdjustedPValue, group!.signTest.pValue, 'a single tested group is unaffected by Holm correction (m=1)');
+    assert.equal(group.n, 15);
+    assert.ok(group.medianReturnPct! > 0);
+    assert.ok(group.bootstrap, 'bootstrap CI must be present for a group at/above the sample floor');
+    assert.ok(group.bootstrap.lower <= group.bootstrap.median && group.bootstrap.median <= group.bootstrap.upper, 'CI must bracket the point estimate');
+    assert.ok(group.signTest.pValue < 0.05, 'an all-positive 15-sample group should reject the zero-median null at the uncorrected level');
+    assert.ok(group.holmAdjustedPValue !== null);
+    assert.equal(group.holmAdjustedPValue, group.signTest.pValue, 'a single tested group is unaffected by Holm correction (m=1)');
   } finally { database.close(); }
 });
 
@@ -180,8 +180,8 @@ test('robust report keeps a missing first observation from being replaced by a l
     const report = computeRobustPatternReport(database, new Date('2026-03-15T00:00:00Z'), { bootstrapIterations: 300 });
     const group = report.groups.find((g) => g.key === '7' && g.horizon === '+1h');
     assert.ok(group, 'the 10 clean tokens alone must clear the reliability floor');
-    assert.equal(group!.n, 10, 'the trap token must contribute zero points — its first observation was missing, and a later repeat cannot substitute for it');
-    assert.ok(group!.medianReturnPct! < 5, 'a median near +1% (all 10 clean tokens) proves the +900% trap return never entered the sample');
+    assert.equal(group.n, 10, 'the trap token must contribute zero points — its first observation was missing, and a later repeat cannot substitute for it');
+    assert.ok(group.medianReturnPct! < 5, 'a median near +1% (all 10 clean tokens) proves the +900% trap return never entered the sample');
   } finally { database.close(); }
 });
 

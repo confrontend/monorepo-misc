@@ -37,6 +37,7 @@ const readRankApiKey = (): string => {
 };
 
 const rankItems = (payload: unknown): unknown[] => {
+  if (Array.isArray(payload)) return payload;
   const root = payload && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as Record<string, unknown> : {};
   const data = root.data;
@@ -159,5 +160,39 @@ export const refreshCurrentWalletRank = async (
     joinedWallets: currentWallets.filter((wallet) => !previousSet.has(wallet)),
     leftWallets: previousWallets.filter((wallet) => !currentSet.has(wallet)),
     requestQuery: Object.fromEntries(url.searchParams.entries()) as WalletRankRefreshResult['requestQuery'],
+  };
+};
+
+/**
+ * Imports a roster captured in the browser, without making a live GMGN request. Accepts either
+ * the raw leaderboard response or the Chrome extension export containing `captures[]`.
+ */
+export const importWalletRankSnapshot = (
+  database: DatabaseSync,
+  rawInput: unknown,
+  options: { capturedAt?: string; requestPath?: string; requestQuery?: Record<string, unknown> } = {},
+): WalletRankRefreshResult => {
+  const root = rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+    ? rawInput as Record<string, unknown> : {};
+  const captures = Array.isArray(root.captures) ? root.captures.filter((capture): capture is Record<string, unknown> => capture !== null && typeof capture === 'object') : [];
+  const rankCapture = [...captures].reverse().find((capture) => typeof capture.requestPath === 'string' && capture.requestPath.includes('/api/v1/rank/sol/wallets/'));
+  const payload = rankCapture?.responseBody ?? (captures.length === 0 ? rawInput : null);
+  const capturedAt = typeof rankCapture?.capturedAt === 'string' ? rankCapture.capturedAt : options.capturedAt ?? new Date().toISOString();
+  const requestPath = typeof rankCapture?.requestPath === 'string' ? rankCapture.requestPath : options.requestPath ?? '/api/v1/rank/sol/wallets/7d';
+  const requestQuery = rankCapture?.requestQuery && typeof rankCapture.requestQuery === 'object' && !Array.isArray(rankCapture.requestQuery)
+    ? rankCapture.requestQuery as Record<string, unknown> : options.requestQuery ?? {};
+  const count = rankItems(payload).filter((item) => item && typeof item === 'object').length;
+  if (count === 0) throw new Error('The JSON does not contain a GMGN wallet leaderboard. Export the leaderboard response or a Chrome extension capture that includes /api/v1/rank/sol/wallets/.');
+  const orderby = typeof requestQuery.orderby === 'string' ? requestQuery.orderby : undefined;
+  const result = storeWalletRankSnapshot(database, {
+    window: orderby?.match(/_(\d+[a-z]+)$/i)?.[1] ?? '30d', orderby, capturedAt,
+    rawPayload: payload, requestPath, requestQuery,
+  });
+  const row = database.prepare('SELECT id FROM gmgn_wallet_rank_snapshots WHERE source_sha256 = ?').get(result.sourceSha256) as { id: number };
+  const currentWallets = walletAddresses(payload, Math.min(100, count));
+  return {
+    snapshotId: row.id, capturedAt, walletCount: currentWallets.length, inserted: result.inserted > 0,
+    responseStatus: 0, live: false, fallbackReason: 'Imported from a local JSON file; no live GMGN request was made.',
+    joinedWallets: [], leftWallets: [], requestQuery: { orderby: orderby ?? 'imported', limit: String(currentWallets.length) },
   };
 };

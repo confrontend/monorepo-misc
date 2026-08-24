@@ -11,3 +11,8 @@
   - **StatusBanner** (12 copies) — `copytrade-status-warning` / `muted` one-line message boxes.
   - **WorkflowStep** (12 copies) — the numbered "0/1/2" circular step badges in Fetch controls.
   - **Badge/Pill** (~5 copies) — verdict badges and scrutiny verdict badges, likely mergeable into one generic `<Badge tone>`.
+
+- 2026-08-23 (later) — idea: centralize all UI-facing strings (labels, button text, tooltips, empty-state/error messages) into one file, imported and reused across the app instead of inline string literals scattered through `ui/main.tsx`. Would pair naturally with the `ui/components/` extraction above (Modal/DataTable etc. take label/text props today) — a shared strings module would give those components, and the ~4,000-line `App()`, a single place to update copy instead of hunting through inline JSX. Not scoped or started.
+
+- 2026-08-23 (later still) — Idea: introduce a lightweight shared derived-state layer in the UI to avoid duplicated decision logic. Keep state management simple: local state → `useState`, parent/child state → React Context, global UI state → Zustand, and backend/API state → TanStack Query. Shared derived concepts should live in one reusable selector or function so different parts of the UI cannot compute the same decision differently.
+

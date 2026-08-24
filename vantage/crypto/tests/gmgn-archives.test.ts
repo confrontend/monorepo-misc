@@ -45,15 +45,15 @@ test('a well-formed archive is reported fully verified with a safe, parsed manif
     const fileName = writeArchive(directory, buffer);
 
     const [summary] = listGmgnArchives(directory);
-    assert.equal(summary!.fileName, fileName);
-    assert.equal(summary!.hashVerified, true);
-    assert.equal(summary!.structureVerified, true);
-    assert.equal(summary!.eventCountVerified, true);
-    assert.equal(summary!.verified, true);
-    assert.equal(summary!.verificationError, null);
-    assert.deepEqual(summary!.entryNames.sort(), ['gmgn-signal-response.json', 'manifest.json']);
-    assert.equal(summary!.manifest!.eventCount, 2);
-    assert.equal(summary!.manifest!.capturedAt, '2026-08-11T04:12:21.462Z');
+    assert.equal(summary.fileName, fileName);
+    assert.equal(summary.hashVerified, true);
+    assert.equal(summary.structureVerified, true);
+    assert.equal(summary.eventCountVerified, true);
+    assert.equal(summary.verified, true);
+    assert.equal(summary.verificationError, null);
+    assert.deepEqual(summary.entryNames.sort(), ['gmgn-signal-response.json', 'manifest.json']);
+    assert.equal(summary.manifest!.eventCount, 2);
+    assert.equal(summary.manifest!.capturedAt, '2026-08-11T04:12:21.462Z');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -68,8 +68,8 @@ test('a tampered archive fails hash verification even though it still parses', (
     writeFileSync(path.join(directory, fileName), Buffer.concat([buffer, Buffer.from('tampered')]));
 
     const [summary] = listGmgnArchives(directory);
-    assert.equal(summary!.hashVerified, false);
-    assert.equal(summary!.verified, false);
+    assert.equal(summary.hashVerified, false);
+    assert.equal(summary.verified, false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -82,10 +82,10 @@ test('a structurally invalid file is flagged with a descriptive error and no man
     writeArchive(directory, garbage);
 
     const [summary] = listGmgnArchives(directory);
-    assert.equal(summary!.structureVerified, false);
-    assert.equal(summary!.verified, false);
-    assert.equal(summary!.manifest, null);
-    assert.match(summary!.verificationError ?? '', /valid stored ZIP archive/);
+    assert.equal(summary.structureVerified, false);
+    assert.equal(summary.verified, false);
+    assert.equal(summary.manifest, null);
+    assert.match(summary.verificationError ?? '', /valid stored ZIP archive/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -98,9 +98,9 @@ test('an archive missing manifest.json is flagged rather than silently treated a
     writeArchive(directory, buffer);
 
     const [summary] = listGmgnArchives(directory);
-    assert.equal(summary!.structureVerified, false);
-    assert.equal(summary!.verified, false);
-    assert.match(summary!.verificationError ?? '', /manifest\.json/);
+    assert.equal(summary.structureVerified, false);
+    assert.equal(summary.verified, false);
+    assert.match(summary.verificationError ?? '', /manifest\.json/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -113,9 +113,9 @@ test('a manifest event count that disagrees with the archived response is flagge
     writeArchive(directory, buffer);
 
     const [summary] = listGmgnArchives(directory);
-    assert.equal(summary!.structureVerified, true);
-    assert.equal(summary!.eventCountVerified, false);
-    assert.equal(summary!.verified, false);
+    assert.equal(summary.structureVerified, true);
+    assert.equal(summary.eventCountVerified, false);
+    assert.equal(summary.verified, false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

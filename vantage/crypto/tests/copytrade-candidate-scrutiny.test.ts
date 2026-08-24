@@ -63,7 +63,7 @@ const seedRoundTrip = (
 
 const baseRow = (walletAddress: string, over: Partial<CopyTradeRow> = {}): CopyTradeRow => ({
   walletAddress, name: null, trades: 10, winRatePercent: 60, medianReturnPercent: 10,
-  averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass' as Verdict,
+  averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass',
   riskFlags: [], failedRules: [], excludedNoCostBasis: 0, endingCapitalUsdCompounded: 110,
   truncated: false, coveredDays: 90, lastTradeAt: 1_000_000, daysSinceLastTrade: 1,
   needsDuneBackfill: false, unreliableReason: null,
@@ -110,7 +110,7 @@ test('a wallet whose profit is dominated by one token fails concentration, and t
     assert.equal(result.checks.concentration.verdict, 'fail');
     assert.equal(result.checks.concentration.metrics.bestTokenSharePercent, 88);
     assert.ok(result.checks.concentration.metrics.medianWithoutToken !== null);
-    assert.ok(result.checks.concentration.metrics.medianWithoutToken! < result.checks.concentration.metrics.medianWithToken! - 10);
+    assert.ok(result.checks.concentration.metrics.medianWithoutToken < result.checks.concentration.metrics.medianWithToken! - 10);
   } finally { database.close(); }
 });
 
@@ -167,8 +167,8 @@ test('a wallet with no Dune coverage yields insufficient for every coverage-depe
     // Enough round trips to be a real candidate, but never queried against Dune.
     for (let i = 0; i < 15; i += 1) seedRoundTrip(database, 'W_NODUNE', `TOKEN_${i}`, 1000 + i * 1000, 5, 'none');
     const row = baseRow('W_NODUNE', { trades: 15 });
-    const simInWindow = computeCopySimulationReport(database, { walletAddresses: ['W_NODUNE'], periodDays: 90 }).wallets[0]!;
-    const simFullHistory = computeCopySimulationReport(database, { walletAddresses: ['W_NODUNE'] }).wallets[0]!;
+    const simInWindow = computeCopySimulationReport(database, { walletAddresses: ['W_NODUNE'], periodDays: 90 }).wallets[0];
+    const simFullHistory = computeCopySimulationReport(database, { walletAddresses: ['W_NODUNE'] }).wallets[0];
     assert.equal(simFullHistory.copiedTrades, 0, 'test setup sanity: nothing should be Dune-matched');
     const result = computeCandidateScrutiny(database, 'W_NODUNE', {
       row, simInWindow, simFullHistory, candidateCount: 5, screenedCount: 50, scopePeriodDays: 90,
@@ -252,8 +252,8 @@ test('selection context states N candidates out of M scanned, and the batch entr
       rowsByWallet, candidateCount: 4, screenedCount: 112, scopePeriodDays: 90,
     });
     assert.equal(reports.length, MAX_SCRUTINY_WALLETS);
-    assert.equal(reports[0]!.selectionContext.candidateCount, 4);
-    assert.equal(reports[0]!.selectionContext.screenedCount, 112);
-    assert.match(reports[0]!.selectionContext.note, /one of 4 candidates from 112 wallets scanned/);
+    assert.equal(reports[0].selectionContext.candidateCount, 4);
+    assert.equal(reports[0].selectionContext.screenedCount, 112);
+    assert.match(reports[0].selectionContext.note, /one of 4 candidates from 112 wallets scanned/);
   } finally { database.close(); }
 });

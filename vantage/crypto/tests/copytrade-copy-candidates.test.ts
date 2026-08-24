@@ -9,7 +9,7 @@ import type { HistoricalConsistencyReport, HistoricalConsistencyVerdict } from '
 
 const baseRow = (walletAddress: string, over: Partial<CopyTradeRow> = {}): CopyTradeRow => ({
   walletAddress, name: null, trades: 200, winRatePercent: 60, medianReturnPercent: 10,
-  averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass' as Verdict,
+  averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass',
   riskFlags: [], failedRules: [], excludedNoCostBasis: 0, endingCapitalUsdCompounded: 110,
   truncated: false, coveredDays: 90, lastTradeAt: null, daysSinceLastTrade: null,
   needsDuneBackfill: false, unreliableReason: null,
@@ -204,12 +204,12 @@ test('tail metrics are carried onto candidates without changing the median-only 
     }]]),
   );
   assert.equal(result.candidates.length, 0, 'a positive mean must not bypass the existing positive-median gate');
-  const screened = computeScreenPassCandidates(report([baseRow('TAIL')]), hcReport([hcRow('TAIL', 'consistent')])).candidates[0]!;
+  const screened = computeScreenPassCandidates(report([baseRow('TAIL')]), hcReport([hcRow('TAIL', 'consistent')])).candidates[0];
   assert.equal(screened.walletAddress, 'TAIL');
   const withSurvival = computeCopyCandidates(
     report([baseRow('TAIL')]), hcReport([hcRow('TAIL', 'consistent')]),
     new Map([['TAIL', { simulatedMedianReturnPercent: 5, simulatedMeanReturnPercent: 51.4, tradesAbove100Percent: 17, tailShareOfMeanPercent: 95, coverageRatePercent: 84 }]]),
-  ).candidates[0]!;
+  ).candidates[0];
   assert.equal(withSurvival.simulatedMeanReturnPercent, 51.4);
   assert.equal(withSurvival.tradesAbove100Percent, 17);
   assert.equal(withSurvival.tailShareOfMeanPercent, 95);

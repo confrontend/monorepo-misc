@@ -125,7 +125,7 @@ test('poll integrity counts gaps, empty polls, crashed polls, and failures separ
     assert.equal(report.polls.emptyPolls, 1);
     assert.equal(report.polls.pollsWithGaps, 1);
     assert.equal(report.polls.gaps.length, 1);
-    assert.equal(report.polls.gaps[0]!.pollId, pollB);
+    assert.equal(report.polls.gaps[0].pollId, pollB);
     assert.equal(report.duplicates.pollRepeatedSignals, 1);
   } finally {
     database.close();

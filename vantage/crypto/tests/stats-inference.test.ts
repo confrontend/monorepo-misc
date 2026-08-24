@@ -6,10 +6,10 @@ test('bootstrapMedianCI: a constant array always resamples to the same median, C
   const values = Array(20).fill(5);
   const result = bootstrapMedianCI(values, { iterations: 500, seed: 1 });
   assert.ok(result);
-  assert.equal(result!.median, 5);
-  assert.equal(result!.lower, 5);
-  assert.equal(result!.upper, 5);
-  assert.equal(result!.n, 20);
+  assert.equal(result.median, 5);
+  assert.equal(result.lower, 5);
+  assert.equal(result.upper, 5);
+  assert.equal(result.n, 20);
 });
 
 test('bootstrapMedianCI: is reproducible given the same seed', () => {

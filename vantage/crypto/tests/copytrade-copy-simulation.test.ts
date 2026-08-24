@@ -97,7 +97,7 @@ test('tail metrics use only simulated trades and expose median/mean divergence p
     insertTradeRow(database, { walletAddress: 'W1', eventType: 'buy', tokenAddress: 'UNQUERIED', observedTimestamp: 4000, buyCostUsd: '100', priceUsd: '1' });
     insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'UNQUERIED', observedTimestamp: 4100, costUsd: '10000', buyCostUsd: '100', priceUsd: '100' });
 
-    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 }).wallets[0]!;
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 }).wallets[0];
     assert.ok(Math.abs((wallet.simulatedMedianReturnPercent ?? 0) - (-5)) < 0.01);
     assert.ok(Math.abs((wallet.simulatedMeanReturnPercent ?? 0) - 661.67) < 0.01);
     assert.ok(Math.abs((wallet.walletMeanReturnPercent ?? 0) - 661.67) < 0.01);
@@ -114,7 +114,7 @@ test('tail share is null when the summed simulated return is not positive', () =
   try {
     seedRoundTrip(database, 'W1', 'LOSS_A', 1000, -200);
     seedRoundTrip(database, 'W1', 'LOSS_B', 2000, -300);
-    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 }).wallets[0]!;
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 }).wallets[0];
     assert.equal(wallet.simulatedMeanReturnPercent, -250);
     assert.equal(wallet.tailShareOfMeanPercent, null);
   } finally { database.close(); }
@@ -142,7 +142,7 @@ test('a round trip with both legs matched well within the gap tolerance is simul
     seedDuneMatch(database, sellId, sellDelayedAt, 1.5);
 
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'] });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     assert.equal(wallet.roundTripsConsidered, 1);
     assert.equal(wallet.copiedTrades, 1);
     assert.equal(wallet.missedTrades, 0);
@@ -154,7 +154,7 @@ test('a round trip with both legs matched well within the gap tolerance is simul
     const expectedExit = 1.5 * (1 - haircut);
     const expectedReturnPercent = Math.round(((expectedExit - expectedEntry) / expectedEntry) * 100 * 100) / 100;
     assert.equal(wallet.trades[0]?.simulatedReturnPercent, expectedReturnPercent);
-    assert.ok((wallet.simulatedMedianReturnPercent ?? wallet.trades[0]!.simulatedReturnPercent!) < 50, 'fees and slippage must reduce the return below the raw price delta');
+    assert.ok((wallet.simulatedMedianReturnPercent ?? wallet.trades[0].simulatedReturnPercent) < 50, 'fees and slippage must reduce the return below the raw price delta');
   } finally { database.close(); }
 });
 
@@ -176,7 +176,7 @@ test('a round trip with one leg queried-no-match and the other never queried att
     // has never been queried at all — it must count as pending, not as a second "no match".
     seedNoMatch(database, buyId);
 
-    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'] }).wallets[0]!;
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'] }).wallets[0];
     assert.equal(wallet.pendingDuneTargets, 1, 'the never-queried sell leg is pending, not a Dune miss');
     assert.equal(wallet.duneNoMatchTargets, 1, 'the queried buy leg is a genuine Dune miss');
     assert.equal(wallet.duneMatchedTargets, 0);
@@ -228,7 +228,7 @@ test('a match beyond MAX_MATCH_GAP_SECONDS is rejected as stale, not silently us
     seedDuneMatch(database, sellId, sellDelayedAt, 1.5);
 
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'] });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     assert.equal(wallet.trades[0]?.status, 'missing_entry_match');
     assert.equal(wallet.copiedTrades, 0);
     assert.equal(wallet.missedTrades, 1);
@@ -257,7 +257,7 @@ test('delayCostPercentagePoints is the gap between the simulated and the wallet\
     seedDuneMatch(database, sellId, new Date((2000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1.5);
 
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     // With zero fees/slippage the simulated and matched-price returns coincide exactly (50%),
     // same as the wallet's own recorded 50% return here, so the delay cost is 0.
     assert.equal(wallet.walletMedianReturnPercent, 50);
@@ -286,7 +286,7 @@ test('period-scoped simulation uses only round trips sold inside the requested w
     const report = computeCopySimulationReport(database, {
       walletAddresses: ['W1'], periodDays: 7, now: new Date(nowSeconds * 1000), feeBps: 0, slippageBps: 0,
     });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     assert.equal(wallet.roundTripsConsidered, 1);
     assert.equal(wallet.copiedTrades, 1);
     assert.equal(wallet.trades[0]?.tokenAddress, 'RECENT');
@@ -308,7 +308,7 @@ test('walletMedianReturnPercent and coverageRatePercent are computed on the same
     insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'TOKB', observedTimestamp: 4000, costUsd: '10', buyCostUsd: '100', priceUsd: '0.1' });
 
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'], feeBps: 0, slippageBps: 0 });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     assert.equal(wallet.roundTripsConsidered, 2);
     assert.equal(wallet.copiedTrades, 1);
     assert.equal(wallet.walletMedianReturnPercent, 100, 'the wallet median must reflect only the trade that was actually simulated, not the uncopied -90% one');
@@ -332,7 +332,7 @@ test('gas fee is reported separately in SOL, two transactions per copied round t
     seedDuneMatch(database, sell2, new Date((4000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1.1);
 
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'], gasPriorityFeeSolPerTx: 0.002 });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     assert.equal(wallet.copiedTrades, 1);
     assert.equal(wallet.trades.find((t) => t.tokenAddress === 'TOKA')?.gasFeeSol, 0.004, 'one buy + one sell = two gas payments');
     assert.equal(wallet.trades.find((t) => t.tokenAddress === 'TOKB')?.gasFeeSol, null, 'a trade that was never actually copied paid no gas');
@@ -381,7 +381,7 @@ test('partial sells allocate one copied position proportionally instead of openi
     for (const [id, at, price] of [[buyId, 1000, 1], [sellOneId, 1100, 2], [sellTwoId, 1200, 3]] as const) {
       seedDuneMatch(database, id, new Date((at + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), price);
     }
-    const wallet = computeCopySimulationReport(database, { walletAddresses: ['PARTIAL'], feeBps: 0, slippageBps: 0, gasPriorityFeeSolPerTx: 0 }).wallets[0]!;
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['PARTIAL'], feeBps: 0, slippageBps: 0, gasPriorityFeeSolPerTx: 0 }).wallets[0];
     assert.equal(wallet.roundTripsConsidered, 2);
     assert.equal(wallet.copiedTrades, 2);
     assert.equal(wallet.portfolio.maxConcurrentPositions, 1);
@@ -411,7 +411,7 @@ test('copy simulation exposes the fixed-stake portfolio from the same delayed fe
     const sellId = insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'TOKA', observedTimestamp: 2000, costUsd: '150', buyCostUsd: '100', priceUsd: '1.5' });
     seedDuneMatch(database, buyId, new Date((1000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1);
     seedDuneMatch(database, sellId, new Date((2000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1.5);
-    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'] }).wallets[0]!;
+    const wallet = computeCopySimulationReport(database, { walletAddresses: ['W1'] }).wallets[0];
     assert.equal(wallet.portfolio.copiedTrades, 1);
   assert.equal(wallet.portfolio.endingCapitalUsd, 104.54, 'the $10 stake receives the fee/slippage-adjusted return minus recorded gas USD');
     assert.equal(wallet.portfolio.capitalPath.at(-1)?.capitalUsd, 104.54);
@@ -428,7 +428,7 @@ test('entry/exit trade USD size (the liquidity proxy) is carried through when pr
     seedDuneMatch(database, sell1, new Date((2000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(), 1.5, 9876.25);
 
     const report = computeCopySimulationReport(database, { walletAddresses: ['W1'] });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     const simulated = wallet.trades.find((t) => t.tokenAddress === 'TOKA')!;
     assert.equal(simulated.status, 'simulated');
     assert.equal(simulated.entryTradeAmountUsd, 4321.5);
@@ -438,7 +438,7 @@ test('entry/exit trade USD size (the liquidity proxy) is carried through when pr
     insertTradeRow(database, { walletAddress: 'W1', eventType: 'buy', tokenAddress: 'TOKC', observedTimestamp: 5000, buyCostUsd: '100', priceUsd: '1' });
     insertTradeRow(database, { walletAddress: 'W1', eventType: 'sell', tokenAddress: 'TOKC', observedTimestamp: 6000, costUsd: '90', buyCostUsd: '100', priceUsd: '0.9' });
     const report2 = computeCopySimulationReport(database, { walletAddresses: ['W1'] });
-    const neverQueried = report2.wallets[0]!.trades.find((t) => t.tokenAddress === 'TOKC')!;
+    const neverQueried = report2.wallets[0].trades.find((t) => t.tokenAddress === 'TOKC')!;
     assert.equal(neverQueried.status, 'not_yet_queried');
     assert.equal(neverQueried.entryTradeAmountUsd, null);
     assert.equal(neverQueried.exitTradeAmountUsd, null);
@@ -449,7 +449,7 @@ test('a wallet with no round trips at all returns null summary stats, not zeros'
   const database = setup();
   try {
     const report = computeCopySimulationReport(database, { walletAddresses: ['GHOST'] });
-    const wallet = report.wallets[0]!;
+    const wallet = report.wallets[0];
     assert.equal(wallet.walletMedianReturnPercent, null);
     assert.equal(wallet.simulatedMedianReturnPercent, null);
     assert.equal(wallet.coverageRatePercent, null);

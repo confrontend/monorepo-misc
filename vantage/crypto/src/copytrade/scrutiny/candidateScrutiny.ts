@@ -539,12 +539,26 @@ export const computeCandidateScrutinyBatch = (
   },
 ): CandidateScrutinyReport[] => {
   const capped = walletAddresses.slice(0, MAX_SCRUTINY_WALLETS);
+  // Batched across all wallets, not called per-wallet: computeCopySimulationReport already accepts
+  // a wallet-address list and internally reloads/reparses every completed Dune run's raw result
+  // (readAllCopySimulationMatches) on every call, regardless of how many wallets were asked for.
+  // Calling it once per wallet (as this used to, twice each for in-window/full-history) reloaded
+  // that table up to 2x MAX_SCRUTINY_WALLETS times for one Scrutiny page load -- with ~97 pinned
+  // wallets that is what pushed a cold (uncached) load past the client's 45s timeout, not the
+  // browser-cache removal itself. Per-wallet output is unaffected: each wallet's round trips, open
+  // positions, and coverage rows are already scoped to that wallet inside the shared report.
+  const inWindowByWallet = new Map(
+    computeCopySimulationReport(database, { walletAddresses: capped, periodDays: context.scopePeriodDays }).wallets.map((w) => [w.walletAddress, w]),
+  );
+  const fullHistoryByWallet = new Map(
+    computeCopySimulationReport(database, { walletAddresses: capped }).wallets.map((w) => [w.walletAddress, w]),
+  );
   const reports: CandidateScrutinyReport[] = [];
   for (const walletAddress of capped) {
     const row = context.rowsByWallet.get(walletAddress);
     if (!row) continue;
-    const simInWindow = computeCopySimulationReport(database, { walletAddresses: [walletAddress], periodDays: context.scopePeriodDays }).wallets[0];
-    const simFullHistory = computeCopySimulationReport(database, { walletAddresses: [walletAddress] }).wallets[0];
+    const simInWindow = inWindowByWallet.get(walletAddress);
+    const simFullHistory = fullHistoryByWallet.get(walletAddress);
     if (!simInWindow || !simFullHistory) continue;
     reports.push(computeCandidateScrutiny(database, walletAddress, {
       row, simInWindow, simFullHistory,

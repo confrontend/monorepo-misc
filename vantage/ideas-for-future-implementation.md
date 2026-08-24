@@ -1,2 +1,0 @@
-# Ideas for future implementation
-

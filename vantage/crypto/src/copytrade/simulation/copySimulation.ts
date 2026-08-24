@@ -31,6 +31,13 @@ export const DEFAULT_COPIER_DELAY_SECONDS = 15;
  *  for the 1-24h token-age bucket) — comfortably above the p90 so normal matches always clear
  *  it, while still rejecting the rare multi-minute-stale tail rather than silently using it. */
 export const MAX_MATCH_GAP_SECONDS = 300;
+
+const isUsableCopyMatch = (match: CopySimulationMatch | undefined, eventTimestamp: number, delaySeconds: number): boolean => {
+  if (match?.status !== 'matched' || !match.matchedTradeAt) return false;
+  const matchedMs = Date.parse(match.matchedTradeAt);
+  if (Number.isNaN(matchedMs)) return false;
+  return Math.abs(matchedMs / 1000 - (eventTimestamp + delaySeconds)) <= MAX_MATCH_GAP_SECONDS;
+};
 /** GMGN's own documented copy-trade fee: "One copytrade transaction = buying/selling amount +
  *  Gas priority fee + 1% GMGN handling fee, no other factors." Documented, not assumed — still
  *  configurable per call and always reported alongside results. */
@@ -150,7 +157,7 @@ export const simulateFixedStakePortfolio = (
   const acceptedPositions = new Set<string>();
   const dailyEquity = new Map<string, number>();
   const tradeCapitalPath: { trade: number; tradeId?: number; day: string; capitalUsd: number }[] = [];
-  const firstDay = new Date(events[0]!.at * 1000).toISOString().slice(0, 10);
+  const firstDay = new Date(events[0].at * 1000).toISOString().slice(0, 10);
   const equity = (): number => cash + [...open.values()].reduce((sum, value) => sum + value, 0);
 
   for (const event of events) {
@@ -369,6 +376,7 @@ type CopySimulationTargetPlan = {
   retryableTargetsBefore: number | null;
   coverageBeforePercent: number | null;
   allTargetIds: Set<number>;
+  roundTrips: RoundTrip[];
 };
 
 /** Build the exact queue that the Dune runner will submit. Keeping this in one place is
@@ -376,11 +384,19 @@ type CopySimulationTargetPlan = {
  * (plus cutoff marks for open positions). */
 const planCopySimulationTargets = (
   database: DatabaseSync,
-  options: { walletAddresses: string[]; chain: string; periodDays?: number; copierDelaySeconds: number; retryNoMatch?: boolean; now?: Date },
+  options: {
+    walletAddresses: string[]; chain: string; periodDays?: number; copierDelaySeconds: number; retryNoMatch?: boolean; now?: Date;
+    /** Callers that already read these for the same wallets/chain/periodDays/now (e.g.
+     *  computeCopySimulationReport) pass them in to skip a second identical SQL read + pairing
+     *  pass — at high per-wallet trade volume that pairing pass is not free. Only valid when the
+     *  caller's own scope exactly matches these options; runCopySimulationBatch has no such
+     *  precomputed values and omits this, falling back to reading them here as before. */
+    precomputed?: { roundTrips: RoundTrip[]; openPositions: OpenPosition[] };
+  },
 ): CopySimulationTargetPlan => {
   const now = options.now ?? new Date();
-  const roundTrips = readRecentRoundTrips(database, options.walletAddresses, options.chain, options.periodDays, now);
-  const openPositions = readRecentOpenPositions(database, options.walletAddresses, options.chain, options.periodDays, now);
+  const roundTrips = options.precomputed?.roundTrips ?? readRecentRoundTrips(database, options.walletAddresses, options.chain, options.periodDays, now);
+  const openPositions = options.precomputed?.openPositions ?? readRecentOpenPositions(database, options.walletAddresses, options.chain, options.periodDays, now);
   const covered = alreadyCoveredTradeIds(database);
   const existingMatches = options.retryNoMatch ? readAllCopySimulationMatches(database) : null;
   const targets: CopySimulationTarget[] = [];
@@ -409,17 +425,18 @@ const planCopySimulationTargets = (
     targets.push({ tradeId, tokenAddress: position.tokenAddress, delayedTargetAtIso: cutoffAtIso, direction: 'before' });
   }
 
-  const allTargetIds = new Set(roundTrips.flatMap((trip) => [trip.buyTradeId, trip.sellTradeId]));
-  const matchedBefore = options.retryNoMatch && existingMatches
-    ? [...allTargetIds].filter((tradeId) => existingMatches.get(tradeId)?.status === 'matched').length
+ const allTargetIds = new Set(roundTrips.flatMap((trip) => [trip.buyTradeId, trip.sellTradeId]));
+ const matchedBefore = options.retryNoMatch && existingMatches
+    ? roundTrips.filter((trip) => isUsableCopyMatch(existingMatches.get(trip.buyTradeId), trip.buyAt, options.copierDelaySeconds) && isUsableCopyMatch(existingMatches.get(trip.sellTradeId), trip.sellAt, options.copierDelaySeconds)).length
     : null;
-  return {
-    targets,
-    retryableTargetsBefore: options.retryNoMatch ? targets.length : null,
-    coverageBeforePercent: options.retryNoMatch && allTargetIds.size > 0 && matchedBefore !== null
-      ? Math.round((matchedBefore / allTargetIds.size) * 1000) / 10 : null,
+ return {
+   targets,
+   retryableTargetsBefore: options.retryNoMatch ? targets.length : null,
+    coverageBeforePercent: options.retryNoMatch && roundTrips.length > 0 && matchedBefore !== null
+      ? Math.round((matchedBefore / roundTrips.length) * 1000) / 10 : null,
     allTargetIds,
-  };
+    roundTrips,
+ };
 };
 
 /**
@@ -443,7 +460,7 @@ export const runCopySimulationBatch = async (
   // below, which is how two earlier runs permanently lost 300 targets each.
   await reconcileStuckCopySimulationRuns(database);
   const plan = planCopySimulationTargets(database, { ...options, chain, copierDelaySeconds: delaySeconds });
-  const { targets, retryableTargetsBefore, coverageBeforePercent, allTargetIds } = plan;
+  const { targets, retryableTargetsBefore, coverageBeforePercent, allTargetIds, roundTrips } = plan;
   if (!targets.length) {
     options.onPlan?.({ targetsTotal: 0, batchesTotal: 0, retryableTargetsBefore, coverageBeforePercent });
     return { runIds: [], targetsSubmitted: 0, batchesRun: 0, exhausted: false, cancelled: false, targetsTotal: 0, failedBatches: [], retryableTargetsBefore, retryableTargetsRemaining: 0, coverageBeforePercent, coverageAfterPercent: coverageBeforePercent };
@@ -485,10 +502,10 @@ export const runCopySimulationBatch = async (
   }
   const afterMatches = options.retryNoMatch ? readAllCopySimulationMatches(database) : null;
   const matchedAfter = options.retryNoMatch && afterMatches
-    ? [...allTargetIds].filter((tradeId) => afterMatches.get(tradeId)?.status === 'matched').length
+    ? roundTrips.filter((trip) => isUsableCopyMatch(afterMatches.get(trip.buyTradeId), trip.buyAt, delaySeconds) && isUsableCopyMatch(afterMatches.get(trip.sellTradeId), trip.sellAt, delaySeconds)).length
     : null;
-  const coverageAfterPercent = options.retryNoMatch && allTargetIds.size > 0 && matchedAfter !== null
-    ? Math.round((matchedAfter / allTargetIds.size) * 1000) / 10
+ const coverageAfterPercent = options.retryNoMatch && allTargetIds.size > 0 && matchedAfter !== null
+    ? Math.round((matchedAfter / roundTrips.length) * 1000) / 10
     : null;
   const retryableTargetsRemaining = options.retryNoMatch && afterMatches
     ? [...allTargetIds].filter((tradeId) => {
@@ -611,11 +628,11 @@ export const MIN_COPY_SIMULATION_SAMPLE = 10;
 /** Linear-interpolated quantile of an already-sorted ascending array. */
 const quantile = (sortedValues: number[], q: number): number => {
   if (sortedValues.length === 0) return 0;
-  if (sortedValues.length === 1) return sortedValues[0]!;
+  if (sortedValues.length === 1) return sortedValues[0];
   const pos = (sortedValues.length - 1) * q;
   const base = Math.floor(pos);
   const rest = pos - base;
-  const lower = sortedValues[base]!;
+  const lower = sortedValues[base];
   const upper = sortedValues[base + 1];
   return upper === undefined ? lower : lower + rest * (upper - lower);
 };
@@ -786,9 +803,12 @@ export const computeCopySimulationReport = (
   const matches = readAllCopySimulationMatches(database);
   // This is deliberately the same planner used by the fetch runner. A report trade is one
   // round trip, while the fetch queue contains its separate buy/sell legs and open marks.
+  // roundTrips/openPositions are passed in (same wallets/chain/periodDays/now as above) so the
+  // planner doesn't re-read and re-pair them from scratch -- at high per-wallet trade volume
+  // that second pass was measured costing seconds per call.
   const pendingTargetPlan = planCopySimulationTargets(database, {
     walletAddresses: options.walletAddresses, chain, periodDays: options.periodDays,
-    copierDelaySeconds: delaySeconds, now,
+    copierDelaySeconds: delaySeconds, now, precomputed: { roundTrips, openPositions },
   });
   const coverageByWallet = readWalletCoverageRows(database, chain, options.walletAddresses);
 
@@ -868,8 +888,8 @@ export const computeCopySimulationReport = (
         tradeResults.push({ ...baseTrade, simulatedReturnPercent: null, status: 'not_yet_queried', entryGapSeconds: null, exitGapSeconds: null, gasFeeSol: null, entryTradeAmountUsd: null, exitTradeAmountUsd: null });
         continue;
       }
-      const entryUsable = entryMatch?.status === 'matched' && entryGap !== null && Math.abs(entryGap) <= MAX_MATCH_GAP_SECONDS;
-      const exitUsable = exitMatch?.status === 'matched' && exitGap !== null && Math.abs(exitGap) <= MAX_MATCH_GAP_SECONDS;
+      const entryUsable = isUsableCopyMatch(entryMatch, trip.buyAt, delaySeconds);
+      const exitUsable = isUsableCopyMatch(exitMatch, trip.sellAt, delaySeconds);
       // Count only queried legs that lack a usable Dune result. A round trip with one queried
       // no-match leg and one never-queried leg must not make the latter look like a Dune miss.
       if (entryMatch && entryUsable) { duneMatchedTargets += 1; walletMatchedTargets += 1; }
