@@ -2,7 +2,7 @@
 
 **Status:** Review-ready proposal  
 **Scope:** `#copytrade/top-callers` only  
-**Purpose:** Make the page answer one question: *which tracked GMGN caller currently has the strongest measured outcome?*
+**Purpose:** Make the page answer one question: _which tracked GMGN caller currently has the strongest measured outcome?_
 
 ## Executive assessment
 
@@ -116,15 +116,15 @@ Caller detail for the selected caller
 
 ## Button and terminology changes
 
-| Current label | Proposed label | Reason |
-|---|---|---|
-| Run complete caller research | **Run caller research** | Single user goal; shorter and clearer |
-| Refresh saved results | **Refresh** (quiet link) | Not a research step |
-| Measure all tracked callers (N) | Move under run status / advanced controls | It is one internal stage of the main workflow |
-| Capture leaderboard | Collect GMGN caller snapshot | Reflects the combined source operation |
-| Fetch caller history | Hide by default; retain as manual override | Prevents incomplete sequences |
-| Selected caller | Inspect a caller | Makes it clear this changes the view only |
-| Track / Tracking | Included / Not included | Makes run scope obvious |
+| Current label                   | Proposed label                             | Reason                                        |
+| ------------------------------- | ------------------------------------------ | --------------------------------------------- |
+| Run complete caller research    | **Run caller research**                    | Single user goal; shorter and clearer         |
+| Refresh saved results           | **Refresh** (quiet link)                   | Not a research step                           |
+| Measure all tracked callers (N) | Move under run status / advanced controls  | It is one internal stage of the main workflow |
+| Capture leaderboard             | Collect GMGN caller snapshot               | Reflects the combined source operation        |
+| Fetch caller history            | Hide by default; retain as manual override | Prevents incomplete sequences                 |
+| Selected caller                 | Inspect a caller                           | Makes it clear this changes the view only     |
+| Track / Tracking                | Included / Not included                    | Makes run scope obvious                       |
 
 ## Data and behavior rules
 

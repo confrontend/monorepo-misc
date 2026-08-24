@@ -1,6 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CopyTradeRow } from './evaluate.js';
-import { DEFAULT_COPIER_DELAY_SECONDS, type CopySimulationWalletReport } from '../simulation/copySimulation.js';
+import {
+  DEFAULT_COPIER_DELAY_SECONDS,
+  type CopySimulationWalletReport,
+} from '../simulation/copySimulation.js';
 import { assessCoverageGap, type CoverageGapAssessment } from './candidateScrutiny.js';
 import { hasReliableCopyEvidence } from './copyCandidates.js';
 import { STRONGLY_NEGATIVE_PNL_PERCENT } from '../simulation/constants.js';
@@ -146,24 +149,36 @@ export const computeEliminationReport = (
     // is unmeasured; the hidden-loss reading says whether what is unmeasured actually changes
     // the wallet's real losing-trade rate. A wallet is only judged here when both hold: enough
     // was measured, and what was missed provably did not flatter it.
-    const trustworthy = !row.truncated
-      && row.historyFailed !== true
-      && row.trades >= ELIMINATION_MIN_TRADES
-      && hasReliableCopyEvidence(sim)
-      && coverageGap?.hiddenLossRisk === 'negligible'
-      && coverageGap?.hiddenUpsideBias === 'negligible';
+    const trustworthy =
+      !row.truncated &&
+      row.historyFailed !== true &&
+      row.trades >= ELIMINATION_MIN_TRADES &&
+      hasReliableCopyEvidence(sim) &&
+      coverageGap?.hiddenLossRisk === 'negligible' &&
+      coverageGap?.hiddenUpsideBias === 'negligible';
 
     // Freshness is checked per-reason rather than folded into `trustworthy`, because only this
     // one reason reads the GMGN stats snapshot; the copy-result and hold-time reasons come from
     // stored trades and stay valid regardless of how old the stats row is.
     const statsAgeHours = row.gmgnAggregate
-      ? (now.getTime() - Date.parse(row.gmgnAggregate.fetchedAt)) / 3_600_000 : null;
-    const statsFresh = statsAgeHours !== null && Number.isFinite(statsAgeHours) && statsAgeHours <= ELIMINATION_STATS_MAX_AGE_HOURS;
+      ? (now.getTime() - Date.parse(row.gmgnAggregate.fetchedAt)) / 3_600_000
+      : null;
+    const statsFresh =
+      statsAgeHours !== null &&
+      Number.isFinite(statsAgeHours) &&
+      statsAgeHours <= ELIMINATION_STATS_MAX_AGE_HOURS;
 
     const reasons: EliminationReason[] = [];
-    if (statsFresh && gmgnPnl30dPercent !== null && gmgnPnl30dPercent <= STRONGLY_NEGATIVE_PNL_PERCENT) reasons.push('strongly_negative_30d_pnl');
-    if (simulatedMedianReturnPercent !== null && simulatedMedianReturnPercent <= 0) reasons.push('negative_delayed_copy_result');
-    if (medianHoldSeconds !== null && medianHoldSeconds < DEFAULT_COPIER_DELAY_SECONDS) reasons.push('hold_time_shorter_than_copy_delay');
+    if (
+      statsFresh &&
+      gmgnPnl30dPercent !== null &&
+      gmgnPnl30dPercent <= STRONGLY_NEGATIVE_PNL_PERCENT
+    )
+      reasons.push('strongly_negative_30d_pnl');
+    if (simulatedMedianReturnPercent !== null && simulatedMedianReturnPercent <= 0)
+      reasons.push('negative_delayed_copy_result');
+    if (medianHoldSeconds !== null && medianHoldSeconds < DEFAULT_COPIER_DELAY_SECONDS)
+      reasons.push('hold_time_shorter_than_copy_delay');
 
     return {
       walletAddress: row.walletAddress,
@@ -186,10 +201,12 @@ export const computeEliminationReport = (
   // Judged wallets first. The surviving list runs to ~98 rows and the handful that are actually
   // decidable were previously buried a dozen rows down, so the table read as "everything is
   // undecided" from the top. Ordering is presentation only — it changes no verdict.
-  const surviving = entries.filter((entry) => !entry.eliminated).sort((left, right) => {
-    if (left.trustworthy !== right.trustworthy) return left.trustworthy ? -1 : 1;
-    return (right.duneCoveragePercent ?? -1) - (left.duneCoveragePercent ?? -1);
-  });
+  const surviving = entries
+    .filter((entry) => !entry.eliminated)
+    .sort((left, right) => {
+      if (left.trustworthy !== right.trustworthy) return left.trustworthy ? -1 : 1;
+      return (right.duneCoveragePercent ?? -1) - (left.duneCoveragePercent ?? -1);
+    });
   // "Needs Dune" means exactly: not yet judgeable, AND more Dune data would actually change
   // that. Filtering on the coverage floor alone got both halves wrong. It missed wallets sitting
   // above 90% whose hidden-loss reading is not yet negligible — those are blocked by a
@@ -198,10 +215,17 @@ export const computeEliminationReport = (
   // help at all: one live wallet sits at 100% coverage with zero missing targets and is still
   // not trustworthy, because its blocker is trade count, not coverage. Requiring outstanding
   // targets covers both cases, and keeps the time estimate honest in both directions.
-  const survivorsNeedingDune = surviving.filter((entry) => !entry.trustworthy
-    && (entry.duneMissedTrades === null || entry.duneMissedTrades > 0));
-  const survivorsNeverSimulatedCount = survivorsNeedingDune.filter((entry) => entry.duneMissedTrades === null).length;
-  const measuredDuneTargetsRemaining = survivorsNeedingDune.reduce((sum, entry) => sum + (entry.duneMissedTrades ?? 0), 0);
+  const survivorsNeedingDune = surviving.filter(
+    (entry) =>
+      !entry.trustworthy && (entry.duneMissedTrades === null || entry.duneMissedTrades > 0),
+  );
+  const survivorsNeverSimulatedCount = survivorsNeedingDune.filter(
+    (entry) => entry.duneMissedTrades === null,
+  ).length;
+  const measuredDuneTargetsRemaining = survivorsNeedingDune.reduce(
+    (sum, entry) => sum + (entry.duneMissedTrades ?? 0),
+    0,
+  );
 
   return {
     generatedAt: now.toISOString(),
@@ -228,13 +252,22 @@ export type DuneRefetchEstimate = {
 const SEEDED_SECONDS_PER_DUNE_TARGET = 2_941 / 150;
 const MAX_RUNS_CONSIDERED = 20;
 
-export const estimateDuneRefetchDuration = (database: DatabaseSync, targetsNeeded: number): DuneRefetchEstimate => {
-  const rows = database.prepare(
-    `SELECT requested_at AS requestedAt, completed_at AS completedAt, trade_refs AS tradeRefs
+export const estimateDuneRefetchDuration = (
+  database: DatabaseSync,
+  targetsNeeded: number,
+): DuneRefetchEstimate => {
+  const rows = database
+    .prepare(
+      `SELECT requested_at AS requestedAt, completed_at AS completedAt, trade_refs AS tradeRefs
      FROM copytrade_copy_simulation_runs
      WHERE status = 'completed' AND completed_at IS NOT NULL
      ORDER BY id DESC LIMIT ?`,
-  ).all(MAX_RUNS_CONSIDERED) as Array<{ requestedAt: string; completedAt: string; tradeRefs: string }>;
+    )
+    .all(MAX_RUNS_CONSIDERED) as Array<{
+    requestedAt: string;
+    completedAt: string;
+    tradeRefs: string;
+  }>;
 
   let totalSeconds = 0;
   let totalTargets = 0;
@@ -246,13 +279,16 @@ export const estimateDuneRefetchDuration = (database: DatabaseSync, targetsNeede
     try {
       const refs = JSON.parse(row.tradeRefs) as unknown;
       targetCount = Array.isArray(refs) ? refs.length : 0;
-    } catch { continue; }
+    } catch {
+      continue;
+    }
     if (targetCount <= 0) continue;
     totalSeconds += (end - start) / 1000;
     totalTargets += targetCount;
   }
 
-  const secondsPerTarget = totalTargets > 0 ? totalSeconds / totalTargets : SEEDED_SECONDS_PER_DUNE_TARGET;
+  const secondsPerTarget =
+    totalTargets > 0 ? totalSeconds / totalTargets : SEEDED_SECONDS_PER_DUNE_TARGET;
   return {
     targetsNeeded,
     secondsPerTarget: Math.round(secondsPerTarget * 10) / 10,

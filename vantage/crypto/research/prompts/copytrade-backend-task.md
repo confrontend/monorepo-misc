@@ -34,18 +34,18 @@ GMGN_API_KEY="$(tr -d '\r\n' < .secrets/gmgn/gmgn-api-key.txt)" \
 
 Returns `{"activities":[ ... ]}`. Each activity row carries:
 
-| Field | Meaning |
-|---|---|
-| `wallet`, `chain`, `tx_hash` | identity |
-| `timestamp` | Unix seconds |
-| `event_type` | `buy` / `sell` / `transfer_in` / `transfer_out` |
-| `token.address`, `token.symbol` | the token |
-| `token_amount`, `quote_amount` | sizes |
-| `cost_usd` | USD value of this leg |
-| `buy_cost_usd` | **on sells only** — the original cost basis of what was sold |
-| `price_usd` | per-token USD price |
-| `gas_usd`, `dex_usd`, `priority_fee`, `tip_fee` | costs |
-| `launchpad_platform` | e.g. `Pump.fun` |
+| Field                                           | Meaning                                                      |
+| ----------------------------------------------- | ------------------------------------------------------------ |
+| `wallet`, `chain`, `tx_hash`                    | identity                                                     |
+| `timestamp`                                     | Unix seconds                                                 |
+| `event_type`                                    | `buy` / `sell` / `transfer_in` / `transfer_out`              |
+| `token.address`, `token.symbol`                 | the token                                                    |
+| `token_amount`, `quote_amount`                  | sizes                                                        |
+| `cost_usd`                                      | USD value of this leg                                        |
+| `buy_cost_usd`                                  | **on sells only** — the original cost basis of what was sold |
+| `price_usd`                                     | per-token USD price                                          |
+| `gas_usd`, `dex_usd`, `priority_fee`, `tip_fee` | costs                                                        |
+| `launchpad_platform`                            | e.g. `Pump.fun`                                              |
 
 `buy_cost_usd` on a sell is what makes per-trade return computable directly:
 `return = (cost_usd - buy_cost_usd) / buy_cost_usd`.

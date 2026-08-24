@@ -4,5 +4,7 @@ type WorkflowStepProps = {
 };
 
 export const WorkflowStep = ({ number, title }: WorkflowStepProps) => (
-  <span className="copytrade-workflow-step" title={title}>{number}</span>
+  <span className="copytrade-workflow-step" title={title}>
+    {number}
+  </span>
 );

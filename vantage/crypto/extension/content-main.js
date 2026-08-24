@@ -29,64 +29,138 @@
   // Query keys that are pure browser/device fingerprinting, never useful for research and
   // deliberately never persisted, even redacted. Distinct from sensitiveKey below (credentials),
   // which get redacted (kept but blanked) rather than dropped outright.
-  const FINGERPRINT_QUERY_KEYS = new Set(['device_id', 'fp_did', 'client_id', 'from_app', 'app_ver', 'tz_name', 'tz_offset', 'app_lang', 'os', 'worker']);
-  const sensitiveKey = /^(access_token|authorization|cookie|set-cookie|x-api-key|api[_-]?key|secret|private[_-]?key|password|jwt)$/i;
+  const FINGERPRINT_QUERY_KEYS = new Set([
+    'device_id',
+    'fp_did',
+    'client_id',
+    'from_app',
+    'app_ver',
+    'tz_name',
+    'tz_offset',
+    'app_lang',
+    'os',
+    'worker',
+  ]);
+  const sensitiveKey =
+    /^(access_token|authorization|cookie|set-cookie|x-api-key|api[_-]?key|secret|private[_-]?key|password|jwt)$/i;
   const redactValue = (value) => {
     if (Array.isArray(value)) return value.map(redactValue);
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sensitiveKey.test(key) ? '[REDACTED]' : redactValue(item)]));
+    if (value && typeof value === 'object')
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key,
+          sensitiveKey.test(key) ? '[REDACTED]' : redactValue(item),
+        ]),
+      );
     return value;
   };
   const safeUrl = (value) => {
     try {
       const url = new URL(String(value), location.href);
-      for (const key of [...url.searchParams.keys()]) if (sensitiveKey.test(key)) url.searchParams.set(key, '[REDACTED]');
+      for (const key of [...url.searchParams.keys()])
+        if (sensitiveKey.test(key)) url.searchParams.set(key, '[REDACTED]');
       return url.href;
-    } catch { return String(value).replace(/(access_token|authorization|api[_-]?key|secret)=[^&\s]+/gi, '$1=[REDACTED]'); }
+    } catch {
+      return String(value).replace(
+        /(access_token|authorization|api[_-]?key|secret)=[^&\s]+/gi,
+        '$1=[REDACTED]',
+      );
+    }
   };
   const payloadText = (value) => {
     if (value == null) return null;
     if (typeof value === 'string') {
-      try { return JSON.stringify(redactValue(JSON.parse(value))).slice(0, MAX_PAYLOAD_CHARS); }
-      catch { return value.replace(/((?:access_token|authorization|api[_-]?key|secret|private[_-]?key)=)[^&\s]+/gi, '$1[REDACTED]').slice(0, MAX_PAYLOAD_CHARS); }
+      try {
+        return JSON.stringify(redactValue(JSON.parse(value))).slice(0, MAX_PAYLOAD_CHARS);
+      } catch {
+        return value
+          .replace(
+            /((?:access_token|authorization|api[_-]?key|secret|private[_-]?key)=)[^&\s]+/gi,
+            '$1[REDACTED]',
+          )
+          .slice(0, MAX_PAYLOAD_CHARS);
+      }
     }
     if (value instanceof URLSearchParams) {
       const params = new URLSearchParams(value);
-      for (const key of [...params.keys()]) if (sensitiveKey.test(key)) params.set(key, '[REDACTED]');
+      for (const key of [...params.keys()])
+        if (sensitiveKey.test(key)) params.set(key, '[REDACTED]');
       return params.toString().slice(0, MAX_PAYLOAD_CHARS);
     }
-    try { return JSON.stringify(redactValue(value)).slice(0, MAX_PAYLOAD_CHARS); } catch { return String(value).slice(0, MAX_PAYLOAD_CHARS); }
+    try {
+      return JSON.stringify(redactValue(value)).slice(0, MAX_PAYLOAD_CHARS);
+    } catch {
+      return String(value).slice(0, MAX_PAYLOAD_CHARS);
+    }
   };
 
   const emitInvestigation = (sample) => {
     if (!investigationActive) return;
-    window.postMessage({ source: INVESTIGATION_MARKER, sample: { ...sample, observedAt: new Date().toISOString(), pageUrl: location.href } }, '*');
+    window.postMessage(
+      {
+        source: INVESTIGATION_MARKER,
+        sample: { ...sample, observedAt: new Date().toISOString(), pageUrl: location.href },
+      },
+      '*',
+    );
   };
 
-  const isRiskUrl = (url) => /\/pf\/api\/v1\/wallet\/sol\/[1-9A-HJ-NP-Za-km-z]{32,44}\/profit_stat\/30d(?:[/?]|$)/.test(String(url));
+  const isRiskUrl = (url) =>
+    /\/pf\/api\/v1\/wallet\/sol\/[1-9A-HJ-NP-Za-km-z]{32,44}\/profit_stat\/30d(?:[/?]|$)/.test(
+      String(url),
+    );
 
   const emitRisk = (url, status, bodyText) => {
     if (!isRiskUrl(url)) return;
     try {
       const parsed = JSON.parse(bodyText);
-      const match = String(url).match(/\/wallet\/sol\/([1-9A-HJ-NP-Za-km-z]{32,44})\/profit_stat\/30d/);
+      const match = String(url).match(
+        /\/wallet\/sol\/([1-9A-HJ-NP-Za-km-z]{32,44})\/profit_stat\/30d/,
+      );
       if (!match) return;
       if (!riskAutoActive) return;
       const parsedUrl = new URL(url, location.href);
-      window.postMessage({ source: RISK_MARKER, capture: { capturedAt: new Date().toISOString(), walletAddress: match[1], period: '30d', status, url: `${parsedUrl.origin}${parsedUrl.pathname}`, responseBody: parsed } }, '*');
+      window.postMessage(
+        {
+          source: RISK_MARKER,
+          capture: {
+            capturedAt: new Date().toISOString(),
+            walletAddress: match[1],
+            period: '30d',
+            status,
+            url: `${parsedUrl.origin}${parsedUrl.pathname}`,
+            responseBody: parsed,
+          },
+        },
+        '*',
+      );
     } catch {
       // The background record should only contain the structured GMGN response.
     }
   };
 
   window.addEventListener('message', (event) => {
-    if (event.source === window && event.data?.source === INVESTIGATION_STATE_MARKER) investigationActive = event.data.active === true;
+    if (event.source === window && event.data?.source === INVESTIGATION_STATE_MARKER)
+      investigationActive = event.data.active === true;
     if (event.source === window && event.data?.source === RISK_STATE_MARKER) {
       riskAutoActive = event.data.active === true;
     }
   });
 
   const emitOne = (path, status, parsed, query) => {
-    window.postMessage({ source: MARKER, capture: { capturedAt: new Date().toISOString(), requestPath: path, requestQuery: query && Object.keys(query).length ? query : undefined, status, responseBody: parsed } }, '*');
+    window.postMessage(
+      {
+        source: MARKER,
+        capture: {
+          capturedAt: new Date().toISOString(),
+          requestPath: path,
+          requestQuery: query && Object.keys(query).length ? query : undefined,
+          status,
+          responseBody: parsed,
+        },
+      },
+      '*',
+    );
   };
 
   // Research-relevant query params (chain/period/type/orderby/has_token/...) are kept, redacted
@@ -95,7 +169,11 @@
   // and have no research value at all.
   const captureQuery = (url) => {
     let parsed;
-    try { parsed = new URL(url, location.href); } catch { return undefined; }
+    try {
+      parsed = new URL(url, location.href);
+    } catch {
+      return undefined;
+    }
     const query = {};
     for (const [key, value] of parsed.searchParams.entries()) {
       if (FINGERPRINT_QUERY_KEYS.has(key)) continue;
@@ -121,11 +199,22 @@
       const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
       const request = args[1] || (args[0] && typeof args[0] === 'object' ? args[0] : null);
       if (matchesTarget(url) || isRiskUrl(url) || investigationActive) {
-        response.clone().text().then((text) => {
-          if (matchesTarget(url)) emit(url, response.status, text);
-          emitRisk(url, response.status, text);
-          emitInvestigation({ transport: 'fetch', method: request?.method || 'GET', url: safeUrl(url), status: response.status, requestPayload: payloadText(request?.body), responsePayload: payloadText(text) });
-        }).catch(() => {});
+        response
+          .clone()
+          .text()
+          .then((text) => {
+            if (matchesTarget(url)) emit(url, response.status, text);
+            emitRisk(url, response.status, text);
+            emitInvestigation({
+              transport: 'fetch',
+              method: request?.method || 'GET',
+              url: safeUrl(url),
+              status: response.status,
+              requestPayload: payloadText(request?.body),
+              responsePayload: payloadText(text),
+            });
+          })
+          .catch(() => {});
       }
     } catch {
       // Never let capture logic break the page's real request.
@@ -154,7 +243,14 @@
       if (matchesTarget(capturedUrl) || isRiskUrl(capturedUrl) || investigationActive) {
         if (matchesTarget(capturedUrl)) emit(capturedUrl, xhr.status, xhr.responseText);
         emitRisk(capturedUrl, xhr.status, xhr.responseText);
-        emitInvestigation({ transport: 'xhr', method: capturedMethod, url: safeUrl(capturedUrl), status: xhr.status, requestPayload: capturedRequestBody, responsePayload: payloadText(xhr.responseText || '') });
+        emitInvestigation({
+          transport: 'xhr',
+          method: capturedMethod,
+          url: safeUrl(capturedUrl),
+          status: xhr.status,
+          requestPayload: capturedRequestBody,
+          responsePayload: payloadText(xhr.responseText || ''),
+        });
       }
     });
     return xhr;
@@ -177,17 +273,28 @@
     try {
       const hostname = new URL(url, location.href).hostname;
       return hostname === 'gmgn.ai' || hostname.endsWith('.gmgn.ai');
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   };
 
   const OriginalWebSocket = window.WebSocket;
   function PatchedWebSocket(url, protocols) {
-    const socket = protocols === undefined ? new OriginalWebSocket(url) : new OriginalWebSocket(url, protocols);
+    const socket =
+      protocols === undefined ? new OriginalWebSocket(url) : new OriginalWebSocket(url, protocols);
     try {
       if (sameGmgnHost(url)) {
         const originalSend = socket.send;
         socket.send = function (data) {
-          emitInvestigation({ transport: 'websocket', method: 'message', direction: 'outbound', url: safeUrl(url), status: null, requestPayload: payloadText(data), responsePayload: null });
+          emitInvestigation({
+            transport: 'websocket',
+            method: 'message',
+            direction: 'outbound',
+            url: safeUrl(url),
+            status: null,
+            requestPayload: payloadText(data),
+            responsePayload: null,
+          });
           return originalSend.call(socket, data);
         };
         // Listener is attached unconditionally at connection time — GMGN's socket connects
@@ -195,16 +302,36 @@
         socket.addEventListener('message', (event) => {
           const data = event.data;
           const handle = (text) => {
-            emitInvestigation({ transport: 'websocket', method: 'message', direction: 'inbound', url: safeUrl(url), status: null, requestPayload: null, responsePayload: payloadText(text) });
+            emitInvestigation({
+              transport: 'websocket',
+              method: 'message',
+              direction: 'inbound',
+              url: safeUrl(url),
+              status: null,
+              requestPayload: null,
+              responsePayload: payloadText(text),
+            });
             let parsed;
-            try { parsed = JSON.parse(text); } catch { return; }
+            try {
+              parsed = JSON.parse(text);
+            } catch {
+              return;
+            }
             if (parsed && parsed.channel === WS_SIGNAL_CHANNEL && Array.isArray(parsed.data)) {
               const realSignals = parsed.data.filter(isRealSignalItem);
-              if (realSignals.length) emitOne(`ws-message:${String(url)}`, null, { channel: parsed.channel, data: realSignals });
+              if (realSignals.length)
+                emitOne(`ws-message:${String(url)}`, null, {
+                  channel: parsed.channel,
+                  data: realSignals,
+                });
             }
           };
           if (typeof data === 'string') handle(data);
-          else if (data instanceof Blob) data.text().then(handle).catch(() => {});
+          else if (data instanceof Blob)
+            data
+              .text()
+              .then(handle)
+              .catch(() => {});
           // ArrayBuffer/binary frames are left uncaptured for now — every GMGN endpoint
           // observed so far has been JSON-over-text, so this is the likely case to miss least.
         });
@@ -220,5 +347,4 @@
   PatchedWebSocket.CLOSING = OriginalWebSocket.CLOSING;
   PatchedWebSocket.CLOSED = OriginalWebSocket.CLOSED;
   window.WebSocket = PatchedWebSocket;
-
 })();

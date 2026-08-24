@@ -15,7 +15,16 @@ test('redactAccountIdentifiers strips known account-identifying fields', () => {
   });
   const redacted = redactAccountIdentifiers(raw);
   const parsed = JSON.parse(redacted) as Record<string, string>;
-  for (const key of ['user_id', 'account_id', 'device_id', 'client_id', 'cid', 'referral_code', 'referral_id', 'telegram_id']) {
+  for (const key of [
+    'user_id',
+    'account_id',
+    'device_id',
+    'client_id',
+    'cid',
+    'referral_code',
+    'referral_id',
+    'telegram_id',
+  ]) {
     assert.equal(parsed[key], '[REDACTED]', `${key} must be redacted`);
   }
 });
@@ -28,7 +37,11 @@ test('redactAccountIdentifiers leaves legitimate research data untouched', () =>
     user_name: 'a display name, not an id, must survive',
   });
   const redacted = redactAccountIdentifiers(raw);
-  assert.equal(redacted, raw, 'non-identifier fields, including wallet/token addresses, must pass through unchanged');
+  assert.equal(
+    redacted,
+    raw,
+    'non-identifier fields, including wallet/token addresses, must pass through unchanged',
+  );
 });
 
 test('redactAccountIdentifiers is case-insensitive on the key name and preserves surrounding JSON structure', () => {

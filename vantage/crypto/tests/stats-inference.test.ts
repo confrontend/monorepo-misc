@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bootstrapMedianCI, signTest, holmCorrection } from '../src/platform/stats-utils/inference.js';
+import {
+  bootstrapMedianCI,
+  signTest,
+  holmCorrection,
+} from '../src/platform/stats-utils/inference.js';
 
 test('bootstrapMedianCI: a constant array always resamples to the same median, CI collapses to a point', () => {
   const values = Array(20).fill(5);
@@ -24,7 +28,7 @@ test('bootstrapMedianCI: a spread-out distribution produces a wider interval tha
   const wide = [-50, -20, 5, 10, 15, 30, 40, 60, 80, 100];
   const tightResult = bootstrapMedianCI(tight, { iterations: 1000, seed: 7 })!;
   const wideResult = bootstrapMedianCI(wide, { iterations: 1000, seed: 7 })!;
-  assert.ok((wideResult.upper - wideResult.lower) > (tightResult.upper - tightResult.lower));
+  assert.ok(wideResult.upper - wideResult.lower > tightResult.upper - tightResult.lower);
 });
 
 test('bootstrapMedianCI: empty input returns null rather than throwing', () => {
@@ -89,5 +93,9 @@ test('holmCorrection: scanning many cells makes it much harder for any one to su
   // untested (p=1) cells — this is the exact scenario the Patterns subgroup view is in today.
   const manyCells = [0.04, ...Array(50).fill(1)];
   const result = holmCorrection(manyCells, 0.05);
-  assert.equal(result.rejected[0], false, 'a borderline result must not survive correction across many scanned cells');
+  assert.equal(
+    result.rejected[0],
+    false,
+    'a borderline result must not survive correction across many scanned cells',
+  );
 });

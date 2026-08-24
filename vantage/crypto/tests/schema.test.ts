@@ -8,11 +8,16 @@ test('schema initialization creates V1 tables and is idempotent', () => {
 
   try {
     applyMigrations(database);
-    const tables = database.prepare(`
+    const tables = database
+      .prepare(
+        `
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
       ORDER BY name
-    `).all().map((row) => (row as { name: string }).name);
+    `,
+      )
+      .all()
+      .map((row) => (row as { name: string }).name);
     assert.deepEqual(tables, [
       'copytrade_copy_simulation_runs',
       'copytrade_dune_fetch_audits',
@@ -63,18 +68,48 @@ test('schema initialization creates V1 tables and is idempotent', () => {
 test('GMGN wallet stats history is append-only while latest cache remains separate', () => {
   const database = openDatabase(':memory:');
   try {
-    database.prepare(`INSERT INTO copytrade_wallet_stats (wallet_address, chain, period, fetched_at, raw_payload) VALUES (?, ?, ?, ?, ?)`)
+    database
+      .prepare(
+        `INSERT INTO copytrade_wallet_stats (wallet_address, chain, period, fetched_at, raw_payload) VALUES (?, ?, ?, ?, ?)`,
+      )
       .run('W', 'sol', '30d', '2026-08-18T00:00:00.000Z', '{"realized_profit_pnl":0.1}');
-    database.prepare(`INSERT INTO copytrade_wallet_stats_events (wallet_address, chain, period, fetched_at, raw_payload) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`)
-      .run('W', 'sol', '30d', '2026-08-18T00:00:00.000Z', '{"realized_profit_pnl":0.1}', 'W', 'sol', '30d', '2026-08-19T00:00:00.000Z', '{"realized_profit_pnl":0.2}');
-    database.prepare(`UPDATE copytrade_wallet_stats SET fetched_at = ?, raw_payload = ? WHERE wallet_address = ? AND chain = ? AND period = ?`)
+    database
+      .prepare(
+        `INSERT INTO copytrade_wallet_stats_events (wallet_address, chain, period, fetched_at, raw_payload) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'W',
+        'sol',
+        '30d',
+        '2026-08-18T00:00:00.000Z',
+        '{"realized_profit_pnl":0.1}',
+        'W',
+        'sol',
+        '30d',
+        '2026-08-19T00:00:00.000Z',
+        '{"realized_profit_pnl":0.2}',
+      );
+    database
+      .prepare(
+        `UPDATE copytrade_wallet_stats SET fetched_at = ?, raw_payload = ? WHERE wallet_address = ? AND chain = ? AND period = ?`,
+      )
       .run('2026-08-19T00:00:00.000Z', '{"realized_profit_pnl":0.2}', 'W', 'sol', '30d');
-    const rows = database.prepare(`SELECT fetched_at, raw_payload FROM copytrade_wallet_stats_events WHERE wallet_address = 'W' ORDER BY fetched_at`).all() as Array<{ fetched_at: string; raw_payload: string }>;
+    const rows = database
+      .prepare(
+        `SELECT fetched_at, raw_payload FROM copytrade_wallet_stats_events WHERE wallet_address = 'W' ORDER BY fetched_at`,
+      )
+      .all() as Array<{ fetched_at: string; raw_payload: string }>;
     assert.equal(rows.length, 2);
     assert.equal(rows[0].raw_payload, '{"realized_profit_pnl":0.1}');
     assert.equal(rows[1].raw_payload, '{"realized_profit_pnl":0.2}');
-    const latest = database.prepare(`SELECT fetched_at, raw_payload FROM copytrade_wallet_stats WHERE wallet_address = 'W' AND chain = 'sol' AND period = '30d'`).get() as { fetched_at: string; raw_payload: string };
+    const latest = database
+      .prepare(
+        `SELECT fetched_at, raw_payload FROM copytrade_wallet_stats WHERE wallet_address = 'W' AND chain = 'sol' AND period = '30d'`,
+      )
+      .get() as { fetched_at: string; raw_payload: string };
     assert.equal(latest.fetched_at, '2026-08-19T00:00:00.000Z');
     assert.equal(latest.raw_payload, '{"realized_profit_pnl":0.2}');
-  } finally { database.close(); }
+  } finally {
+    database.close();
+  }
 });

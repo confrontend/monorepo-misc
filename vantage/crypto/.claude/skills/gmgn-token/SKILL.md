@@ -1,9 +1,9 @@
 ---
 name: gmgn-token
 description: Research any crypto or meme token by address — real-time price, market cap, liquidity, holder list, trader list, top Smart Money and KOL positions, security audit (honeypot, rug pull risk, dev wallet, renounced status), social links (Twitter/X, website) via GMGN API on Solana, BSC, Base, or Ethereum. Use when user asks about a token's price, safety, holders, traders, smart money exposure, or wants due diligence before buying.
-argument-hint: "<sub-command> --chain <sol|bsc|base|eth|robinhood|arc|stable> --address <token_address>"
+argument-hint: '<sub-command> --chain <sol|bsc|base|eth|robinhood|arc|stable> --address <token_address>'
 metadata:
-  cliHelp: "gmgn-cli token --help"
+  cliHelp: 'gmgn-cli token --help'
 ---
 
 **BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, (1) run `gmgn-cli config` and show the output to the user; (2) once the user sends the API Key, run `gmgn-cli config --apply <KEY>` to complete configuration and verification, then show the output to the user. If `--check` returns an error (unknown option or command not found), tell the user to run `npm install -g gmgn-cli` to update, then retry.**
@@ -36,13 +36,13 @@ Use the `gmgn-cli` tool to query token information based on the user's request.
 
 ## Sub-commands
 
-| Sub-command | Description |
-|-------------|-------------|
-| `token info` | Basic info + realtime price, liquidity, market cap, total supply, holder count, social links (market cap = price.price × circulating_supply) |
-| `token security` | Security metrics (honeypot, taxes, holder concentration, contract risks) |
-| `token pool` | Liquidity pool info (DEX, reserves, liquidity depth) |
-| `token holders` | Top token holders list with profit/loss breakdown |
-| `token traders` | Top token traders list with profit/loss breakdown |
+| Sub-command      | Description                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token info`     | Basic info + realtime price, liquidity, market cap, total supply, holder count, social links (market cap = price.price × circulating_supply) |
+| `token security` | Security metrics (honeypot, taxes, holder concentration, contract risks)                                                                     |
+| `token pool`     | Liquidity pool info (DEX, reserves, liquidity depth)                                                                                         |
+| `token holders`  | Top token holders list with profit/loss breakdown                                                                                            |
+| `token traders`  | Top token traders list with profit/loss breakdown                                                                                            |
 
 ## Supported Chains
 
@@ -57,13 +57,13 @@ Use the `gmgn-cli` tool to query token information based on the user's request.
 
 All token routes used by this skill go through GMGN's leaky-bucket limiter with `rate=20` and `capacity=20`. Sustained throughput is roughly `20 ÷ weight` requests/second, and the max burst is roughly `floor(20 ÷ weight)` when the bucket is full.
 
-| Command | Route | Weight |
-|---------|-------|--------|
-| `token info` | `GET /v1/token/info` | 1 |
-| `token security` | `GET /v1/token/security` | 1 |
-| `token pool` | `GET /v1/token/pool_info` | 1 |
-| `token holders` | `GET /v1/market/token_top_holders` | 5 |
-| `token traders` | `GET /v1/market/token_top_traders` | 5 |
+| Command          | Route                              | Weight |
+| ---------------- | ---------------------------------- | ------ |
+| `token info`     | `GET /v1/token/info`               | 1      |
+| `token security` | `GET /v1/token/security`           | 1      |
+| `token pool`     | `GET /v1/token/pool_info`          | 1      |
+| `token holders`  | `GET /v1/market/token_top_holders` | 5      |
+| `token traders`  | `GET /v1/market/token_top_traders` | 5      |
 
 When a request returns `429`:
 
@@ -74,48 +74,48 @@ When a request returns `429`:
 
 ## Parameters — `token info` / `token security` / `token pool`
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--chain` | Yes | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--address` | Yes | Token contract address |
-| `--raw` | No | Output raw single-line JSON (for piping or further processing) |
+| Parameter   | Required | Description                                                     |
+| ----------- | -------- | --------------------------------------------------------------- |
+| `--chain`   | Yes      | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
+| `--address` | Yes      | Token contract address                                          |
+| `--raw`     | No       | Output raw single-line JSON (for piping or further processing)  |
 
 ## Parameters — `token holders` / `token traders`
 
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `--chain` | Yes | — | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--address` | Yes | — | Token contract address |
-| `--limit` | No | `20` | Number of results, max `100` |
-| `--order-by` | No | `amount_percentage` | Sort field — see table below |
-| `--direction` | No | `desc` | Sort direction: `asc` / `desc` |
-| `--tag` | No | — | Wallet filter: `smart_degen` / `renowned` / `fresh_wallet` / `dev` / `sniper` / `rat_trader` / `bundler` / `transfer_in` / `dex_bot` / `bluechip_owner`. Omit to return all wallets. |
-| `--raw` | No | — | Output raw single-line JSON |
+| Parameter     | Required | Default             | Description                                                                                                                                                                          |
+| ------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--chain`     | Yes      | —                   | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                                                                                                      |
+| `--address`   | Yes      | —                   | Token contract address                                                                                                                                                               |
+| `--limit`     | No       | `20`                | Number of results, max `100`                                                                                                                                                         |
+| `--order-by`  | No       | `amount_percentage` | Sort field — see table below                                                                                                                                                         |
+| `--direction` | No       | `desc`              | Sort direction: `asc` / `desc`                                                                                                                                                       |
+| `--tag`       | No       | —                   | Wallet filter: `smart_degen` / `renowned` / `fresh_wallet` / `dev` / `sniper` / `rat_trader` / `bundler` / `transfer_in` / `dex_bot` / `bluechip_owner`. Omit to return all wallets. |
+| `--raw`       | No       | —                   | Output raw single-line JSON                                                                                                                                                          |
 
 ### `--order-by` Values
 
-| Value | Description |
-|-------|-------------|
+| Value               | Description                                       |
+| ------------------- | ------------------------------------------------- |
 | `amount_percentage` | Sort by percentage of total supply held (default) |
-| `profit` | Sort by realized profit in USD |
-| `unrealized_profit` | Sort by unrealized profit in USD |
-| `buy_volume_cur` | Sort by buy volume |
-| `sell_volume_cur` | Sort by sell volume |
+| `profit`            | Sort by realized profit in USD                    |
+| `unrealized_profit` | Sort by unrealized profit in USD                  |
+| `buy_volume_cur`    | Sort by buy volume                                |
+| `sell_volume_cur`   | Sort by sell volume                               |
 
 ### `--tag` Values
 
-| Value          | Description |
-| -------------- | ----------- |
-| `smart_degen`  | Smart money wallets (historically high-performing traders) |
-| `renowned`     | KOL / well-known wallets (influencers, funds, public figures) |
-| `fresh_wallet` | New wallets with no prior trading history |
-| `dev`          | Token developer / creator wallets |
-| `sniper`       | Wallets that sniped the token at launch |
-| `rat_trader`   | Insider / sneak-trading wallets |
-| `bundler`      | Bot-bundled buy wallets |
-| `transfer_in`  | Wallets with a transfer-in record for this token |
-| `dex_bot`      | DEX bot wallets (Axiom, Photon, BullX, Trojan, GMGN, Drops, PepeBoost, Padre) |
-| `bluechip_owner` | Wallets holding established bluechip tokens |
+| Value            | Description                                                                   |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `smart_degen`    | Smart money wallets (historically high-performing traders)                    |
+| `renowned`       | KOL / well-known wallets (influencers, funds, public figures)                 |
+| `fresh_wallet`   | New wallets with no prior trading history                                     |
+| `dev`            | Token developer / creator wallets                                             |
+| `sniper`         | Wallets that sniped the token at launch                                       |
+| `rat_trader`     | Insider / sneak-trading wallets                                               |
+| `bundler`        | Bot-bundled buy wallets                                                       |
+| `transfer_in`    | Wallets with a transfer-in record for this token                              |
+| `dex_bot`        | DEX bot wallets (Axiom, Photon, BullX, Trojan, GMGN, Drops, PepeBoost, Padre) |
+| `bluechip_owner` | Wallets holding established bluechip tokens                                   |
 
 ### `--tag` + `--order-by` Combination Guide
 
@@ -123,16 +123,16 @@ When a request returns `429`:
 
 Recommended combinations for common use cases:
 
-| Goal | `--tag` | `--order-by` |
-|------|---------|--------------|
-| Largest smart money holders by supply | `smart_degen` | `amount_percentage` |
-| Smart money with highest realized profit | `smart_degen` | `profit` |
-| Smart money sitting on unrealized gains | `smart_degen` | `unrealized_profit` |
-| Smart money aggressively accumulating | `smart_degen` | `buy_volume_cur` |
-| Smart money distributing (exit signal) | `smart_degen` | `sell_volume_cur` |
-| KOLs who already took profit | `renowned` | `profit` |
-| KOLs still holding with paper gains | `renowned` | `unrealized_profit` |
-| Largest holders overall (no filter) | *(omit)* | `amount_percentage` |
+| Goal                                     | `--tag`       | `--order-by`        |
+| ---------------------------------------- | ------------- | ------------------- |
+| Largest smart money holders by supply    | `smart_degen` | `amount_percentage` |
+| Smart money with highest realized profit | `smart_degen` | `profit`            |
+| Smart money sitting on unrealized gains  | `smart_degen` | `unrealized_profit` |
+| Smart money aggressively accumulating    | `smart_degen` | `buy_volume_cur`    |
+| Smart money distributing (exit signal)   | `smart_degen` | `sell_volume_cur`   |
+| KOLs who already took profit             | `renowned`    | `profit`            |
+| KOLs still holding with paper gains      | `renowned`    | `unrealized_profit` |
+| Largest holders overall (no filter)      | _(omit)_      | `amount_percentage` |
 
 ## Response Field Reference
 
@@ -142,176 +142,176 @@ The response has five nested objects: `pool`, `dev`, `link`, `stat`, `wallet_tag
 
 **Top-level Fields**
 
-| Field | Description |
-|-------|-------------|
-| `address` | Token contract address |
-| `symbol` / `name` | Token ticker and full name |
-| `decimals` | Token decimal places |
-| `total_supply` | Total token supply (same as `circulating_supply` for most tokens) |
-| `circulating_supply` | Circulating supply |
-| `max_supply` | Maximum supply |
-| `price` | **Object** — price and trading stats (see `price` Object below). Access current price as `price.price`. |
-| `liquidity` | Total liquidity in USD (from biggest pool) |
-| `holder_count` | Number of unique token holders |
-| `logo` | Token logo image URL |
-| `creation_timestamp` | Token creation time (Unix seconds) |
-| `open_timestamp` | Time the token opened for trading (Unix seconds) |
-| `biggest_pool_address` | Address of the main liquidity pool |
-| `og` | Whether the token is flagged as an OG token (`true` / `false`) |
-| `launchpad` | Launchpad identifier (e.g. `pump`, `moonshot`) |
-| `launchpad_status` | Launchpad state: `0` = not opened, `1` = live, `2` = migrated |
-| `launchpad_progress` | Launchpad bonding-curve progress (0–1) |
-| `launchpad_platform` | Launchpad platform name |
-| `migrated_pool` | Pool address after migration |
-| `migration_market_cap` | Market cap at migration time (USD, float) |
-| `migration_market_cap_quote` | Quote currency for `migration_market_cap` |
-| `ath_price` | All-time-high price (USD, float) |
-| `locked_ratio` | Ratio of supply locked (0–1, float) |
+| Field                        | Description                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `address`                    | Token contract address                                                                                  |
+| `symbol` / `name`            | Token ticker and full name                                                                              |
+| `decimals`                   | Token decimal places                                                                                    |
+| `total_supply`               | Total token supply (same as `circulating_supply` for most tokens)                                       |
+| `circulating_supply`         | Circulating supply                                                                                      |
+| `max_supply`                 | Maximum supply                                                                                          |
+| `price`                      | **Object** — price and trading stats (see `price` Object below). Access current price as `price.price`. |
+| `liquidity`                  | Total liquidity in USD (from biggest pool)                                                              |
+| `holder_count`               | Number of unique token holders                                                                          |
+| `logo`                       | Token logo image URL                                                                                    |
+| `creation_timestamp`         | Token creation time (Unix seconds)                                                                      |
+| `open_timestamp`             | Time the token opened for trading (Unix seconds)                                                        |
+| `biggest_pool_address`       | Address of the main liquidity pool                                                                      |
+| `og`                         | Whether the token is flagged as an OG token (`true` / `false`)                                          |
+| `launchpad`                  | Launchpad identifier (e.g. `pump`, `moonshot`)                                                          |
+| `launchpad_status`           | Launchpad state: `0` = not opened, `1` = live, `2` = migrated                                           |
+| `launchpad_progress`         | Launchpad bonding-curve progress (0–1)                                                                  |
+| `launchpad_platform`         | Launchpad platform name                                                                                 |
+| `migrated_pool`              | Pool address after migration                                                                            |
+| `migration_market_cap`       | Market cap at migration time (USD, float)                                                               |
+| `migration_market_cap_quote` | Quote currency for `migration_market_cap`                                                               |
+| `ath_price`                  | All-time-high price (USD, float)                                                                        |
+| `locked_ratio`               | Ratio of supply locked (0–1, float)                                                                     |
 
 **`pool` Object** — Main liquidity pool details
 
-| Field | Description |
-|-------|-------------|
-| `pool.pool_address` | Pool contract address |
-| `pool.quote_address` | Quote token address (e.g. USDC, SOL, WETH) |
-| `pool.quote_symbol` | Quote token symbol (e.g. `USDC`, `SOL`) |
-| `pool.exchange` | DEX name (e.g. `meteora_dlmm`, `raydium`, `pump_amm`, `uniswap_v3`) |
-| `pool.liquidity` | Pool liquidity in USD |
-| `pool.base_reserve` | Base token reserve amount |
-| `pool.quote_reserve` | Quote token reserve amount |
-| `pool.base_reserve_value` | Base reserve USD value |
-| `pool.quote_reserve_value` | Quote reserve USD value |
-| `pool.fee_ratio` | Pool trading fee ratio (e.g. `0.1` = 0.1%) |
-| `pool.creation_timestamp` | Pool creation time (Unix seconds) |
+| Field                      | Description                                                         |
+| -------------------------- | ------------------------------------------------------------------- |
+| `pool.pool_address`        | Pool contract address                                               |
+| `pool.quote_address`       | Quote token address (e.g. USDC, SOL, WETH)                          |
+| `pool.quote_symbol`        | Quote token symbol (e.g. `USDC`, `SOL`)                             |
+| `pool.exchange`            | DEX name (e.g. `meteora_dlmm`, `raydium`, `pump_amm`, `uniswap_v3`) |
+| `pool.liquidity`           | Pool liquidity in USD                                               |
+| `pool.base_reserve`        | Base token reserve amount                                           |
+| `pool.quote_reserve`       | Quote token reserve amount                                          |
+| `pool.base_reserve_value`  | Base reserve USD value                                              |
+| `pool.quote_reserve_value` | Quote reserve USD value                                             |
+| `pool.fee_ratio`           | Pool trading fee ratio (e.g. `0.1` = 0.1%)                          |
+| `pool.creation_timestamp`  | Pool creation time (Unix seconds)                                   |
 
 **`dev` Object** — Token creator / developer info
 
-| Field | Description |
-|-------|-------------|
-| `dev.creator_address` | Creator wallet address |
-| `dev.creator_token_balance` | Creator's current token balance |
-| `dev.creator_token_status` | Creator holding status: `hold` (still holding) / `sell` (sold/exited) |
-| `dev.top_10_holder_rate` | Ratio of supply held by top 10 wallets (0–1) |
-| `dev.twitter_name_change_history` | Array of past Twitter username changes (each entry has `twitter_username`, `rename_timestamp`) |
-| `dev.dexscr_ad` | Creator bought a DEXScreener ad: `1` = yes, `0` = no |
-| `dev.dexscr_update_link` | Creator updated DEXScreener socials/links: `1` = yes, `0` = no |
-| `dev.dexscr_boost_fee` | Creator used DEXScreener Boost: `1` = yes, `0` = no |
-| `dev.dexscr_trending_bar` | Token appeared in DEXScreener trending bar: `1` = yes, `0` = no |
-| `dev.dexscr_ad_ts` | Timestamp of DEXScreener ad purchase (Unix seconds) |
-| `dev.dexscr_update_link_ts` | Timestamp of DEXScreener link update (Unix seconds) |
-| `dev.dexscr_boost_ts` | Timestamp of DEXScreener Boost (Unix seconds) |
-| `dev.dexscr_trending_bar_ts` | Timestamp of DEXScreener trending bar appearance (Unix seconds) |
-| `dev.cto_flag` | Token has been Community Takeover'd (original dev abandoned): `1` = yes, `0` = no |
-| `dev.fund_from` | Address that funded the creator wallet |
-| `dev.fund_from_ts` | Timestamp of that funding event (Unix seconds) |
-| `dev.creator_open_count` | Number of tokens this creator has previously launched |
-| `dev.twitter_del_post_token_count` | Number of posts the creator deleted from Twitter |
-| `dev.twitter_create_token_count` | Number of tokens the creator has promoted on Twitter |
-| `dev.offchain` | Whether the token is an offchain token |
-| `dev.ath_token_info` | Creator's all-time-high token info object (optional); see sub-fields below |
-| `dev.ath_token_info.ath_token` | Contract address of the creator's best-performing token ever |
-| `dev.ath_token_info.ath_mc` | All-time-high market cap of that token (USD, string) |
-| `dev.ath_token_info.avatar` | Token logo URL |
-| `dev.ath_token_info.symbol` | Token symbol |
-| `dev.ath_token_info.name` | Token name |
-| `dev.ath_token_info.creation_timestamp` | Token creation time (Unix seconds) |
+| Field                                   | Description                                                                                    |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `dev.creator_address`                   | Creator wallet address                                                                         |
+| `dev.creator_token_balance`             | Creator's current token balance                                                                |
+| `dev.creator_token_status`              | Creator holding status: `hold` (still holding) / `sell` (sold/exited)                          |
+| `dev.top_10_holder_rate`                | Ratio of supply held by top 10 wallets (0–1)                                                   |
+| `dev.twitter_name_change_history`       | Array of past Twitter username changes (each entry has `twitter_username`, `rename_timestamp`) |
+| `dev.dexscr_ad`                         | Creator bought a DEXScreener ad: `1` = yes, `0` = no                                           |
+| `dev.dexscr_update_link`                | Creator updated DEXScreener socials/links: `1` = yes, `0` = no                                 |
+| `dev.dexscr_boost_fee`                  | Creator used DEXScreener Boost: `1` = yes, `0` = no                                            |
+| `dev.dexscr_trending_bar`               | Token appeared in DEXScreener trending bar: `1` = yes, `0` = no                                |
+| `dev.dexscr_ad_ts`                      | Timestamp of DEXScreener ad purchase (Unix seconds)                                            |
+| `dev.dexscr_update_link_ts`             | Timestamp of DEXScreener link update (Unix seconds)                                            |
+| `dev.dexscr_boost_ts`                   | Timestamp of DEXScreener Boost (Unix seconds)                                                  |
+| `dev.dexscr_trending_bar_ts`            | Timestamp of DEXScreener trending bar appearance (Unix seconds)                                |
+| `dev.cto_flag`                          | Token has been Community Takeover'd (original dev abandoned): `1` = yes, `0` = no              |
+| `dev.fund_from`                         | Address that funded the creator wallet                                                         |
+| `dev.fund_from_ts`                      | Timestamp of that funding event (Unix seconds)                                                 |
+| `dev.creator_open_count`                | Number of tokens this creator has previously launched                                          |
+| `dev.twitter_del_post_token_count`      | Number of posts the creator deleted from Twitter                                               |
+| `dev.twitter_create_token_count`        | Number of tokens the creator has promoted on Twitter                                           |
+| `dev.offchain`                          | Whether the token is an offchain token                                                         |
+| `dev.ath_token_info`                    | Creator's all-time-high token info object (optional); see sub-fields below                     |
+| `dev.ath_token_info.ath_token`          | Contract address of the creator's best-performing token ever                                   |
+| `dev.ath_token_info.ath_mc`             | All-time-high market cap of that token (USD, string)                                           |
+| `dev.ath_token_info.avatar`             | Token logo URL                                                                                 |
+| `dev.ath_token_info.symbol`             | Token symbol                                                                                   |
+| `dev.ath_token_info.name`               | Token name                                                                                     |
+| `dev.ath_token_info.creation_timestamp` | Token creation time (Unix seconds)                                                             |
 
 **`link` Object** — Social and explorer links
 
-| Field | Description |
-|-------|-------------|
-| `link.twitter_username` | Twitter / X username (not full URL) |
-| `link.website` | Project website URL |
-| `link.telegram` | Telegram URL |
-| `link.discord` | Discord URL |
-| `link.instagram` | Instagram URL |
-| `link.tiktok` | TikTok URL |
-| `link.youtube` | YouTube URL |
-| `link.description` | Token description text |
-| `link.gmgn` | GMGN token page URL |
-| `link.geckoterminal` | GeckoTerminal page URL |
-| `link.verify_status` | Social verification status (integer) |
+| Field                   | Description                          |
+| ----------------------- | ------------------------------------ |
+| `link.twitter_username` | Twitter / X username (not full URL)  |
+| `link.website`          | Project website URL                  |
+| `link.telegram`         | Telegram URL                         |
+| `link.discord`          | Discord URL                          |
+| `link.instagram`        | Instagram URL                        |
+| `link.tiktok`           | TikTok URL                           |
+| `link.youtube`          | YouTube URL                          |
+| `link.description`      | Token description text               |
+| `link.gmgn`             | GMGN token page URL                  |
+| `link.geckoterminal`    | GeckoTerminal page URL               |
+| `link.verify_status`    | Social verification status (integer) |
 
 **`stat` Object** — On-chain statistics
 
-| Field | Description |
-|-------|-------------|
-| `stat.holder_count` | Number of holders (same as top-level `holder_count`) |
-| `stat.top_10_holder_rate` | Ratio of supply held by top 10 wallets (0–1) |
-| `stat.dev_team_hold_rate` | Ratio held by dev team wallets |
-| `stat.creator_hold_rate` | Ratio held by creator wallet |
-| `stat.creator_token_balance` | Raw creator token balance |
-| `stat.top_rat_trader_percentage` | Ratio of volume from rat/insider traders |
-| `stat.top_bundler_trader_percentage` | Ratio of volume from bundler bots |
-| `stat.top_entrapment_trader_percentage` | Ratio of volume from entrapment traders |
-| `stat.bot_degen_count` | Number of bot degen wallets |
-| `stat.bot_degen_rate` | Ratio of bot degen wallets |
-| `stat.fresh_wallet_rate` | Ratio of fresh/new wallets among holders |
-| `stat.private_vault_hold_rate` | Ratio held by private vault (vanish) addresses — displayed as "vanish" in GMGN UI (0–1) |
+| Field                                   | Description                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------- |
+| `stat.holder_count`                     | Number of holders (same as top-level `holder_count`)                                    |
+| `stat.top_10_holder_rate`               | Ratio of supply held by top 10 wallets (0–1)                                            |
+| `stat.dev_team_hold_rate`               | Ratio held by dev team wallets                                                          |
+| `stat.creator_hold_rate`                | Ratio held by creator wallet                                                            |
+| `stat.creator_token_balance`            | Raw creator token balance                                                               |
+| `stat.top_rat_trader_percentage`        | Ratio of volume from rat/insider traders                                                |
+| `stat.top_bundler_trader_percentage`    | Ratio of volume from bundler bots                                                       |
+| `stat.top_entrapment_trader_percentage` | Ratio of volume from entrapment traders                                                 |
+| `stat.bot_degen_count`                  | Number of bot degen wallets                                                             |
+| `stat.bot_degen_rate`                   | Ratio of bot degen wallets                                                              |
+| `stat.fresh_wallet_rate`                | Ratio of fresh/new wallets among holders                                                |
+| `stat.private_vault_hold_rate`          | Ratio held by private vault (vanish) addresses — displayed as "vanish" in GMGN UI (0–1) |
 
 **`wallet_tags_stat` Object** — Wallet type breakdown
 
-| Field | Description |
-|-------|-------------|
-| `wallet_tags_stat.smart_wallets` | Number of smart money wallets holding the token |
-| `wallet_tags_stat.renowned_wallets` | Number of renowned / KOL wallets holding the token |
-| `wallet_tags_stat.sniper_wallets` | Number of sniper wallets |
-| `wallet_tags_stat.rat_trader_wallets` | Number of rat trader wallets |
-| `wallet_tags_stat.bundler_wallets` | Number of bundler bot wallets |
-| `wallet_tags_stat.whale_wallets` | Number of whale wallets |
-| `wallet_tags_stat.fresh_wallets` | Number of fresh wallets |
-| `wallet_tags_stat.top_wallets` | Number of top-ranked wallets |
+| Field                                 | Description                                        |
+| ------------------------------------- | -------------------------------------------------- |
+| `wallet_tags_stat.smart_wallets`      | Number of smart money wallets holding the token    |
+| `wallet_tags_stat.renowned_wallets`   | Number of renowned / KOL wallets holding the token |
+| `wallet_tags_stat.sniper_wallets`     | Number of sniper wallets                           |
+| `wallet_tags_stat.rat_trader_wallets` | Number of rat trader wallets                       |
+| `wallet_tags_stat.bundler_wallets`    | Number of bundler bot wallets                      |
+| `wallet_tags_stat.whale_wallets`      | Number of whale wallets                            |
+| `wallet_tags_stat.fresh_wallets`      | Number of fresh wallets                            |
+| `wallet_tags_stat.top_wallets`        | Number of top-ranked wallets                       |
 
 **`price` Object** — Price and trading statistics (access current price via `price.price`)
 
-| Field | Description |
-|-------|-------------|
-| `price.price` | Current price in USD (string) |
-| `price.price_{window}` | Price at the start of the window; windows: `1m`, `5m`, `1h`, `6h`, `24h` |
-| `price.buys_{window}` | Buy transaction count in the window |
-| `price.sells_{window}` | Sell transaction count in the window |
-| `price.volume_{window}` | Total trading volume in USD for the window |
-| `price.buy_volume_{window}` | Buy volume in USD for the window |
-| `price.sell_volume_{window}` | Sell volume in USD for the window |
-| `price.swaps_{window}` | Total swap count for the window |
-| `price.hot_level` | Heat level integer |
+| Field                        | Description                                                              |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `price.price`                | Current price in USD (string)                                            |
+| `price.price_{window}`       | Price at the start of the window; windows: `1m`, `5m`, `1h`, `6h`, `24h` |
+| `price.buys_{window}`        | Buy transaction count in the window                                      |
+| `price.sells_{window}`       | Sell transaction count in the window                                     |
+| `price.volume_{window}`      | Total trading volume in USD for the window                               |
+| `price.buy_volume_{window}`  | Buy volume in USD for the window                                         |
+| `price.sell_volume_{window}` | Sell volume in USD for the window                                        |
+| `price.swaps_{window}`       | Total swap count for the window                                          |
+| `price.hot_level`            | Heat level integer                                                       |
 
 **`fee_distribution` Object** — Launchpad fee-sharing config (optional; present for `pump` / `bankr` tokens). Use `token info` to check fee distribution, creator reward claim status (`has_claimed_fee`), and royalty allocation for pump/bankr tokens.
 
-| Field | Description |
-|-------|-------------|
-| `fee_distribution.launchpad` | Launchpad identifier: `"pump"`, `"bankr"`, or `""` (unknown) |
+| Field                            | Description                                                               |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| `fee_distribution.launchpad`     | Launchpad identifier: `"pump"`, `"bankr"`, or `""` (unknown)              |
 | `fee_distribution.platform_data` | Platform-specific fee config; structure varies by `launchpad` (see below) |
 
 When `fee_distribution.launchpad = "pump"`:
 
-| Field | Description |
-|-------|-------------|
-| `platform_data.fee_authority` | Fee authority wallet address |
-| `platform_data.is_locked` | Whether the fee config is locked |
-| `platform_data.show` | Whether fee distribution is displayed in the UI |
-| `platform_data.list` | Array of fee-share holders (see FeeShareHolder below) |
+| Field                          | Description                                             |
+| ------------------------------ | ------------------------------------------------------- |
+| `platform_data.fee_authority`  | Fee authority wallet address                            |
+| `platform_data.is_locked`      | Whether the fee config is locked                        |
+| `platform_data.show`           | Whether fee distribution is displayed in the UI         |
+| `platform_data.list`           | Array of fee-share holders (see FeeShareHolder below)   |
 | `platform_data.bonus_category` | Bonus category list (e.g. `creator_reward`, `cashback`) |
 
 When `fee_distribution.launchpad = "bankr"`:
 
-| Field | Description |
-|-------|-------------|
-| `platform_data.deployer` | Original deployer wallet address |
-| `platform_data.fee_recipient` | Fee recipient wallet address |
-| `platform_data.list` | Array of fee-share holders (see FeeShareHolder below) |
+| Field                         | Description                                           |
+| ----------------------------- | ----------------------------------------------------- |
+| `platform_data.deployer`      | Original deployer wallet address                      |
+| `platform_data.fee_recipient` | Fee recipient wallet address                          |
+| `platform_data.list`          | Array of fee-share holders (see FeeShareHolder below) |
 
 FeeShareHolder fields (each item in `platform_data.list`):
 
-| Field | Description |
-|-------|-------------|
-| `wallet` | Wallet address |
-| `royalty_bps` | Royalty share in basis points (10000 = 100%) |
-| `is_creator` | Whether this is the original creator |
-| `has_claimed_fee` | Whether fees have been claimed |
-| `username` | Display name |
-| `pfp` | Avatar URL |
-| `twitter_username` | Twitter / X username |
+| Field              | Description                                  |
+| ------------------ | -------------------------------------------- |
+| `wallet`           | Wallet address                               |
+| `royalty_bps`      | Royalty share in basis points (10000 = 100%) |
+| `is_creator`       | Whether this is the original creator         |
+| `has_claimed_fee`  | Whether fees have been claimed               |
+| `username`         | Display name                                 |
+| `pfp`              | Avatar URL                                   |
+| `twitter_username` | Twitter / X username                         |
 
 ---
 
@@ -319,51 +319,51 @@ FeeShareHolder fields (each item in `platform_data.list`):
 
 **Contract Safety**
 
-| Field | Chains | Description |
-|-------|--------|-------------|
-| `is_honeypot` | BSC / Base | Whether token is a honeypot (`"yes"` / `"no"`); empty string on SOL |
-| `open_source` | all | Contract source code verified: `"yes"` / `"no"` / `"unknown"` |
-| `owner_renounced` | all | Contract ownership renounced: `"yes"` / `"no"` / `"unknown"` |
-| `renounced_mint` | SOL | Mint authority renounced (SOL-specific; always `false` on EVM) |
-| `renounced_freeze_account` | SOL | Freeze authority renounced (SOL-specific; always `false` on EVM) |
-| `buy_tax` / `sell_tax` | all | Tax ratio — e.g. `0.03` = 3%; `0` = no tax |
+| Field                      | Chains     | Description                                                         |
+| -------------------------- | ---------- | ------------------------------------------------------------------- |
+| `is_honeypot`              | BSC / Base | Whether token is a honeypot (`"yes"` / `"no"`); empty string on SOL |
+| `open_source`              | all        | Contract source code verified: `"yes"` / `"no"` / `"unknown"`       |
+| `owner_renounced`          | all        | Contract ownership renounced: `"yes"` / `"no"` / `"unknown"`        |
+| `renounced_mint`           | SOL        | Mint authority renounced (SOL-specific; always `false` on EVM)      |
+| `renounced_freeze_account` | SOL        | Freeze authority renounced (SOL-specific; always `false` on EVM)    |
+| `buy_tax` / `sell_tax`     | all        | Tax ratio — e.g. `0.03` = 3%; `0` = no tax                          |
 
 **Holder Concentration & Risk**
 
-| Field | Description |
-|-------|-------------|
-| `top_10_holder_rate` | Ratio of supply held by top 10 wallets (0–1); higher = more concentrated |
-| `dev_team_hold_rate` | Ratio held by dev team wallets |
-| `creator_balance_rate` | Ratio held by the token creator wallet |
-| `creator_token_status` | Dev holding status: `creator_hold` (still holding) / `creator_close` (sold/closed) |
-| `suspected_insider_hold_rate` | Ratio held by suspected insider wallets |
+| Field                         | Description                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `top_10_holder_rate`          | Ratio of supply held by top 10 wallets (0–1); higher = more concentrated           |
+| `dev_team_hold_rate`          | Ratio held by dev team wallets                                                     |
+| `creator_balance_rate`        | Ratio held by the token creator wallet                                             |
+| `creator_token_status`        | Dev holding status: `creator_hold` (still holding) / `creator_close` (sold/closed) |
+| `suspected_insider_hold_rate` | Ratio held by suspected insider wallets                                            |
 
 **Trading Risk**
 
-| Field | Description |
-|-------|-------------|
-| `rug_ratio` | Rug pull risk score (0–1); higher = more risky |
-| `is_wash_trading` | Whether wash trading activity is detected (`true` / `false`) |
-| `rat_trader_amount_rate` | Ratio of volume from sneak/insider trading |
-| `bundler_trader_amount_rate` | Ratio of volume from bundle trading (bot-driven) |
-| `sniper_count` | Number of sniper wallets that bought at launch |
-| `burn_status` | Liquidity pool burn status (e.g. `"burn"` = burned, `""` = not burned) |
+| Field                        | Description                                                            |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `rug_ratio`                  | Rug pull risk score (0–1); higher = more risky                         |
+| `is_wash_trading`            | Whether wash trading activity is detected (`true` / `false`)           |
+| `rat_trader_amount_rate`     | Ratio of volume from sneak/insider trading                             |
+| `bundler_trader_amount_rate` | Ratio of volume from bundle trading (bot-driven)                       |
+| `sniper_count`               | Number of sniper wallets that bought at launch                         |
+| `burn_status`                | Liquidity pool burn status (e.g. `"burn"` = burned, `""` = not burned) |
 
 ---
 
 ### `token pool` — Key Fields
 
-| Field | Description |
-|-------|-------------|
-| `address` | Pool contract address |
-| `base_address` | Base token address (the queried token) |
-| `quote_address` | Quote token address (e.g. SOL, USDC, WETH) |
-| `exchange` | DEX name (e.g. `raydium`, `pump_amm`, `uniswap_v3`, `pancakeswap`) |
-| `liquidity` | Pool liquidity in USD |
-| `base_reserve` | Base token reserve amount |
-| `quote_reserve` | Quote token reserve amount |
-| `price` | Current price in USD derived from pool reserves |
-| `creation_timestamp` | Pool creation time (Unix seconds) |
+| Field                | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `address`            | Pool contract address                                              |
+| `base_address`       | Base token address (the queried token)                             |
+| `quote_address`      | Quote token address (e.g. SOL, USDC, WETH)                         |
+| `exchange`           | DEX name (e.g. `raydium`, `pump_amm`, `uniswap_v3`, `pancakeswap`) |
+| `liquidity`          | Pool liquidity in USD                                              |
+| `base_reserve`       | Base token reserve amount                                          |
+| `quote_reserve`      | Quote token reserve amount                                         |
+| `price`              | Current price in USD derived from pool reserves                    |
+| `creation_timestamp` | Pool creation time (Unix seconds)                                  |
 
 ---
 
@@ -373,105 +373,105 @@ The response is an object with a `list` array. Each item in `list` represents on
 
 **Identity & Holdings**
 
-| Field | Description |
-|-------|-------------|
-| `address` | Wallet address |
-| `account_address` | Token account address (the on-chain account holding the token, distinct from the wallet address) |
-| `addr_type` | Address type: `0` = regular wallet, `2` = exchange / liquidity pool |
-| `exchange` | Exchange or pool name if `addr_type` is `2` (e.g. `pump_amm`, `raydium`) |
-| `wallet_tag_v2` | Rank label in this list (e.g. `TOP1`, `TOP2`, ...) |
-| `native_balance` | Native token balance in smallest unit (lamports for SOL) |
-| `balance` | Current token balance (human-readable units) |
-| `amount_cur` | Same as `balance` — current token amount held |
-| `usd_value` | USD value of current holdings at current price |
-| `amount_percentage` | Ratio of total supply held (0–1); e.g. `0.05` = 5% |
-| `is_on_curve` | `true` = still on bonding curve (pump.fun pre-graduation); `false` = open market |
-| `is_new` | Whether this is a newly created wallet |
-| `is_suspicious` | Whether this wallet is flagged as suspicious |
-| `transfer_in` | Whether the current holding was received via transfer (not bought) |
+| Field               | Description                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `address`           | Wallet address                                                                                   |
+| `account_address`   | Token account address (the on-chain account holding the token, distinct from the wallet address) |
+| `addr_type`         | Address type: `0` = regular wallet, `2` = exchange / liquidity pool                              |
+| `exchange`          | Exchange or pool name if `addr_type` is `2` (e.g. `pump_amm`, `raydium`)                         |
+| `wallet_tag_v2`     | Rank label in this list (e.g. `TOP1`, `TOP2`, ...)                                               |
+| `native_balance`    | Native token balance in smallest unit (lamports for SOL)                                         |
+| `balance`           | Current token balance (human-readable units)                                                     |
+| `amount_cur`        | Same as `balance` — current token amount held                                                    |
+| `usd_value`         | USD value of current holdings at current price                                                   |
+| `amount_percentage` | Ratio of total supply held (0–1); e.g. `0.05` = 5%                                               |
+| `is_on_curve`       | `true` = still on bonding curve (pump.fun pre-graduation); `false` = open market                 |
+| `is_new`            | Whether this is a newly created wallet                                                           |
+| `is_suspicious`     | Whether this wallet is flagged as suspicious                                                     |
+| `transfer_in`       | Whether the current holding was received via transfer (not bought)                               |
 
 **Trading Summary**
 
-| Field | Description |
-|-------|-------------|
-| `buy_volume_cur` | Total buy volume in USD |
-| `sell_volume_cur` | Total sell volume in USD |
-| `buy_amount_cur` | Total tokens bought |
-| `sell_amount_cur` | Total tokens sold |
+| Field                    | Description                                                            |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `buy_volume_cur`         | Total buy volume in USD                                                |
+| `sell_volume_cur`        | Total sell volume in USD                                               |
+| `buy_amount_cur`         | Total tokens bought                                                    |
+| `sell_amount_cur`        | Total tokens sold                                                      |
 | `sell_amount_percentage` | Ratio of bought tokens that have been sold (0–1); `1.0` = fully exited |
-| `buy_tx_count_cur` | Number of buy transactions |
-| `sell_tx_count_cur` | Number of sell transactions |
-| `netflow_usd` | Net USD flow = sell income − buy cost (negative = net spent) |
-| `netflow_amount` | Net token flow = bought − sold (positive = still holding net position) |
+| `buy_tx_count_cur`       | Number of buy transactions                                             |
+| `sell_tx_count_cur`      | Number of sell transactions                                            |
+| `netflow_usd`            | Net USD flow = sell income − buy cost (negative = net spent)           |
+| `netflow_amount`         | Net token flow = bought − sold (positive = still holding net position) |
 
 **Cost & P&L**
 
-| Field | Description |
-|-------|-------------|
-| `avg_cost` | Average buy price in USD per token |
-| `avg_sold` | Average sell price in USD per token |
-| `history_bought_cost` | Total USD spent buying |
-| `history_bought_fee` | Total fees paid on buys in USD |
-| `history_sold_income` | Total USD received from selling |
-| `history_sold_fee` | Total fees paid on sells in USD |
-| `total_cost` | Total cost basis including fees |
-| `profit` | Total profit in USD (realized + unrealized) |
-| `profit_change` | Total profit ratio = profit / total_cost |
-| `realized_profit` | Realized profit in USD from completed sells |
-| `realized_pnl` | Realized profit ratio = realized_profit / buy_cost |
-| `unrealized_profit` | Unrealized profit in USD on current holdings at current price |
-| `unrealized_pnl` | Unrealized profit ratio; `null` if no current holdings |
+| Field                 | Description                                                   |
+| --------------------- | ------------------------------------------------------------- |
+| `avg_cost`            | Average buy price in USD per token                            |
+| `avg_sold`            | Average sell price in USD per token                           |
+| `history_bought_cost` | Total USD spent buying                                        |
+| `history_bought_fee`  | Total fees paid on buys in USD                                |
+| `history_sold_income` | Total USD received from selling                               |
+| `history_sold_fee`    | Total fees paid on sells in USD                               |
+| `total_cost`          | Total cost basis including fees                               |
+| `profit`              | Total profit in USD (realized + unrealized)                   |
+| `profit_change`       | Total profit ratio = profit / total_cost                      |
+| `realized_profit`     | Realized profit in USD from completed sells                   |
+| `realized_pnl`        | Realized profit ratio = realized_profit / buy_cost            |
+| `unrealized_profit`   | Unrealized profit in USD on current holdings at current price |
+| `unrealized_pnl`      | Unrealized profit ratio; `null` if no current holdings        |
 
 **Transfer History**
 
-| Field | Description |
-|-------|-------------|
-| `current_transfer_in_amount` | Tokens received via transfer (not bought) in current period |
-| `current_transfer_out_amount` | Tokens sent out via transfer (not sold) in current period |
-| `history_transfer_in_amount` | Historical total tokens received via transfer |
-| `history_transfer_in_cost` | Estimated cost basis of transferred-in tokens |
-| `history_transfer_out_amount` | Historical total tokens sent out via transfer |
-| `history_transfer_out_income` | Estimated income from transferred-out tokens |
-| `history_transfer_out_fee` | Fees paid on transfer-outs |
-| `transfer_in_count` | Number of inbound transfers |
-| `transfer_out_count` | Number of outbound transfers |
+| Field                         | Description                                                 |
+| ----------------------------- | ----------------------------------------------------------- |
+| `current_transfer_in_amount`  | Tokens received via transfer (not bought) in current period |
+| `current_transfer_out_amount` | Tokens sent out via transfer (not sold) in current period   |
+| `history_transfer_in_amount`  | Historical total tokens received via transfer               |
+| `history_transfer_in_cost`    | Estimated cost basis of transferred-in tokens               |
+| `history_transfer_out_amount` | Historical total tokens sent out via transfer               |
+| `history_transfer_out_income` | Estimated income from transferred-out tokens                |
+| `history_transfer_out_fee`    | Fees paid on transfer-outs                                  |
+| `transfer_in_count`           | Number of inbound transfers                                 |
+| `transfer_out_count`          | Number of outbound transfers                                |
 
 **Timing**
 
-| Field | Description |
-|-------|-------------|
-| `start_holding_at` | Unix timestamp when wallet first acquired this token |
-| `end_holding_at` | Unix timestamp when wallet fully exited; `null` if still holding |
-| `last_active_timestamp` | Unix timestamp of most recent on-chain activity for this token |
-| `last_block` | Block number of last activity |
+| Field                   | Description                                                      |
+| ----------------------- | ---------------------------------------------------------------- |
+| `start_holding_at`      | Unix timestamp when wallet first acquired this token             |
+| `end_holding_at`        | Unix timestamp when wallet fully exited; `null` if still holding |
+| `last_active_timestamp` | Unix timestamp of most recent on-chain activity for this token   |
+| `last_block`            | Block number of last activity                                    |
 
 **Wallet Identity**
 
-| Field | Description |
-|-------|-------------|
-| `name` | Wallet display name (if known) |
-| `twitter_username` | Twitter / X username |
-| `twitter_name` | Twitter / X display name |
-| `avatar` | Avatar image URL |
-| `tags` | Platform-level wallet tags (e.g. `["kol"]`, `["smart_degen"]`, `["axiom"]`) |
+| Field              | Description                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| `name`             | Wallet display name (if known)                                                                         |
+| `twitter_username` | Twitter / X username                                                                                   |
+| `twitter_name`     | Twitter / X display name                                                                               |
+| `avatar`           | Avatar image URL                                                                                       |
+| `tags`             | Platform-level wallet tags (e.g. `["kol"]`, `["smart_degen"]`, `["axiom"]`)                            |
 | `maker_token_tags` | Token-specific behavior tags for this wallet (e.g. `["bundler"]`, `["paper_hands"]`, `["top_holder"]`) |
-| `created_at` | Wallet creation timestamp (Unix seconds); `0` if unknown |
+| `created_at`       | Wallet creation timestamp (Unix seconds); `0` if unknown                                               |
 
 **Shared Funding**
 
-| Field | Description |
-|-------|-------------|
+| Field             | Description                                                                                                                                                                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `native_transfer` | First native token (SOL/BNB/ETH) transfer into this wallet — indicates the original funding source; wallets sharing the same `native_transfer.address` are likely funded from a common origin (coordinated wallets / same operator) |
 
 **Last Transaction Records**
 
 Each of the following is an object with `name`, `address`, `timestamp`, `tx_hash`, `type`:
 
-| Field | Description |
-|-------|-------------|
-| `token_transfer` | Most recent token transfer (buy or sell) |
-| `token_transfer_in` | Most recent inbound token transfer |
-| `token_transfer_out` | Most recent outbound token transfer |
+| Field                | Description                              |
+| -------------------- | ---------------------------------------- |
+| `token_transfer`     | Most recent token transfer (buy or sell) |
+| `token_transfer_in`  | Most recent inbound token transfer       |
+| `token_transfer_out` | Most recent outbound token transfer      |
 
 ---
 
@@ -575,15 +575,15 @@ gmgn-cli token holders --chain sol --address EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGG
 
 Use this table to pick the right combination for common `token traders` use cases:
 
-| Use case | `--tag` | `--order-by` |
-|----------|---------|-------------|
-| Smart money with highest buy volume | `smart_degen` | `buy_volume_cur` |
-| Smart money with highest sell volume (exit signal) | `smart_degen` | `sell_volume_cur` |
-| KOLs recently active | `renowned` | `last_active_timestamp` |
-| Smart money most profitable traders | `smart_degen` | `profit` |
-| Snipers still holding | `sniper` | `amount_percentage` |
-| Smart money sitting on biggest unrealized gains | `smart_degen` | `unrealized_profit` |
-| KOLs who already took profit | `renowned` | `profit` |
+| Use case                                           | `--tag`       | `--order-by`            |
+| -------------------------------------------------- | ------------- | ----------------------- |
+| Smart money with highest buy volume                | `smart_degen` | `buy_volume_cur`        |
+| Smart money with highest sell volume (exit signal) | `smart_degen` | `sell_volume_cur`       |
+| KOLs recently active                               | `renowned`    | `last_active_timestamp` |
+| Smart money most profitable traders                | `smart_degen` | `profit`                |
+| Snipers still holding                              | `sniper`      | `amount_percentage`     |
+| Smart money sitting on biggest unrealized gains    | `smart_degen` | `unrealized_profit`     |
+| KOLs who already took profit                       | `renowned`    | `profit`                |
 
 ### `token traders` — Find Active Traders
 
@@ -626,22 +626,23 @@ gmgn-cli token traders --chain eth --address 0xC02aaA39b223FE8D0A0e5C4F27eAD9083
 
 After fetching `token security` and `token info`, apply this scoring card to give a structured verdict. Do not skip this step when the user asks for a safety check or due diligence.
 
-| Field | ✅ Safe | ⚠️ Warning | 🚫 Danger (Hard Stop) |
-|-------|---------|-----------|----------------------|
-| `is_honeypot` | `"no"` | — | `"yes"` → **stop immediately** |
-| `open_source` | `"yes"` | `"unknown"` | `"no"` |
-| `owner_renounced` | `"yes"` | `"unknown"` | `"no"` |
-| `renounced_mint` (SOL) | `true` | — | `false` |
-| `renounced_freeze_account` (SOL) | `true` | — | `false` |
-| `rug_ratio` | `< 0.10` | `0.10–0.30` | `> 0.30` |
-| `top_10_holder_rate` | `< 0.20` | `0.20–0.50` | `> 0.50` |
-| `creator_token_status` | `creator_close` | — | `creator_hold` |
-| `buy_tax` / `sell_tax` | `0` | `0.01–0.05` | `> 0.10` |
-| `sniper_count` | `< 5` | `5–20` | `> 20` |
-| `smart_wallets` (from `wallet_tags_stat`) | `≥ 3` | `1–2` | `0` (bearish, not a hard stop) |
-| `renowned_wallets` (from `wallet_tags_stat`) | `≥ 1` | — | `0` (neutral, not a hard stop) |
+| Field                                        | ✅ Safe         | ⚠️ Warning  | 🚫 Danger (Hard Stop)          |
+| -------------------------------------------- | --------------- | ----------- | ------------------------------ |
+| `is_honeypot`                                | `"no"`          | —           | `"yes"` → **stop immediately** |
+| `open_source`                                | `"yes"`         | `"unknown"` | `"no"`                         |
+| `owner_renounced`                            | `"yes"`         | `"unknown"` | `"no"`                         |
+| `renounced_mint` (SOL)                       | `true`          | —           | `false`                        |
+| `renounced_freeze_account` (SOL)             | `true`          | —           | `false`                        |
+| `rug_ratio`                                  | `< 0.10`        | `0.10–0.30` | `> 0.30`                       |
+| `top_10_holder_rate`                         | `< 0.20`        | `0.20–0.50` | `> 0.50`                       |
+| `creator_token_status`                       | `creator_close` | —           | `creator_hold`                 |
+| `buy_tax` / `sell_tax`                       | `0`             | `0.01–0.05` | `> 0.10`                       |
+| `sniper_count`                               | `< 5`           | `5–20`      | `> 20`                         |
+| `smart_wallets` (from `wallet_tags_stat`)    | `≥ 3`           | `1–2`       | `0` (bearish, not a hard stop) |
+| `renowned_wallets` (from `wallet_tags_stat`) | `≥ 1`           | —           | `0` (neutral, not a hard stop) |
 
 **Final scoring logic:**
+
 - If `is_honeypot = "yes"` → **hard stop immediately**, do not proceed regardless of other signals
 - If other 🚫 fields present → **skip** (strong warning — present to user)
 - `smart_wallets = 0` alone is NOT a hard stop — it means no smart money interest yet, which is bearish but not disqualifying for very new tokens

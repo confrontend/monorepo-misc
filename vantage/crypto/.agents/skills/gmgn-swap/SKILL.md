@@ -1,9 +1,9 @@
 ---
 name: gmgn-swap
-description: "[FINANCIAL EXECUTION] Buy and sell meme coins and crypto tokens on Solana, BSC, Base, or Ethereum — single swap, multi-wallet batch trading, limit orders, stop loss, take profit, trailing stop loss, trailing take profit via GMGN API. Requires explicit user confirmation. Use when user asks to buy, sell, or swap a token, trade from multiple wallets, set a limit order, stop loss, take profit, or check order status."
-argument-hint: "[--chain <chain> --from <wallet> --input-token <addr> --output-token <addr> --amount <n>] | [order get --chain <chain> --order-id <id>] | [gas-price --chain <eth|bsc|base|sol>] | [order strategy list --chain <chain> --group-tag <LimitOrder|STMix>] | [order strategy create --chain <chain> --order-type <limit_order|smart_trade> --sub-order-type <buy_low|buy_high|stop_loss|take_profit|mix_trade> ...]"
+description: '[FINANCIAL EXECUTION] Buy and sell meme coins and crypto tokens on Solana, BSC, Base, or Ethereum — single swap, multi-wallet batch trading, limit orders, stop loss, take profit, trailing stop loss, trailing take profit via GMGN API. Requires explicit user confirmation. Use when user asks to buy, sell, or swap a token, trade from multiple wallets, set a limit order, stop loss, take profit, or check order status.'
+argument-hint: '[--chain <chain> --from <wallet> --input-token <addr> --output-token <addr> --amount <n>] | [order get --chain <chain> --order-id <id>] | [gas-price --chain <eth|bsc|base|sol>] | [order strategy list --chain <chain> --group-tag <LimitOrder|STMix>] | [order strategy create --chain <chain> --order-type <limit_order|smart_trade> --sub-order-type <buy_low|buy_high|stop_loss|take_profit|mix_trade> ...]'
 metadata:
-  cliHelp: "gmgn-cli swap --help"
+  cliHelp: 'gmgn-cli swap --help'
 ---
 
 > ## 🚫 DISABLED IN THIS PROJECT
@@ -63,16 +63,16 @@ This is a hard, code-level barrier — do not attempt to work around it.
 
 ## Sub-commands
 
-| Sub-command | Description |
-|-------------|-------------|
-| `swap` | Submit a token swap |
-| `multi-swap` | Submit token swaps across multiple wallets concurrently (up to 100) |
-| `order quote` | Get a swap quote (no transaction submitted; exist auth — API Key only, no private key needed) |
-| `order get` | Query order status |
-| `gas-price` | Query recommended gas price (low / average / high tiers) for any chain; exist auth (API Key only) |
-| `order strategy create` | Create a limit/strategy order (requires private key) |
-| `order strategy list` | List strategy orders (requires private key) |
-| `order strategy cancel` | Cancel a strategy order (requires private key) |
+| Sub-command             | Description                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------- |
+| `swap`                  | Submit a token swap                                                                               |
+| `multi-swap`            | Submit token swaps across multiple wallets concurrently (up to 100)                               |
+| `order quote`           | Get a swap quote (no transaction submitted; exist auth — API Key only, no private key needed)     |
+| `order get`             | Query order status                                                                                |
+| `gas-price`             | Query recommended gas price (low / average / high tiers) for any chain; exist auth (API Key only) |
+| `order strategy create` | Create a limit/strategy order (requires private key)                                              |
+| `order strategy list`   | List strategy orders (requires private key)                                                       |
+| `order strategy cancel` | Cancel a strategy order (requires private key)                                                    |
 
 ## Supported Chains
 
@@ -84,12 +84,12 @@ Currency tokens are the base/native assets of each chain. They are used to buy o
 
 > ⚠️ **CRITICAL: Always copy currency addresses from this table — NEVER rely on memory or training data.** A wrong address (e.g. `So11111111111111111111111111111111111111111` instead of `So11111111111111111111111111111111111111112`) will cause silent failures or `jupiter has no route` errors with no clear indication of what went wrong.
 
-| Chain  | Currency tokens |
-| ------ | --------------- |
+| Chain  | Currency tokens                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------------------ |
 | `sol`  | SOL (native, `So11111111111111111111111111111111111111112`), USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`) |
-| `bsc`  | BNB (native, `0x0000000000000000000000000000000000000000`), USDC (`0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d`) |
-| `base` | ETH (native, `0x0000000000000000000000000000000000000000`), USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`) |
-| `eth`  | ETH (native, `0x0000000000000000000000000000000000000000`) |
+| `bsc`  | BNB (native, `0x0000000000000000000000000000000000000000`), USDC (`0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d`)    |
+| `base` | ETH (native, `0x0000000000000000000000000000000000000000`), USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)    |
+| `eth`  | ETH (native, `0x0000000000000000000000000000000000000000`)                                                         |
 
 ## Prerequisites
 
@@ -101,16 +101,16 @@ Currency tokens are the base/native assets of each chain. They are used to buy o
 
 All swap-related routes used by this skill go through GMGN's leaky-bucket limiter with `rate=20` and `capacity=20`. Sustained throughput is roughly `20 ÷ weight` requests/second, and the max burst is roughly `floor(20 ÷ weight)` when the bucket is full.
 
-| Command | Route | Weight |
-|---------|-------|--------|
-| `swap` | `POST /v1/trade/swap` | 5 |
-| `multi-swap` | `POST /v1/trade/multi_swap` | 5 |
-| `order quote` | `GET /v1/trade/quote` | 2 |
-| `order get` | `GET /v1/trade/query_order` | 1 |
-| `order strategy create` | `POST /v1/trade/strategy/create` | 5 |
-| `order strategy cancel` | `POST /v1/trade/strategy/cancel` | 2 |
-| `order strategy list` | `GET /v1/trade/strategy/orders` | 1 |
-| `gas-price` | `GET /v1/trade/gas_price` | 1 |
+| Command                 | Route                            | Weight |
+| ----------------------- | -------------------------------- | ------ |
+| `swap`                  | `POST /v1/trade/swap`            | 5      |
+| `multi-swap`            | `POST /v1/trade/multi_swap`      | 5      |
+| `order quote`           | `GET /v1/trade/quote`            | 2      |
+| `order get`             | `GET /v1/trade/query_order`      | 1      |
+| `order strategy create` | `POST /v1/trade/strategy/create` | 5      |
+| `order strategy cancel` | `POST /v1/trade/strategy/cancel` | 2      |
+| `order strategy list`   | `GET /v1/trade/strategy/orders`  | 1      |
+| `gas-price`             | `GET /v1/trade/gas_price`        | 1      |
 
 When a request returns `429`:
 
@@ -170,51 +170,51 @@ gmgn-cli swap \
 
 ## `swap` Parameters
 
-| Parameter | Required | Chain | Description |
-|-----------|----------|-------|-------------|
-| `--chain` | Yes | all | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--from` | Yes | all | Wallet address (must match API Key binding) |
-| `--input-token` | Yes | all | Input token contract address |
-| `--output-token` | Yes | all | Output token contract address |
-| `--amount` | No* | all | Input amount in smallest unit. **Mutually exclusive with `--percent`** — provide one or the other, never both. Required unless `--percent` is used. |
-| `--percent <pct>` | No* | all | Sell percentage of `input_token`, e.g. `50` = 50%, `1` = 1%. Sets `input_amount` to `0` automatically. **Mutually exclusive with `--amount`. Only valid when `input_token` is NOT a currency (SOL/BNB/ETH/USDC).** |
-| `--slippage <n>` | No | all | Slippage tolerance as an integer 0–100, e.g. `30` = 30%. **Mutually exclusive with `--auto-slippage`** — use one or the other. |
-| `--auto-slippage` | No | all | Enable automatic slippage. **Mutually exclusive with `--slippage`.** |
-| `--min-output <n>` | No | all | Minimum output amount |
-| `--anti-mev` | No | sol / bsc / eth | Enable anti-MEV protection — **recommended**; protects against frontrunning and sandwich attacks. Default: on. **Not supported on `base`.** |
-| `--priority-fee <sol>` | No | `sol` | Priority fee in SOL (≥ 0.00001). Required when using `--condition-orders` on SOL. |
-| `--tip-fee <n>` | No | `sol` / `bsc` | Tip fee (SOL ≥ 0.00001 / BSC ≥ 0.000001 BNB). Required when using `--condition-orders` on SOL. |
-| `--gas-price <gwei>` | No | `bsc` / `base` / `eth` | Gas price in gwei (BSC ≥ 0.05 / BASE/ETH ≥ 0.01). Required when using `--condition-orders` on BSC. Mutually exclusive with `--gas-level`. |
-| `--gas-level <level>` | No | `eth` | Gas price tier: `low` / `average` / `high`. Mutually exclusive with `--gas-price`. |
-| `--auto-fee` | No | `eth` | **Only with `--condition-orders`.** GMGN automatically selects the optimal fee. |
-| `--max-fee-per-gas <n>` | No | `bsc` / `base` / `eth` | EIP-1559 max fee per gas. Clamped per chain minimums. Defaults to `--gas-price` if omitted (BASE/ETH). |
-| `--max-priority-fee-per-gas <n>` | No | `bsc` / `base` / `eth` | EIP-1559 max priority fee per gas. Clamped per chain minimums; capped to `--max-fee-per-gas`. |
-| `--condition-orders <json>` | No | sol / bsc / base / eth / robinhood | JSON array of condition sub-orders (take-profit / stop-loss) to attach after a successful swap. **Max 10 sub-orders.** Strategy creation is best-effort: if the swap succeeds but strategy creation fails, the swap result is still returned. **Not supported on `arc` / `stable`.** See ConditionOrder fields below. |
-| `--sell-ratio-type <type>` | No | all | **Only with `--condition-orders`.** Sell ratio basis: `buy_amount` (default) — sells a fixed token amount stored at strategy creation time; `hold_amount` — sells a fixed percentage of the position held at trigger time |
-| `--yes` | No | all | Skip the interactive confirmation prompt. **Rejected unless `GMGN_ALLOW_AUTOMATED_TRADES=1` is set in the environment.** Do not use this to bypass human confirmation. |
+| Parameter                        | Required | Chain                              | Description                                                                                                                                                                                                                                                                                                           |
+| -------------------------------- | -------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--chain`                        | Yes      | all                                | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                                                                                                                                                                                                                                       |
+| `--from`                         | Yes      | all                                | Wallet address (must match API Key binding)                                                                                                                                                                                                                                                                           |
+| `--input-token`                  | Yes      | all                                | Input token contract address                                                                                                                                                                                                                                                                                          |
+| `--output-token`                 | Yes      | all                                | Output token contract address                                                                                                                                                                                                                                                                                         |
+| `--amount`                       | No*      | all                                | Input amount in smallest unit. **Mutually exclusive with `--percent`** — provide one or the other, never both. Required unless `--percent` is used.                                                                                                                                                                   |
+| `--percent <pct>`                | No*      | all                                | Sell percentage of `input_token`, e.g. `50` = 50%, `1` = 1%. Sets `input_amount` to `0` automatically. **Mutually exclusive with `--amount`. Only valid when `input_token` is NOT a currency (SOL/BNB/ETH/USDC).**                                                                                                    |
+| `--slippage <n>`                 | No       | all                                | Slippage tolerance as an integer 0–100, e.g. `30` = 30%. **Mutually exclusive with `--auto-slippage`** — use one or the other.                                                                                                                                                                                        |
+| `--auto-slippage`                | No       | all                                | Enable automatic slippage. **Mutually exclusive with `--slippage`.**                                                                                                                                                                                                                                                  |
+| `--min-output <n>`               | No       | all                                | Minimum output amount                                                                                                                                                                                                                                                                                                 |
+| `--anti-mev`                     | No       | sol / bsc / eth                    | Enable anti-MEV protection — **recommended**; protects against frontrunning and sandwich attacks. Default: on. **Not supported on `base`.**                                                                                                                                                                           |
+| `--priority-fee <sol>`           | No       | `sol`                              | Priority fee in SOL (≥ 0.00001). Required when using `--condition-orders` on SOL.                                                                                                                                                                                                                                     |
+| `--tip-fee <n>`                  | No       | `sol` / `bsc`                      | Tip fee (SOL ≥ 0.00001 / BSC ≥ 0.000001 BNB). Required when using `--condition-orders` on SOL.                                                                                                                                                                                                                        |
+| `--gas-price <gwei>`             | No       | `bsc` / `base` / `eth`             | Gas price in gwei (BSC ≥ 0.05 / BASE/ETH ≥ 0.01). Required when using `--condition-orders` on BSC. Mutually exclusive with `--gas-level`.                                                                                                                                                                             |
+| `--gas-level <level>`            | No       | `eth`                              | Gas price tier: `low` / `average` / `high`. Mutually exclusive with `--gas-price`.                                                                                                                                                                                                                                    |
+| `--auto-fee`                     | No       | `eth`                              | **Only with `--condition-orders`.** GMGN automatically selects the optimal fee.                                                                                                                                                                                                                                       |
+| `--max-fee-per-gas <n>`          | No       | `bsc` / `base` / `eth`             | EIP-1559 max fee per gas. Clamped per chain minimums. Defaults to `--gas-price` if omitted (BASE/ETH).                                                                                                                                                                                                                |
+| `--max-priority-fee-per-gas <n>` | No       | `bsc` / `base` / `eth`             | EIP-1559 max priority fee per gas. Clamped per chain minimums; capped to `--max-fee-per-gas`.                                                                                                                                                                                                                         |
+| `--condition-orders <json>`      | No       | sol / bsc / base / eth / robinhood | JSON array of condition sub-orders (take-profit / stop-loss) to attach after a successful swap. **Max 10 sub-orders.** Strategy creation is best-effort: if the swap succeeds but strategy creation fails, the swap result is still returned. **Not supported on `arc` / `stable`.** See ConditionOrder fields below. |
+| `--sell-ratio-type <type>`       | No       | all                                | **Only with `--condition-orders`.** Sell ratio basis: `buy_amount` (default) — sells a fixed token amount stored at strategy creation time; `hold_amount` — sells a fixed percentage of the position held at trigger time                                                                                             |
+| `--yes`                          | No       | all                                | Skip the interactive confirmation prompt. **Rejected unless `GMGN_ALLOW_AUTOMATED_TRADES=1` is set in the environment.** Do not use this to bypass human confirmation.                                                                                                                                                |
 
 ### ConditionOrder Fields (for `--condition-orders`)
 
 Each element in the `--condition-orders` JSON array supports:
 
-| Field | Required | Type | Description |
-|-------|----------|------|-------------|
-| `order_type` | Yes | string | Sub-order type: `profit_stop` (fixed take-profit), `loss_stop` (fixed stop-loss), `profit_stop_trace` (trailing take-profit), `loss_stop_trace` (trailing stop-loss) |
-| `side` | Yes | string | Always `"sell"` |
-| `price_scale` | Conditional | string | Gain/drop % from entry. Required for `profit_stop` / `loss_stop` / `profit_stop_trace`; optional for `loss_stop_trace`. For `profit_stop` / `profit_stop_trace`: gain % (e.g. `"100"` = +100% / 2× entry). For `loss_stop` / `loss_stop_trace`: drop % (e.g. `"65"` = drops 65%, triggers at 35% of entry). |
-| `sell_ratio` | Yes | string | Percentage of position to sell when triggered, e.g. `"100"` = 100% |
-| `drawdown_rate` | Conditional | string | Required for `profit_stop_trace` and `loss_stop_trace`. Trailing callback %: after price peaks, how far it must fall before the order fires. E.g. `"50"` = 50% drawdown from peak. |
+| Field           | Required    | Type   | Description                                                                                                                                                                                                                                                                                                 |
+| --------------- | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `order_type`    | Yes         | string | Sub-order type: `profit_stop` (fixed take-profit), `loss_stop` (fixed stop-loss), `profit_stop_trace` (trailing take-profit), `loss_stop_trace` (trailing stop-loss)                                                                                                                                        |
+| `side`          | Yes         | string | Always `"sell"`                                                                                                                                                                                                                                                                                             |
+| `price_scale`   | Conditional | string | Gain/drop % from entry. Required for `profit_stop` / `loss_stop` / `profit_stop_trace`; optional for `loss_stop_trace`. For `profit_stop` / `profit_stop_trace`: gain % (e.g. `"100"` = +100% / 2× entry). For `loss_stop` / `loss_stop_trace`: drop % (e.g. `"65"` = drops 65%, triggers at 35% of entry). |
+| `sell_ratio`    | Yes         | string | Percentage of position to sell when triggered, e.g. `"100"` = 100%                                                                                                                                                                                                                                          |
+| `drawdown_rate` | Conditional | string | Required for `profit_stop_trace` and `loss_stop_trace`. Trailing callback %: after price peaks, how far it must fall before the order fires. E.g. `"50"` = 50% drawdown from peak.                                                                                                                          |
 
 **Example — attach take-profit at 2× (+100%) and stop-loss at -60%:**
 
 ```json
 [
-  {"order_type": "profit_stop", "side": "sell", "price_scale": "100", "sell_ratio": "100"},
-  {"order_type": "loss_stop",   "side": "sell", "price_scale": "60",  "sell_ratio": "100"}
+  { "order_type": "profit_stop", "side": "sell", "price_scale": "100", "sell_ratio": "100" },
+  { "order_type": "loss_stop", "side": "sell", "price_scale": "60", "sell_ratio": "100" }
 ]
 ```
 
-**Example — buy token A with 0.01 SOL, take-profit 50% at +100%, take-profit remaining 50% at +300%, stop-loss 100% at -65% (trigger at 35% entry price)   (`hold_amount` mode):**
+**Example — buy token A with 0.01 SOL, take-profit 50% at +100%, take-profit remaining 50% at +300%, stop-loss 100% at -65% (trigger at 35% entry price) (`hold_amount` mode):**
 
 ```bash
 gmgn-cli swap \
@@ -251,39 +251,39 @@ gmgn-cli swap \
 
 ## `swap` / `order get` Response Fields
 
-| Field               | Type   | Description |
-| ------------------- | ------ | ---- |
-| `order_id`          | string | Order ID for follow-up queries |
-| `hash`              | string | Transaction hash |
-| `status`            | string | Order status: `pending` / `processed` / `confirmed` / `failed` / `expired` |
-| `error_code`        | string | Error code on failure |
-| `error_status`      | string | Error description on failure |
+| Field               | Type   | Description                                                                                                        |
+| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| `order_id`          | string | Order ID for follow-up queries                                                                                     |
+| `hash`              | string | Transaction hash                                                                                                   |
+| `status`            | string | Order status: `pending` / `processed` / `confirmed` / `failed` / `expired`                                         |
+| `error_code`        | string | Error code on failure                                                                                              |
+| `error_status`      | string | Error description on failure                                                                                       |
 | `strategy_order_id` | string | Strategy order ID; only present when `--condition-orders` was passed and strategy creation succeeded (best-effort) |
-| `report`            | object | Execution report; only present when `state = 30` and `status = "successful"`. See Report Fields below. |
+| `report`            | object | Execution report; only present when `state = 30` and `status = "successful"`. See Report Fields below.             |
 
 ### Report Fields (present only when `status = "successful"`)
 
-| Field                   | Type    | Description |
-| ----------------------- | ------- | ---- |
-| `input_token`           | string  | Input token contract address |
-| `input_token_decimals`  | integer | Input token decimal places |
-| `swap_mode`             | string  | Swap mode: `ExactIn` / `ExactOut` |
-| `input_amount`          | string  | Actual input consumed (smallest unit) |
-| `output_token`          | string  | Output token contract address |
-| `output_token_decimals` | integer | Output token decimal places |
+| Field                   | Type    | Description                            |
+| ----------------------- | ------- | -------------------------------------- |
+| `input_token`           | string  | Input token contract address           |
+| `input_token_decimals`  | integer | Input token decimal places             |
+| `swap_mode`             | string  | Swap mode: `ExactIn` / `ExactOut`      |
+| `input_amount`          | string  | Actual input consumed (smallest unit)  |
+| `output_token`          | string  | Output token contract address          |
+| `output_token_decimals` | integer | Output token decimal places            |
 | `output_amount`         | string  | Actual output received (smallest unit) |
-| `quote_token`           | string  | Quote token contract address |
-| `quote_decimals`        | integer | Quote token decimal places |
-| `quote_amount`          | string  | Quote amount (smallest unit) |
-| `base_token`            | string  | Base token contract address |
-| `base_decimals`         | integer | Base token decimal places |
-| `base_amount`           | string  | Base token amount (smallest unit) |
-| `price`                 | string  | Execution price (quote/base token) |
-| `price_usd`             | string  | Execution price in USD |
-| `height`                | integer | Block height of execution |
-| `order_height`          | integer | Block height when order was placed |
-| `gas_native`            | string  | Gas fee in native token |
-| `gas_usd`               | string  | Gas fee in USD |
+| `quote_token`           | string  | Quote token contract address           |
+| `quote_decimals`        | integer | Quote token decimal places             |
+| `quote_amount`          | string  | Quote amount (smallest unit)           |
+| `base_token`            | string  | Base token contract address            |
+| `base_decimals`         | integer | Base token decimal places              |
+| `base_amount`           | string  | Base token amount (smallest unit)      |
+| `price`                 | string  | Execution price (quote/base token)     |
+| `price_usd`             | string  | Execution price in USD                 |
+| `height`                | integer | Block height of execution              |
+| `order_height`          | integer | Block height when order was placed     |
+| `gas_native`            | string  | Gas fee in native token                |
+| `gas_usd`               | string  | Gas fee in USD                         |
 
 ## Output Format
 
@@ -318,6 +318,7 @@ Reply "confirm" to proceed.
 ```
 
 **Note**: `Risk Level` is derived from the required security check:
+
 - 🟢 Low: `rug_ratio < 0.1`
 - 🟡 Medium: `rug_ratio 0.1–0.3`
 - 🔴 High: `rug_ratio > 0.3` (requires re-confirmation)
@@ -389,40 +390,40 @@ gmgn-cli multi-swap \
 
 ## `multi-swap` Parameters
 
-| Parameter | Required | Chain | Description |
-|-----------|----------|-------|-------------|
-| `--chain` | Yes | all | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--accounts` | Yes | all | Comma-separated wallet addresses (1–100, all must be bound to the API Key) |
-| `--input-token` | Yes | all | Input token contract address |
-| `--output-token` | Yes | all | Output token contract address |
-| `--input-amount` | No* | all | JSON map of `wallet_address → input amount` (smallest unit). One of `--input-amount`, `--input-amount-bps`, or `--output-amount` is required. |
-| `--input-amount-bps` | No* | all | JSON map of `wallet_address → percent in bps` (1–10000; 5000 = 50%). Only valid when `input_token` is NOT a currency. |
-| `--output-amount` | No* | all | JSON map of `wallet_address → target output amount` (smallest unit). |
-| `--slippage <n>` | No | all | Slippage tolerance as an integer 0–100, e.g. `30` = 30%. Mutually exclusive with `--auto-slippage`. |
-| `--auto-slippage` | No | all | Enable automatic slippage. |
-| `--anti-mev` | No | sol / bsc / eth | Enable anti-MEV protection. Not supported on `base`. |
-| `--priority-fee <sol>` | No | `sol` | Priority fee in SOL (≥ 0.00001). Required when using `--condition-orders` on SOL. |
-| `--tip-fee <amount>` | No | `sol` / `bsc` | Tip fee (SOL ≥ 0.00001 / BSC ≥ 0.000001 BNB). Required when using `--condition-orders` on SOL. |
-| `--gas-price <gwei>` | No | `bsc` / `base` / `eth` | Gas price in gwei (BSC ≥ 0.05 / BASE/ETH ≥ 0.01). Required when using `--condition-orders` on BSC. Mutually exclusive with `--gas-level`. |
-| `--gas-level <level>` | No | `eth` | Gas price tier: `low` / `average` / `high`. Mutually exclusive with `--gas-price`. |
-| `--auto-fee` | No | `eth` | **Only with `--condition-orders`.** GMGN automatically selects the optimal fee. |
-| `--max-fee-per-gas <amount>` | No | `bsc` / `base` / `eth` | EIP-1559 max fee per gas. Clamped per chain minimums. Defaults to `--gas-price` if omitted (BASE/ETH). |
-| `--max-priority-fee-per-gas <amount>` | No | `bsc` / `base` / `eth` | EIP-1559 max priority fee per gas. Clamped per chain minimums; capped to `--max-fee-per-gas`. |
-| `--condition-orders <json>` | No | sol / bsc / base / eth / robinhood | JSON array of condition sub-orders (take-profit / stop-loss) attached to each successful wallet's swap. Same structure as `swap --condition-orders`. Strategy creation is best-effort per wallet. **Not supported on `arc` / `stable`.** |
-| `--sell-ratio-type <type>` | No | all | **Only with `--condition-orders`.** Sell ratio base: `buy_amount` (default) / `hold_amount`. |
-| `--yes` | No | all | Skip the interactive confirmation prompt. **Rejected unless `GMGN_ALLOW_AUTOMATED_TRADES=1` is set in the environment.** |
+| Parameter                             | Required | Chain                              | Description                                                                                                                                                                                                                              |
+| ------------------------------------- | -------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--chain`                             | Yes      | all                                | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                                                                                                                                                          |
+| `--accounts`                          | Yes      | all                                | Comma-separated wallet addresses (1–100, all must be bound to the API Key)                                                                                                                                                               |
+| `--input-token`                       | Yes      | all                                | Input token contract address                                                                                                                                                                                                             |
+| `--output-token`                      | Yes      | all                                | Output token contract address                                                                                                                                                                                                            |
+| `--input-amount`                      | No*      | all                                | JSON map of `wallet_address → input amount` (smallest unit). One of `--input-amount`, `--input-amount-bps`, or `--output-amount` is required.                                                                                            |
+| `--input-amount-bps`                  | No*      | all                                | JSON map of `wallet_address → percent in bps` (1–10000; 5000 = 50%). Only valid when `input_token` is NOT a currency.                                                                                                                    |
+| `--output-amount`                     | No*      | all                                | JSON map of `wallet_address → target output amount` (smallest unit).                                                                                                                                                                     |
+| `--slippage <n>`                      | No       | all                                | Slippage tolerance as an integer 0–100, e.g. `30` = 30%. Mutually exclusive with `--auto-slippage`.                                                                                                                                      |
+| `--auto-slippage`                     | No       | all                                | Enable automatic slippage.                                                                                                                                                                                                               |
+| `--anti-mev`                          | No       | sol / bsc / eth                    | Enable anti-MEV protection. Not supported on `base`.                                                                                                                                                                                     |
+| `--priority-fee <sol>`                | No       | `sol`                              | Priority fee in SOL (≥ 0.00001). Required when using `--condition-orders` on SOL.                                                                                                                                                        |
+| `--tip-fee <amount>`                  | No       | `sol` / `bsc`                      | Tip fee (SOL ≥ 0.00001 / BSC ≥ 0.000001 BNB). Required when using `--condition-orders` on SOL.                                                                                                                                           |
+| `--gas-price <gwei>`                  | No       | `bsc` / `base` / `eth`             | Gas price in gwei (BSC ≥ 0.05 / BASE/ETH ≥ 0.01). Required when using `--condition-orders` on BSC. Mutually exclusive with `--gas-level`.                                                                                                |
+| `--gas-level <level>`                 | No       | `eth`                              | Gas price tier: `low` / `average` / `high`. Mutually exclusive with `--gas-price`.                                                                                                                                                       |
+| `--auto-fee`                          | No       | `eth`                              | **Only with `--condition-orders`.** GMGN automatically selects the optimal fee.                                                                                                                                                          |
+| `--max-fee-per-gas <amount>`          | No       | `bsc` / `base` / `eth`             | EIP-1559 max fee per gas. Clamped per chain minimums. Defaults to `--gas-price` if omitted (BASE/ETH).                                                                                                                                   |
+| `--max-priority-fee-per-gas <amount>` | No       | `bsc` / `base` / `eth`             | EIP-1559 max priority fee per gas. Clamped per chain minimums; capped to `--max-fee-per-gas`.                                                                                                                                            |
+| `--condition-orders <json>`           | No       | sol / bsc / base / eth / robinhood | JSON array of condition sub-orders (take-profit / stop-loss) attached to each successful wallet's swap. Same structure as `swap --condition-orders`. Strategy creation is best-effort per wallet. **Not supported on `arc` / `stable`.** |
+| `--sell-ratio-type <type>`            | No       | all                                | **Only with `--condition-orders`.** Sell ratio base: `buy_amount` (default) / `hold_amount`.                                                                                                                                             |
+| `--yes`                               | No       | all                                | Skip the interactive confirmation prompt. **Rejected unless `GMGN_ALLOW_AUTOMATED_TRADES=1` is set in the environment.**                                                                                                                 |
 
 ## `multi-swap` Response Fields
 
 The response `data` is an array — one element per wallet:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `account` | string | Wallet address |
-| `success` | bool | Whether this wallet's swap succeeded |
-| `error` | string | Error message on failure; absent on success |
-| `error_code` | string | Error code on failure; absent on success |
-| `result` | object | On success: OrderResponse (same fields as `swap` response). On failure: absent. |
+| Field                      | Type   | Description                                                                                                        |
+| -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| `account`                  | string | Wallet address                                                                                                     |
+| `success`                  | bool   | Whether this wallet's swap succeeded                                                                               |
+| `error`                    | string | Error message on failure; absent on success                                                                        |
+| `error_code`               | string | Error code on failure; absent on success                                                                           |
+| `result`                   | object | On success: OrderResponse (same fields as `swap` response). On failure: absent.                                    |
 | `result.strategy_order_id` | string | Strategy order ID; only present when `--condition-orders` was passed and strategy creation succeeded (best-effort) |
 
 ---
@@ -451,14 +452,14 @@ gmgn-cli order quote \
 
 ### `order quote` Response Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `input_token` | string | Input token contract address |
-| `output_token` | string | Output token contract address |
-| `input_amount` | string | Input amount (smallest unit) |
-| `output_amount` | string | Expected output amount (smallest unit) |
-| `min_output_amount` | string | Minimum output after slippage |
-| `slippage` | number | Actual slippage percentage |
+| Field               | Type   | Description                            |
+| ------------------- | ------ | -------------------------------------- |
+| `input_token`       | string | Input token contract address           |
+| `output_token`      | string | Output token contract address          |
+| `input_amount`      | string | Input amount (smallest unit)           |
+| `output_amount`     | string | Expected output amount (smallest unit) |
+| `min_output_amount` | string | Minimum output after slippage          |
+| `slippage`          | number | Actual slippage percentage             |
 
 ---
 
@@ -487,29 +488,29 @@ gmgn-cli gas-price --chain sol
 
 All fields are omitempty — fields unsupported by a chain are omitted. Units are chain-native (wei for EVM chains; lamports / chain-native for SOL).
 
-| Field                    | Type    | Description |
-| ------------------------ | ------- | ----------- |
-| `chain`                  | string  | Chain identifier |
-| `auto`                   | string  | Automatic gas price |
-| `auto_mev`               | string  | Anti-MEV automatic gas price |
-| `last_block`             | int64   | Latest block number |
-| `high`                   | string  | High-priority gas price |
-| `average`                | string  | Average-priority gas price |
-| `low`                    | string  | Low-priority gas price |
-| `suggest_base_fee`       | string  | Suggested base fee |
-| `high_prio_fee`          | string  | High-priority fee |
-| `average_prio_fee`       | string  | Average-priority fee |
-| `low_prio_fee`           | string  | Low-priority fee |
-| `high_prio_fee_mixed`    | string  | High mixed priority fee |
-| `average_prio_fee_mixed` | string  | Average mixed priority fee |
-| `low_prio_fee_mixed`     | string  | Low mixed priority fee |
-| `native_token_usd_price` | float32 | Native token USD price |
-| `high_estimate_time`     | int64   | Estimated confirmation time for high tier (seconds) |
+| Field                    | Type    | Description                                            |
+| ------------------------ | ------- | ------------------------------------------------------ |
+| `chain`                  | string  | Chain identifier                                       |
+| `auto`                   | string  | Automatic gas price                                    |
+| `auto_mev`               | string  | Anti-MEV automatic gas price                           |
+| `last_block`             | int64   | Latest block number                                    |
+| `high`                   | string  | High-priority gas price                                |
+| `average`                | string  | Average-priority gas price                             |
+| `low`                    | string  | Low-priority gas price                                 |
+| `suggest_base_fee`       | string  | Suggested base fee                                     |
+| `high_prio_fee`          | string  | High-priority fee                                      |
+| `average_prio_fee`       | string  | Average-priority fee                                   |
+| `low_prio_fee`           | string  | Low-priority fee                                       |
+| `high_prio_fee_mixed`    | string  | High mixed priority fee                                |
+| `average_prio_fee_mixed` | string  | Average mixed priority fee                             |
+| `low_prio_fee_mixed`     | string  | Low mixed priority fee                                 |
+| `native_token_usd_price` | float32 | Native token USD price                                 |
+| `high_estimate_time`     | int64   | Estimated confirmation time for high tier (seconds)    |
 | `average_estimate_time`  | int64   | Estimated confirmation time for average tier (seconds) |
-| `low_estimate_time`      | int64   | Estimated confirmation time for low tier (seconds) |
-| `high_orign`             | string  | High-priority raw origin value |
-| `average_orign`          | string  | Average-priority raw origin value |
-| `low_orign`              | string  | Low-priority raw origin value |
+| `low_estimate_time`      | int64   | Estimated confirmation time for low tier (seconds)     |
+| `high_orign`             | string  | High-priority raw origin value                         |
+| `average_orign`          | string  | Average-priority raw origin value                      |
+| `low_orign`              | string  | Low-priority raw origin value                          |
 
 ---
 
@@ -557,43 +558,43 @@ gmgn-cli order strategy create \
 
 ## `order strategy create` Parameters
 
-| Parameter | Required | Chain | Description |
-|-----------|----------|-------|-------------|
-| `--chain` | Yes | all | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--from` | Yes | all | Wallet address (must match API Key binding) |
-| `--base-token` | Yes | all | Base token contract address |
-| `--quote-token` | Yes | all | Quote token contract address |
-| `--order-type` | Yes | all | Order type: `limit_order` / `smart_trade`. **`arc` / `stable` support `limit_order` only** — `smart_trade` returns a 400. |
-| `--sub-order-type` | Yes | all | `limit_order`: `buy_low` / `buy_high` / `stop_loss` / `take_profit`; `smart_trade` with condition_orders: `mix_trade` |
-| `--check-price` | No* | all | Trigger price — required for `limit_order`; omit for `smart_trade` (trigger is in the `buy_low` condition order) |
-| `--open-price` | No | all | Open price of the position |
-| `--amount-in` | No* | all | Input amount (smallest unit). Mutually exclusive with `--amount-in-percent` |
-| `--amount-in-percent` | No* | all | Input as percentage (e.g. `50` = 50%). Mutually exclusive with `--amount-in` |
-| `--limit-price-mode` | No | all | `exact` / `slippage` (default: `slippage`) |
-| `--expire-in` | No | all | Order expiry in seconds |
-| `--sell-ratio-type` | No | all | `buy_amount` (default) — when triggered, sells a fixed token amount stored at strategy creation time; `hold_amount` — when triggered, sells a fixed percentage of the position held at trigger time |
-| `--quote-investment` | No | all | Quote token investment amount (`smart_trade`) |
-| `--sell-param` | Yes (`smart_trade`) | all | JSON object of sell-side trade params (slippage, fee, gas, etc.) used when a TP/SL condition fires. **Required for `smart_trade`.** Same fields as the root TradeParam; `slippage` is 0–100 integer. |
-| `--buy-param` | No | all | JSON object of buy-side trade params override for `smart_trade`. Same fields as root TradeParam; `slippage` is 0–100 integer. |
-| `--slippage` | No | all | Slippage tolerance as an integer 0–100, e.g. `30` = 30%. Mutually exclusive with `--auto-slippage`. Defaults to auto-slippage if neither is set. |
-| `--auto-slippage` | No | all | Enable automatic slippage |
-| `--priority-fee` | No | `sol` | Priority fee in SOL (≥ 0.00001). **Required** for SOL. |
-| `--tip-fee` | No | `sol` / `bsc` | Tip fee (SOL ≥ 0.00001 / BSC ≥ 0.000001 BNB). **Required** for SOL. |
-| `--auto-fee` | No | `eth` | Auto fee mode — GMGN automatically selects the optimal fee. |
-| `--gas-price` | No | `bsc` / `base` / `eth` | Gas price in gwei (BSC ≥ 0.05 / BASE/ETH ≥ 0.01). **Required** for BSC. Mutually exclusive with `--gas-level`. |
-| `--gas-level` | No | `eth` | Gas price tier: `low` / `average` / `high`. Mutually exclusive with `--gas-price`. |
-| `--max-fee-per-gas` | No | `bsc` / `base` / `eth` | EIP-1559 max fee per gas. Clamped per chain minimums. |
-| `--max-priority-fee-per-gas` | No | `bsc` / `base` / `eth` | EIP-1559 max priority fee per gas. Clamped per chain minimums; capped to `--max-fee-per-gas`. |
-| `--anti-mev` | No | sol / bsc / eth | Enable anti-MEV protection. Not supported on `base`. |
-| `--condition-orders` | No | sol / bsc / base / eth / robinhood | JSON array of condition sub-orders for `smart_trade`. Must include one `buy_low` entry (with `check_price` lower than `open_price`) plus at least one TP/SL entry. **Not supported on `arc` / `stable`** (`smart_trade` is rejected there). |
-| `--yes` | No | all | Skip the interactive confirmation prompt. **Rejected unless `GMGN_ALLOW_AUTOMATED_TRADES=1` is set in the environment.** |
+| Parameter                    | Required            | Chain                              | Description                                                                                                                                                                                                                                 |
+| ---------------------------- | ------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--chain`                    | Yes                 | all                                | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                                                                                                                                                             |
+| `--from`                     | Yes                 | all                                | Wallet address (must match API Key binding)                                                                                                                                                                                                 |
+| `--base-token`               | Yes                 | all                                | Base token contract address                                                                                                                                                                                                                 |
+| `--quote-token`              | Yes                 | all                                | Quote token contract address                                                                                                                                                                                                                |
+| `--order-type`               | Yes                 | all                                | Order type: `limit_order` / `smart_trade`. **`arc` / `stable` support `limit_order` only** — `smart_trade` returns a 400.                                                                                                                   |
+| `--sub-order-type`           | Yes                 | all                                | `limit_order`: `buy_low` / `buy_high` / `stop_loss` / `take_profit`; `smart_trade` with condition_orders: `mix_trade`                                                                                                                       |
+| `--check-price`              | No*                 | all                                | Trigger price — required for `limit_order`; omit for `smart_trade` (trigger is in the `buy_low` condition order)                                                                                                                            |
+| `--open-price`               | No                  | all                                | Open price of the position                                                                                                                                                                                                                  |
+| `--amount-in`                | No*                 | all                                | Input amount (smallest unit). Mutually exclusive with `--amount-in-percent`                                                                                                                                                                 |
+| `--amount-in-percent`        | No*                 | all                                | Input as percentage (e.g. `50` = 50%). Mutually exclusive with `--amount-in`                                                                                                                                                                |
+| `--limit-price-mode`         | No                  | all                                | `exact` / `slippage` (default: `slippage`)                                                                                                                                                                                                  |
+| `--expire-in`                | No                  | all                                | Order expiry in seconds                                                                                                                                                                                                                     |
+| `--sell-ratio-type`          | No                  | all                                | `buy_amount` (default) — when triggered, sells a fixed token amount stored at strategy creation time; `hold_amount` — when triggered, sells a fixed percentage of the position held at trigger time                                         |
+| `--quote-investment`         | No                  | all                                | Quote token investment amount (`smart_trade`)                                                                                                                                                                                               |
+| `--sell-param`               | Yes (`smart_trade`) | all                                | JSON object of sell-side trade params (slippage, fee, gas, etc.) used when a TP/SL condition fires. **Required for `smart_trade`.** Same fields as the root TradeParam; `slippage` is 0–100 integer.                                        |
+| `--buy-param`                | No                  | all                                | JSON object of buy-side trade params override for `smart_trade`. Same fields as root TradeParam; `slippage` is 0–100 integer.                                                                                                               |
+| `--slippage`                 | No                  | all                                | Slippage tolerance as an integer 0–100, e.g. `30` = 30%. Mutually exclusive with `--auto-slippage`. Defaults to auto-slippage if neither is set.                                                                                            |
+| `--auto-slippage`            | No                  | all                                | Enable automatic slippage                                                                                                                                                                                                                   |
+| `--priority-fee`             | No                  | `sol`                              | Priority fee in SOL (≥ 0.00001). **Required** for SOL.                                                                                                                                                                                      |
+| `--tip-fee`                  | No                  | `sol` / `bsc`                      | Tip fee (SOL ≥ 0.00001 / BSC ≥ 0.000001 BNB). **Required** for SOL.                                                                                                                                                                         |
+| `--auto-fee`                 | No                  | `eth`                              | Auto fee mode — GMGN automatically selects the optimal fee.                                                                                                                                                                                 |
+| `--gas-price`                | No                  | `bsc` / `base` / `eth`             | Gas price in gwei (BSC ≥ 0.05 / BASE/ETH ≥ 0.01). **Required** for BSC. Mutually exclusive with `--gas-level`.                                                                                                                              |
+| `--gas-level`                | No                  | `eth`                              | Gas price tier: `low` / `average` / `high`. Mutually exclusive with `--gas-price`.                                                                                                                                                          |
+| `--max-fee-per-gas`          | No                  | `bsc` / `base` / `eth`             | EIP-1559 max fee per gas. Clamped per chain minimums.                                                                                                                                                                                       |
+| `--max-priority-fee-per-gas` | No                  | `bsc` / `base` / `eth`             | EIP-1559 max priority fee per gas. Clamped per chain minimums; capped to `--max-fee-per-gas`.                                                                                                                                               |
+| `--anti-mev`                 | No                  | sol / bsc / eth                    | Enable anti-MEV protection. Not supported on `base`.                                                                                                                                                                                        |
+| `--condition-orders`         | No                  | sol / bsc / base / eth / robinhood | JSON array of condition sub-orders for `smart_trade`. Must include one `buy_low` entry (with `check_price` lower than `open_price`) plus at least one TP/SL entry. **Not supported on `arc` / `stable`** (`smart_trade` is rejected there). |
+| `--yes`                      | No                  | all                                | Skip the interactive confirmation prompt. **Rejected unless `GMGN_ALLOW_AUTOMATED_TRADES=1` is set in the environment.**                                                                                                                    |
 
 ### `order strategy create` Response Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `order_id` | string | Created strategy order ID |
-| `is_update` | bool | `true` if an existing order was updated, `false` if newly created |
+| Field       | Type   | Description                                                       |
+| ----------- | ------ | ----------------------------------------------------------------- |
+| `order_id`  | string | Created strategy order ID                                         |
+| `is_update` | bool   | `true` if an existing order was updated, `false` if newly created |
 
 ---
 
@@ -615,129 +616,129 @@ gmgn-cli order strategy list --chain sol --group-tag STMix --base-token <token_a
 
 ## `order strategy list` Parameters
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--chain` | Yes | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--type` | No | `open` (default) / `history` |
-| `--from` | No | Filter by wallet address |
-| `--group-tag` | Yes | Filter by order group: `LimitOrder` (limit orders only) / `STMix` (mixed strategy orders: take-profit, stop-loss, trailing take-profit, trailing stop-loss) |
-| `--base-token` | No | Filter by token address |
-| `--page-token` | No | Pagination cursor from previous response |
-| `--limit` | No | Results per page (default 10 for history) |
+| Parameter      | Required | Description                                                                                                                                                 |
+| -------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--chain`      | Yes      | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                                                                             |
+| `--type`       | No       | `open` (default) / `history`                                                                                                                                |
+| `--from`       | No       | Filter by wallet address                                                                                                                                    |
+| `--group-tag`  | Yes      | Filter by order group: `LimitOrder` (limit orders only) / `STMix` (mixed strategy orders: take-profit, stop-loss, trailing take-profit, trailing stop-loss) |
+| `--base-token` | No       | Filter by token address                                                                                                                                     |
+| `--page-token` | No       | Pagination cursor from previous response                                                                                                                    |
+| `--limit`      | No       | Results per page (default 10 for history)                                                                                                                   |
 
 ### `order strategy list` Response Fields
 
-| Field             | Type   | Description |
-| ----------------- | ------ | ---- |
-| `next_page_token` | string | Cursor for next page; empty when no more data |
-| `total`           | int    | Total count (only returned when `--type open`) |
+| Field             | Type   | Description                                       |
+| ----------------- | ------ | ------------------------------------------------- |
+| `next_page_token` | string | Cursor for next page; empty when no more data     |
+| `total`           | int    | Total count (only returned when `--type open`)    |
 | `list`            | array  | Array of strategy order objects; see fields below |
 
 #### `list[]` — Strategy Order Object
 
-| Field                      | Type   | Description |
-| -------------------------- | ------ | ---- |
-| `anti_mev_mode`            | string | Anti-MEV mode string; empty when not set |
-| `auto_slippage`            | bool   | Whether auto slippage is enabled |
-| `base_decimal`             | int    | Base token decimal places |
-| `base_token`               | string | Base token contract address |
-| `chain`                    | string | Chain: `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `close_amount`             | string | Token amount sold on close; empty when order is open |
-| `close_price`              | string | Token price at close; empty when order is open |
-| `close_sell_model`         | string | Sell model used on close; empty when order is open |
-| `close_sign_hash`          | string | Close transaction hash; empty when order is open |
-| `close_time`               | int    | Close timestamp (ms); `0` when order is open |
-| `condition_orders`         | array  | Condition sub-orders; each element is an object — see `condition_orders[]` below |
-| `create_time`              | int    | Creation timestamp (ms) |
-| `custom_rpc`               | string | Custom RPC endpoint; empty string when not set |
-| `dev_sell_ratio`           | string | Dev sell trigger ratio; empty when not set |
+| Field                      | Type   | Description                                                                            |
+| -------------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `anti_mev_mode`            | string | Anti-MEV mode string; empty when not set                                               |
+| `auto_slippage`            | bool   | Whether auto slippage is enabled                                                       |
+| `base_decimal`             | int    | Base token decimal places                                                              |
+| `base_token`               | string | Base token contract address                                                            |
+| `chain`                    | string | Chain: `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                 |
+| `close_amount`             | string | Token amount sold on close; empty when order is open                                   |
+| `close_price`              | string | Token price at close; empty when order is open                                         |
+| `close_sell_model`         | string | Sell model used on close; empty when order is open                                     |
+| `close_sign_hash`          | string | Close transaction hash; empty when order is open                                       |
+| `close_time`               | int    | Close timestamp (ms); `0` when order is open                                           |
+| `condition_orders`         | array  | Condition sub-orders; each element is an object — see `condition_orders[]` below       |
+| `create_time`              | int    | Creation timestamp (ms)                                                                |
+| `custom_rpc`               | string | Custom RPC endpoint; empty string when not set                                         |
+| `dev_sell_ratio`           | string | Dev sell trigger ratio; empty when not set                                             |
 | `drawdown_rate`            | string | Trailing drawdown rate for `profit_stop_trace` / `loss_stop_trace`; empty when not set |
-| `expire_time`              | int    | Expiration timestamp (ms) |
-| `fee`                      | string | Base transaction fee |
-| `gas_price`                | string | Gas price |
-| `is_anti_mev`              | bool   | Whether anti-MEV protection is active |
-| `limit_price_mode`         | string | Limit price mode; empty when not set |
-| `loss_stop`                | string | Stop-loss trigger price; empty when not set |
-| `loss_stop_type`           | string | Stop-loss type; empty when not set |
-| `max_fee_per_gas`          | string | EIP-1559 max fee per gas; EVM only; empty on SOL |
-| `max_priority_fee_per_gas` | string | EIP-1559 max priority fee per gas; EVM only; empty on SOL |
-| `open_amount`              | string | Token amount at open (smallest unit) |
-| `open_price`               | string | Token price at open |
-| `open_sign_hash`           | string | Open transaction hash; empty before confirmed |
-| `order_id`                 | string | Unique order ID (UUID) |
-| `order_statistic`          | object | Cumulative order statistics; see `order_statistic` Object below |
-| `order_type`               | string | Order type: `smart_trade` / `limit_order` |
-| `place_action`             | string | Placement action; empty when not applicable |
-| `prepare_status`           | string | Preparation status; empty when not applicable |
-| `priority_fee`             | string | Priority fee; SOL / BSC only |
-| `profit_stop`              | string | Take-profit trigger price; empty when not set |
-| `profit_stop_type`         | string | Take-profit type; empty when not set |
-| `quote_decimal`            | int    | Quote token decimal places |
-| `quote_investment`         | string | Quote token investment amount (smallest unit) |
-| `quote_token`              | string | Quote token contract address |
-| `reason_by`                | string | Entity that triggered the close; empty when open |
-| `reason_code`              | string | Reason code for the close action; empty when open |
-| `record_high_price`        | string | Highest recorded price since open; used for trailing stops |
-| `sell_param`               | object | Sell transaction parameters; see `sell_param` Object below |
-| `sell_ratio`               | string | Sell ratio; empty when not set |
-| `sell_ratio_type`          | string | Sell ratio base: `buy_amount` / others |
-| `slippage`                 | int    | Slippage tolerance (0 = auto) |
-| `status`                   | string | Order lifecycle status: `open` / `closed` |
-| `strategy_status`          | string | Strategy running status: `running` / `stopped` |
-| `sub_order_type`           | string | Sub-order type: `mix_trade` / others |
-| `tip_fee`                  | string | Tip fee; SOL only |
-| `token_balance`            | string | Remaining token balance; empty when not available |
-| `token_logo`               | string | Token logo URL |
-| `token_name`               | string | Token display name |
-| `token_price`              | string | Current token price; empty when not available |
-| `total_supply`             | string | Token total supply |
-| `version`                  | int    | Order schema version |
-| `wallet_address`           | string | Wallet address that placed the order |
+| `expire_time`              | int    | Expiration timestamp (ms)                                                              |
+| `fee`                      | string | Base transaction fee                                                                   |
+| `gas_price`                | string | Gas price                                                                              |
+| `is_anti_mev`              | bool   | Whether anti-MEV protection is active                                                  |
+| `limit_price_mode`         | string | Limit price mode; empty when not set                                                   |
+| `loss_stop`                | string | Stop-loss trigger price; empty when not set                                            |
+| `loss_stop_type`           | string | Stop-loss type; empty when not set                                                     |
+| `max_fee_per_gas`          | string | EIP-1559 max fee per gas; EVM only; empty on SOL                                       |
+| `max_priority_fee_per_gas` | string | EIP-1559 max priority fee per gas; EVM only; empty on SOL                              |
+| `open_amount`              | string | Token amount at open (smallest unit)                                                   |
+| `open_price`               | string | Token price at open                                                                    |
+| `open_sign_hash`           | string | Open transaction hash; empty before confirmed                                          |
+| `order_id`                 | string | Unique order ID (UUID)                                                                 |
+| `order_statistic`          | object | Cumulative order statistics; see `order_statistic` Object below                        |
+| `order_type`               | string | Order type: `smart_trade` / `limit_order`                                              |
+| `place_action`             | string | Placement action; empty when not applicable                                            |
+| `prepare_status`           | string | Preparation status; empty when not applicable                                          |
+| `priority_fee`             | string | Priority fee; SOL / BSC only                                                           |
+| `profit_stop`              | string | Take-profit trigger price; empty when not set                                          |
+| `profit_stop_type`         | string | Take-profit type; empty when not set                                                   |
+| `quote_decimal`            | int    | Quote token decimal places                                                             |
+| `quote_investment`         | string | Quote token investment amount (smallest unit)                                          |
+| `quote_token`              | string | Quote token contract address                                                           |
+| `reason_by`                | string | Entity that triggered the close; empty when open                                       |
+| `reason_code`              | string | Reason code for the close action; empty when open                                      |
+| `record_high_price`        | string | Highest recorded price since open; used for trailing stops                             |
+| `sell_param`               | object | Sell transaction parameters; see `sell_param` Object below                             |
+| `sell_ratio`               | string | Sell ratio; empty when not set                                                         |
+| `sell_ratio_type`          | string | Sell ratio base: `buy_amount` / others                                                 |
+| `slippage`                 | int    | Slippage tolerance (0 = auto)                                                          |
+| `status`                   | string | Order lifecycle status: `open` / `closed`                                              |
+| `strategy_status`          | string | Strategy running status: `running` / `stopped`                                         |
+| `sub_order_type`           | string | Sub-order type: `mix_trade` / others                                                   |
+| `tip_fee`                  | string | Tip fee; SOL only                                                                      |
+| `token_balance`            | string | Remaining token balance; empty when not available                                      |
+| `token_logo`               | string | Token logo URL                                                                         |
+| `token_name`               | string | Token display name                                                                     |
+| `token_price`              | string | Current token price; empty when not available                                          |
+| `total_supply`             | string | Token total supply                                                                     |
+| `version`                  | int    | Order schema version                                                                   |
+| `wallet_address`           | string | Wallet address that placed the order                                                   |
 
 #### `condition_orders[]` — Condition Sub-Order Object
 
-| Field         | Type   | Description |
-| ------------- | ------ | ---- |
-| `cid`         | string | Condition sub-order ID (UUID) |
+| Field         | Type   | Description                                                                           |
+| ------------- | ------ | ------------------------------------------------------------------------------------- |
+| `cid`         | string | Condition sub-order ID (UUID)                                                         |
 | `order_type`  | string | Sub-order type: `profit_stop` / `loss_stop` / `profit_stop_trace` / `loss_stop_trace` |
-| `side`        | string | Trade side: `sell` |
-| `price_scale` | string | Price ratio relative to open price (string); `profit_stop` / `loss_stop` required |
-| `sell_ratio`  | string | Sell ratio (string), e.g. `"100"` |
-| `check_price` | string | Computed trigger price derived from `price_scale` and open price |
-| `status`      | string | Sub-order status: `cancel` / `success` / `failed` |
+| `side`        | string | Trade side: `sell`                                                                    |
+| `price_scale` | string | Price ratio relative to open price (string); `profit_stop` / `loss_stop` required     |
+| `sell_ratio`  | string | Sell ratio (string), e.g. `"100"`                                                     |
+| `check_price` | string | Computed trigger price derived from `price_scale` and open price                      |
+| `status`      | string | Sub-order status: `cancel` / `success` / `failed`                                     |
 
 #### `order_statistic` Object
 
-| Field                  | Type   | Description |
-| ---------------------- | ------ | ---- |
-| `buy_amount`           | string | Bought token amount (smallest unit) |
-| `buy_quote_price`      | string | Quote token price at buy |
-| `buy_usdt_price`       | string | USDT-denominated price at buy |
-| `quote_profit`         | string | Realized profit in quote token |
-| `sell_amount`          | string | Total token amount sold |
-| `sell_num`             | int    | Total number of sell attempts |
-| `success_sell_amount`  | string | Successfully sold token amount |
-| `success_sell_num`     | int    | Number of successful sells |
-| `usdt_profit`          | string | Realized profit in USDT |
+| Field                 | Type   | Description                         |
+| --------------------- | ------ | ----------------------------------- |
+| `buy_amount`          | string | Bought token amount (smallest unit) |
+| `buy_quote_price`     | string | Quote token price at buy            |
+| `buy_usdt_price`      | string | USDT-denominated price at buy       |
+| `quote_profit`        | string | Realized profit in quote token      |
+| `sell_amount`         | string | Total token amount sold             |
+| `sell_num`            | int    | Total number of sell attempts       |
+| `success_sell_amount` | string | Successfully sold token amount      |
+| `success_sell_num`    | int    | Number of successful sells          |
+| `usdt_profit`         | string | Realized profit in USDT             |
 
 #### `sell_param` Object
 
-| Field                      | Type   | Description |
-| -------------------------- | ------ | ---- |
-| `anti_mev_mode`            | string | Anti-MEV mode for the sell transaction |
-| `auto_fee`                 | bool   | Whether auto fee is enabled for the sell |
-| `auto_slippage`            | bool   | Whether auto slippage is enabled for the sell |
-| `auto_tip`                 | bool   | Whether auto tip is enabled |
-| `custom_rpc`               | string | Custom RPC endpoint; empty string when not set |
-| `fee`                      | string | Sell transaction fee |
-| `gas_price`                | string | Gas price for the sell |
-| `is_anti_mev`              | bool   | Whether anti-MEV protection is active for the sell |
-| `max_fee_per_gas`          | string | EIP-1559 max fee per gas for the sell; EVM only |
+| Field                      | Type   | Description                                              |
+| -------------------------- | ------ | -------------------------------------------------------- |
+| `anti_mev_mode`            | string | Anti-MEV mode for the sell transaction                   |
+| `auto_fee`                 | bool   | Whether auto fee is enabled for the sell                 |
+| `auto_slippage`            | bool   | Whether auto slippage is enabled for the sell            |
+| `auto_tip`                 | bool   | Whether auto tip is enabled                              |
+| `custom_rpc`               | string | Custom RPC endpoint; empty string when not set           |
+| `fee`                      | string | Sell transaction fee                                     |
+| `gas_price`                | string | Gas price for the sell                                   |
+| `is_anti_mev`              | bool   | Whether anti-MEV protection is active for the sell       |
+| `max_fee_per_gas`          | string | EIP-1559 max fee per gas for the sell; EVM only          |
 | `max_priority_fee_per_gas` | string | EIP-1559 max priority fee per gas for the sell; EVM only |
-| `max_tip_fee`              | string | Maximum tip fee; empty when not set |
-| `priority_fee`             | string | Priority fee for the sell; SOL / BSC only |
-| `slippage`                 | int    | Slippage tolerance for the sell (0 = auto) |
-| `tip_fee`                  | string | Tip fee for the sell; SOL only |
+| `max_tip_fee`              | string | Maximum tip fee; empty when not set                      |
+| `priority_fee`             | string | Priority fee for the sell; SOL / BSC only                |
+| `slippage`                 | int    | Slippage tolerance for the sell (0 = auto)               |
+| `tip_fee`                  | string | Tip fee for the sell; SOL only                           |
 
 ---
 
@@ -753,13 +754,13 @@ gmgn-cli order strategy cancel \
 
 ## `order strategy cancel` Parameters
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--chain` | Yes | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--from` | Yes | Wallet address (must match API Key binding) |
-| `--order-id` | Yes | Order ID to cancel |
-| `--order-type` | No | Order type: `limit_order` (limit order) / `smart_trade` (mixed strategy order: take-profit, stop-loss, trailing take-profit, trailing stop-loss) |
-| `--close-sell-model` | No | Sell model when closing the order |
+| Parameter            | Required | Description                                                                                                                                      |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--chain`            | Yes      | `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                                                                  |
+| `--from`             | Yes      | Wallet address (must match API Key binding)                                                                                                      |
+| `--order-id`         | Yes      | Order ID to cancel                                                                                                                               |
+| `--order-type`       | No       | Order type: `limit_order` (limit order) / `smart_trade` (mixed strategy order: take-profit, stop-loss, trailing take-profit, trailing stop-loss) |
+| `--close-sell-model` | No       | Sell model when closing the order                                                                                                                |
 
 ---
 
@@ -802,6 +803,7 @@ gmgn-cli token security --chain <chain> --address <output_token>
 ```
 
 Check the two critical fields:
+
 - **`is_honeypot`**: If `"yes"` → **abort immediately**. Display: "🚫 HONEYPOT DETECTED — swap aborted." Do NOT proceed.
 - **`rug_ratio`**: If `> 0.3` → display 🔴 High Risk warning and require explicit re-confirmation from the user before proceeding.
 
@@ -824,9 +826,9 @@ For full token research before swapping, see [`docs/workflow-token-research.md`]
 - **Order polling** — After a swap, if `status` is not yet `confirmed` / `failed` / `expired`, poll with `order get` up to 3 times at 5-second intervals before reporting a timeout. Once confirmed, display the trade result using `report.input_amount` and `report.output_amount` (convert from smallest unit using `report.input_token_decimals` / `report.output_token_decimals`), e.g. "Spent 0.1 SOL → received 98.5 USDC" or "Sold 1000 TOKEN → received 0.08 SOL".
 - **Block explorer links** — After a successful swap, display a clickable explorer link for the returned `hash`:
 
-  | Chain | Explorer |
-  |-------|----------|
-  | sol   | `https://solscan.io/tx/<hash>` |
-  | bsc   | `https://bscscan.com/tx/<hash>` |
+  | Chain | Explorer                         |
+  | ----- | -------------------------------- |
+  | sol   | `https://solscan.io/tx/<hash>`   |
+  | bsc   | `https://bscscan.com/tx/<hash>`  |
   | base  | `https://basescan.org/tx/<hash>` |
   | eth   | `https://etherscan.io/tx/<hash>` |

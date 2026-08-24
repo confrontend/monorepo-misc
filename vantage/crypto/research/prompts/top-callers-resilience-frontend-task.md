@@ -90,6 +90,7 @@ state for `status === "paused"`:
 `!status.running` and `status.status !== 'completed'`. A `'paused'` status is not a hard failure
 in the old sense — it means "waiting on a scheduled retry, or waiting on you." Update the
 orchestrator to:
+
 - Treat `'paused'` as "still in progress, but idle" — keep polling (the backend will flip it back
   to `'running'` on its own bounded retry, or the user can intervene), rather than immediately
   throwing and setting `topCallerWorkflowStage` to a generic "stopped" message.

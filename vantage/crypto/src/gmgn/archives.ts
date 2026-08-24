@@ -59,7 +59,11 @@ const extractEventCount = (value: unknown): number | null => {
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     if (Array.isArray(record.data)) return record.data.length;
-    if (record.data && typeof record.data === 'object' && Array.isArray((record.data as Record<string, unknown>).list)) {
+    if (
+      record.data &&
+      typeof record.data === 'object' &&
+      Array.isArray((record.data as Record<string, unknown>).list)
+    ) {
       return ((record.data as Record<string, unknown>).list as unknown[]).length;
     }
     if (Array.isArray(record.list)) return record.list.length;
@@ -97,9 +101,10 @@ const readOneArchive = (directory: string, fileName: string): GmgnArchiveSummary
     // its contents are never returned to a caller of listGmgnArchives.
     try {
       const actualCount = extractEventCount(JSON.parse(responseEntry.data.toString('utf8')));
-      eventCountVerified = actualCount !== null && manifest.eventCount !== null
-        ? actualCount === manifest.eventCount
-        : null;
+      eventCountVerified =
+        actualCount !== null && manifest.eventCount !== null
+          ? actualCount === manifest.eventCount
+          : null;
     } catch {
       eventCountVerified = null;
     }
@@ -124,7 +129,9 @@ const readOneArchive = (directory: string, fileName: string): GmgnArchiveSummary
 };
 
 /** Lists locally archived GMGN capture ZIPs with a re-verified hash, structure, and safe manifest. Never returns raw captured events or credentials. */
-export const listGmgnArchives = (directory: string = gmgnArchiveDirectory): GmgnArchiveSummary[] => {
+export const listGmgnArchives = (
+  directory: string = gmgnArchiveDirectory,
+): GmgnArchiveSummary[] => {
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter((name) => name.endsWith('.zip'))

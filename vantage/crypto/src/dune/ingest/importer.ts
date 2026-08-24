@@ -66,13 +66,17 @@ const parseJsonRecords = (rawSource: string): SourceRecord[] => {
   }
   return records.map((value, index) => ({
     rowNumber: index + 1,
-    value: value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : { __raw_value: value },
+    value:
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : { __raw_value: value },
   }));
 };
 
-const parseSourceRecords = (rawSource: string, extension: string): {
+const parseSourceRecords = (
+  rawSource: string,
+  extension: string,
+): {
   format: 'csv' | 'json';
   records: SourceRecord[];
 } => {
@@ -82,7 +86,9 @@ const parseSourceRecords = (rawSource: string, extension: string): {
   if (extension === '.json') {
     return { format: 'json', records: parseJsonRecords(rawSource) };
   }
-  throw new Error(`Unsupported Dune export extension "${extension || '(none)'}"; expected .csv or .json.`);
+  throw new Error(
+    `Unsupported Dune export extension "${extension || '(none)'}"; expected .csv or .json.`,
+  );
 };
 
 const insertAuditRecord = (
@@ -94,19 +100,23 @@ const insertAuditRecord = (
   errors: string[],
   capturedAt: string,
 ): void => {
-  database.prepare(`
+  database
+    .prepare(
+      `
     INSERT INTO dune_import_records
       (batch_id, row_number, token_address, status, errors, raw_payload, captured_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    batchId,
-    record.rowNumber,
-    tokenAddress,
-    status,
-    JSON.stringify(errors),
-    JSON.stringify(record.value),
-    capturedAt,
-  );
+  `,
+    )
+    .run(
+      batchId,
+      record.rowNumber,
+      tokenAddress,
+      status,
+      JSON.stringify(errors),
+      JSON.stringify(record.value),
+      capturedAt,
+    );
 };
 
 export const importDuneContent = (
@@ -119,19 +129,26 @@ export const importDuneContent = (
 ): DuneImportSummary => {
   const sourceSha256 = createHash('sha256').update(rawSource, 'utf8').digest('hex');
   const sourcePath = sourceName;
-  const priorBatch = database.prepare(`
+  const priorBatch = database
+    .prepare(
+      `
     SELECT id, imported_count, skipped_count, error_count
     FROM dune_import_batches
     WHERE source_sha256 = ?
-  `).get(sourceSha256) as {
-    id: number;
-    imported_count: number;
-    skipped_count: number;
-    error_count: number;
-  } | undefined;
+  `,
+    )
+    .get(sourceSha256) as
+    | {
+        id: number;
+        imported_count: number;
+        skipped_count: number;
+        error_count: number;
+      }
+    | undefined;
 
   if (priorBatch) {
-    const totalRecords = priorBatch.imported_count + priorBatch.skipped_count + priorBatch.error_count;
+    const totalRecords =
+      priorBatch.imported_count + priorBatch.skipped_count + priorBatch.error_count;
     const summary: DuneImportSummary = {
       batchId: priorBatch.id,
       sourcePath,
@@ -154,27 +171,47 @@ export const importDuneContent = (
     records = parsed.records;
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause);
-    const result = database.prepare(`
+    const result = database
+      .prepare(
+        `
       INSERT INTO dune_import_batches
         (source_path, source_sha256, source_format, raw_source, status, error_count,
          imported_at, completed_at, error)
       VALUES (?, ?, ?, ?, 'failed', 1, ?, ?, ?)
-    `).run(sourcePath, sourceSha256, format, rawSource, importedAt, importedAt, error);
+    `,
+      )
+      .run(sourcePath, sourceSha256, format, rawSource, importedAt, importedAt, error);
     const batchId = Number(result.lastInsertRowid);
-    database.prepare(`
+    database
+      .prepare(
+        `
       INSERT INTO dune_import_records
         (batch_id, row_number, status, errors, raw_payload, captured_at)
       VALUES (?, 0, 'error', ?, ?, ?)
-    `).run(batchId, JSON.stringify([error]), JSON.stringify({ raw_source: rawSource }), importedAt);
+    `,
+      )
+      .run(batchId, JSON.stringify([error]), JSON.stringify({ raw_source: rawSource }), importedAt);
     logger.error(`[dune] import failed: imported=0 skipped=0 errors=1 (${error})`);
-    return { batchId, sourcePath, sourceSha256, imported: 0, skipped: 0, errors: 1, duplicateFile: false };
+    return {
+      batchId,
+      sourcePath,
+      sourceSha256,
+      imported: 0,
+      skipped: 0,
+      errors: 1,
+      duplicateFile: false,
+    };
   }
 
-  const batchResult = database.prepare(`
+  const batchResult = database
+    .prepare(
+      `
     INSERT INTO dune_import_batches
       (source_path, source_sha256, source_format, raw_source, status, imported_at)
     VALUES (?, ?, ?, ?, 'processing', ?)
-  `).run(sourcePath, sourceSha256, format, rawSource, importedAt);
+  `,
+    )
+    .run(sourcePath, sourceSha256, format, rawSource, importedAt);
   const batchId = Number(batchResult.lastInsertRowid);
   let imported = 0;
   let skipped = 0;
@@ -232,20 +269,28 @@ export const importDuneContent = (
       }
     }
 
-    database.prepare(`
+    database
+      .prepare(
+        `
       UPDATE dune_import_batches
       SET status = 'completed', imported_count = ?, skipped_count = ?, error_count = ?, completed_at = ?
       WHERE id = ?
-    `).run(imported, skipped, errors, now().toISOString(), batchId);
+    `,
+      )
+      .run(imported, skipped, errors, now().toISOString(), batchId);
     database.exec('COMMIT;');
   } catch (cause) {
     database.exec('ROLLBACK;');
     const error = cause instanceof Error ? cause.message : String(cause);
-    database.prepare(`
+    database
+      .prepare(
+        `
       UPDATE dune_import_batches
       SET status = 'failed', error = ?, completed_at = ?
       WHERE id = ?
-    `).run(error, now().toISOString(), batchId);
+    `,
+      )
+      .run(error, now().toISOString(), batchId);
     throw cause;
   }
 
@@ -259,11 +304,12 @@ export const importDuneFile = (
   logger: ImportLogger = defaultLogger,
   now: () => Date = () => new Date(),
   tokenSource: string = 'dune',
-): DuneImportSummary => importDuneContent(
-  database,
-  path.resolve(filePath),
-  readFileSync(filePath, 'utf8'),
-  logger,
-  now,
-  tokenSource,
-);
+): DuneImportSummary =>
+  importDuneContent(
+    database,
+    path.resolve(filePath),
+    readFileSync(filePath, 'utf8'),
+    logger,
+    now,
+    tokenSource,
+  );

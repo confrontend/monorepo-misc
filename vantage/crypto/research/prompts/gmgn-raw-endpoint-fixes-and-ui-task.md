@@ -46,6 +46,7 @@ fixtures too, not just the code.
 **Fix:** the query-derived fields (`chain`, `period`, `category`/`type`, `window`, `orderby`,
 `has_token`) are not recoverable from `requestPath` at all in the current capture format. Two
 options, pick one and state which in `progress.md`:
+
 1. (Preferred, more accurate) Change `extension/content-main.js` to also capture a redacted query
    string (strip only the known-sensitive keys — `device_id`, `fp_did`, `client_id`, and
    anything matching the existing `sensitiveKey` pattern already in that file — instead of
@@ -67,22 +68,25 @@ of bug cannot silently reappear.
 
 ## Bug 2 (confirmed by reading the code): raw-endpoint counts are conflated with signal counts
 
-In `browserImport.ts`, the `imported`/`skipped` counters are shared across *all* capture types:
+In `browserImport.ts`, the `imported`/`skipped` counters are shared across _all_ capture types:
+
 ```ts
 if (requestPath.includes(ENDPOINT_PATHS.radar)) {
   const result = storeRadarSnapshot(...);
   imported += result.inserted; skipped += result.skipped; // same variables as signal storage below
 ```
+
 This means a browser-capture upload containing, say, 40 real GMGN signals and 5 radar snapshots
 reports `imported: 45` — the radar/wallet-rank/smart-money/Twitter snapshot counts are silently
 mixed into what the UI (`ui/main.tsx`'s import-result panel, redesigned recently to be "vivid")
 presents as **"N new signals added."** That's now misleading, not vivid — a direct regression
 against the reason that panel was redesigned. `BrowserImportResult` needs separate fields:
+
 ```ts
 export type BrowserImportResult = {
   batchId: number;
-  imported: number;    // keep meaning "signals" only — do not touch this definition
-  skipped: number;      // same — signals only
+  imported: number; // keep meaning "signals" only — do not touch this definition
+  skipped: number; // same — signals only
   errors: number;
   issueBreakdown: Record<string, number>;
   otherCaptures: number;
@@ -90,7 +94,8 @@ export type BrowserImportResult = {
   duplicateFile: boolean;
   archivePath: string | null;
   archiveSha256: string | null;
-  rawEndpoints: {                 // new
+  rawEndpoints: {
+    // new
     radar: { imported: number; skipped: number };
     walletRank: { imported: number; skipped: number };
     smartMoney: { imported: number; skipped: number };
@@ -98,6 +103,7 @@ export type BrowserImportResult = {
   };
 };
 ```
+
 Update `importGmgnBrowserCapture` to track these separately (four more counter variables, or a
 small accumulator object) and stop folding raw-endpoint results into the signal `imported`/
 `skipped` totals. Update the `duplicateFile` early-return branch too (it currently only
@@ -132,6 +138,7 @@ New module `src/gmgn/rawEndpointReads.ts` (or add to `rawSnapshot.ts` if you pre
 your call), exporting simple, unopinionated read functions, most-recent-first, with a `limit`
 parameter (default something reasonable like 50, matching how other list endpoints in this app
 behave):
+
 - `listRadarSnapshots(database, limit?)`
 - `listWalletRankSnapshots(database, limit?)`
 - `listSmartMoneyWalletStats(database, walletAddress?, limit?)` — optionally filterable by

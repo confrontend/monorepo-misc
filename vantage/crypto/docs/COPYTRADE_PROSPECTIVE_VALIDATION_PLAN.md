@@ -19,9 +19,9 @@ This is different from the prospective question:
 
 The application should not treat the need for future leaderboard snapshots as a reason to discard or delay the historical-consistency analysis. It should report both tracks with different labels: historical evidence can be shown now; prospective selection evidence remains pending until the required dated snapshots exist.
 
-**Why an early-vs-recent split is not just re-testing the same selection bias.** GMGN's leaderboard ranks by 30-day PnL (`reported_pnl_30d` in the stored roster). A period drawn from *before* that 30-day window — for example days 31–90 back — sits mostly outside the window that got the wallet noticed in the first place. It is not a fully independent sample (the wallet was still chosen with some knowledge of its longer track record), but performing well in a period the ranking metric does not directly reward is meaningfully harder to fake than performing well in the window that does. State this reasoning in the report itself so a reader understands why the early period counts as evidence, not decoration.
+**Why an early-vs-recent split is not just re-testing the same selection bias.** GMGN's leaderboard ranks by 30-day PnL (`reported_pnl_30d` in the stored roster). A period drawn from _before_ that 30-day window — for example days 31–90 back — sits mostly outside the window that got the wallet noticed in the first place. It is not a fully independent sample (the wallet was still chosen with some knowledge of its longer track record), but performing well in a period the ranking metric does not directly reward is meaningfully harder to fake than performing well in the window that does. State this reasoning in the report itself so a reader understands why the early period counts as evidence, not decoration.
 
-**Data-depth check before this can run as described.** Verified against the live database: only **14 of 25** currently-fetched wallets have ≥60 days of stored trade history, and only **9 of 25** have the full ≥90 days a 60-vs-30 split implies; **6 of 25** have under 30 days total (as little as 5.7 days). The report must gate on this explicitly per wallet — an `insufficient historical depth` outcome, in the same spirit as the existing `thin` verdict — rather than silently computing a two-period comparison over 6 days of data as if it meant the same thing as one computed over 90. Where depth is short of a fixed split, prefer a wallet-relative split (e.g. first half vs. second half of *available* history) over silently lowering the bar, and label which one was used.
+**Data-depth check before this can run as described.** Verified against the live database: only **14 of 25** currently-fetched wallets have ≥60 days of stored trade history, and only **9 of 25** have the full ≥90 days a 60-vs-30 split implies; **6 of 25** have under 30 days total (as little as 5.7 days). The report must gate on this explicitly per wallet — an `insufficient historical depth` outcome, in the same spirit as the existing `thin` verdict — rather than silently computing a two-period comparison over 6 days of data as if it meant the same thing as one computed over 90. Where depth is short of a fixed split, prefer a wallet-relative split (e.g. first half vs. second half of _available_ history) over silently lowering the bar, and label which one was used.
 
 ## 1. What already exists
 
@@ -42,26 +42,26 @@ The current historical wallet report remains useful as a screen. It is not a wal
 
 ## 2. Source responsibilities
 
-| Need | Preferred source | Role |
-|---|---|---|
-| Who ranked at time T and under which filters | GMGN browser capture | Freeze the roster and exact leaderboard request as it appeared at selection time. |
-| Target wallet's later buys and sells | Official GMGN wallet activity | Detect and preserve future wallet actions, including source transaction identifiers and raw payloads. |
-| On-chain trade, fee, and landed success verification | Dune Solana tables | Retrospective verification after a freshness buffer; batch many transactions into one execution. |
-| Approximate copier price after a delay | Dune Solana DEX trades | Select a deterministic qualifying trade at or after the simulated copier time. This is a proxy, not a historical GMGN route quote. |
-| Live route, price-impact, and quote evidence | Optional GMGN Trade API | Prospective shadow quotes only, if separate access is approved. Never required for the first simulation and never used to place an order. |
-| Attempts that never reached the chain | Local prospective telemetry | Dune cannot observe these; until captured, model them only as explicit sensitivity assumptions. |
+| Need                                                 | Preferred source              | Role                                                                                                                                      |
+| ---------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Who ranked at time T and under which filters         | GMGN browser capture          | Freeze the roster and exact leaderboard request as it appeared at selection time.                                                         |
+| Target wallet's later buys and sells                 | Official GMGN wallet activity | Detect and preserve future wallet actions, including source transaction identifiers and raw payloads.                                     |
+| On-chain trade, fee, and landed success verification | Dune Solana tables            | Retrospective verification after a freshness buffer; batch many transactions into one execution.                                          |
+| Approximate copier price after a delay               | Dune Solana DEX trades        | Select a deterministic qualifying trade at or after the simulated copier time. This is a proxy, not a historical GMGN route quote.        |
+| Live route, price-impact, and quote evidence         | Optional GMGN Trade API       | Prospective shadow quotes only, if separate access is approved. Never required for the first simulation and never used to place an order. |
+| Attempts that never reached the chain                | Local prospective telemetry   | Dune cannot observe these; until captured, model them only as explicit sensitivity assumptions.                                           |
 
 Dune is deliberately not the live detector. It is the delayed validation and enrichment source. The implemented prescreen currently requires a **24-hour minimum signal age** before a first Dune submission (`MIN_SIGNAL_AGE_HOURS = 24`). This plan reuses that real rule; it does not claim that a three-day buffer exists. The rule was selected from the project's recovery evidence: recovered checkpoints had a median 18.6-hour gap, a maximum observed gap of 33.6 hours, and first-attempt success was already 98.4% at a 6–24-hour delay. Any change to 24 hours must be versioned and preregistered.
 
 ## 3. Data and code needed by open item
 
-| Open item | Code change | New data required |
-|---|---|---|
-| Historical consistency (early vs. recent) | Two-slice aggregation reusing `performanceByPeriod`, a per-wallet depth gate, and a distinct **Historically consistent** label. | None — computed from trades already stored. |
-| Walk-forward testing | Immutable experiment/cohort tables, a **Freeze selection** action, and a future-only evaluator that rejects every trade at or before selection time. | Time must pass after each frozen selection so later trades exist. |
-| More independent leaderboard snapshots | Capture-health UI, legacy-provenance label, and a fixed capture protocol. Existing provenance storage can be reused. | Repeated GMGN captures using exactly the same filter and ordering. |
-| Realistic copy simulation | Reuse `copytrade_trades.observed_timestamp`/`fetched_at` with explicit live-poll provenance, add Dune validation/enrichment, a versioned simulation engine, cost assumptions, fill/miss rules, and separate reports. | Empirical detection delays, mature Dune trade evidence, and optionally prospective GMGN quotes. |
-| Older snapshots lack exact provenance | Label and quarantine them from formal experiments. Do not modify their raw evidence. | This cannot be repaired retroactively. Formal testing begins with the first fully provenanced capture. |
+| Open item                                 | Code change                                                                                                                                                                                                          | New data required                                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Historical consistency (early vs. recent) | Two-slice aggregation reusing `performanceByPeriod`, a per-wallet depth gate, and a distinct **Historically consistent** label.                                                                                      | None — computed from trades already stored.                                                            |
+| Walk-forward testing                      | Immutable experiment/cohort tables, a **Freeze selection** action, and a future-only evaluator that rejects every trade at or before selection time.                                                                 | Time must pass after each frozen selection so later trades exist.                                      |
+| More independent leaderboard snapshots    | Capture-health UI, legacy-provenance label, and a fixed capture protocol. Existing provenance storage can be reused.                                                                                                 | Repeated GMGN captures using exactly the same filter and ordering.                                     |
+| Realistic copy simulation                 | Reuse `copytrade_trades.observed_timestamp`/`fetched_at` with explicit live-poll provenance, add Dune validation/enrichment, a versioned simulation engine, cost assumptions, fill/miss rules, and separate reports. | Empirical detection delays, mature Dune trade evidence, and optionally prospective GMGN quotes.        |
+| Older snapshots lack exact provenance     | Label and quarantine them from formal experiments. Do not modify their raw evidence.                                                                                                                                 | This cannot be repaired retroactively. Formal testing begins with the first fully provenanced capture. |
 
 ## 4. Implementation plan
 
@@ -286,12 +286,12 @@ If GMGN grants separate Trade API access, capture fixed-size prospective shadow 
 
 Use four labels. The first two are backward-looking and available now or soon; the last two are forward-looking and require the walk-forward machinery in Phases 1–4:
 
-| Label | Required evidence |
-|---|---|
-| **Screen pass** | Current historical descriptive screen. Already implemented. |
-| **Historically consistent** | Phase 0a: positive, sufficiently covered performance in both the early and recent slices of a wallet's own already-stored history. Backward-looking only — never presented as, or upgraded into, prospective evidence. |
-| **Stable candidate** | Positive, sufficiently covered future performance across multiple independent frozen cohorts and dates. |
-| **Prospective copy candidate** | Stable candidate whose copy simulation remains viable after measured delay, costs, misses, and conservative sensitivity assumptions. |
+| Label                          | Required evidence                                                                                                                                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Screen pass**                | Current historical descriptive screen. Already implemented.                                                                                                                                                            |
+| **Historically consistent**    | Phase 0a: positive, sufficiently covered performance in both the early and recent slices of a wallet's own already-stored history. Backward-looking only — never presented as, or upgraded into, prospective evidence. |
+| **Stable candidate**           | Positive, sufficiently covered future performance across multiple independent frozen cohorts and dates.                                                                                                                |
+| **Prospective copy candidate** | Stable candidate whose copy simulation remains viable after measured delay, costs, misses, and conservative sensitivity assumptions.                                                                                   |
 
 A wallet can be **Historically consistent** without ever becoming a **Stable candidate** (or vice versa) — the two labels are evaluated independently and must never be merged into one composite score, since one is available immediately from stored data and the other necessarily takes weeks to mature; conflating them would let backward-looking evidence quietly stand in for the prospective evidence this plan exists to produce.
 

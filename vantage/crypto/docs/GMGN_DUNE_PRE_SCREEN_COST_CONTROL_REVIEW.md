@@ -40,14 +40,14 @@ The Dune query is submitted in batches. A batch is the cost unit, and each batch
 
 These are collection states, not financial judgments:
 
-| Disposition | Meaning | Dune action |
-|---|---|---|
-| `eligible_core` | Valid, non-duplicate, priority observation selected for the core sample | Submit |
-| `eligible_audit` | Randomly selected from a normally excluded stratum | Submit |
-| `deferred_repeat` | Observation is not the lifetime-first token/type research unit; raw row remains stored | Do not submit in the core queue |
-| `deferred_budget` | Valid row outside the current budget after core and audit quotas are filled | Do not submit now |
-| `invalid_for_query` | Missing/invalid token address, signal type, or UTC observation time | Do not submit; retain and explain |
-| `already_measured` | Existing outcome is complete; retry/in-flight status is tracked separately by the measurement planner | Do not submit |
+| Disposition         | Meaning                                                                                               | Dune action                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `eligible_core`     | Valid, non-duplicate, priority observation selected for the core sample                               | Submit                            |
+| `eligible_audit`    | Randomly selected from a normally excluded stratum                                                    | Submit                            |
+| `deferred_repeat`   | Observation is not the lifetime-first token/type research unit; raw row remains stored                | Do not submit in the core queue   |
+| `deferred_budget`   | Valid row outside the current budget after core and audit quotas are filled                           | Do not submit now                 |
+| `invalid_for_query` | Missing/invalid token address, signal type, or UTC observation time                                   | Do not submit; retain and explain |
+| `already_measured`  | Existing outcome is complete; retry/in-flight status is tracked separately by the measurement planner | Do not submit                     |
 
 `deferred_*` must remain re-evaluable. A later budget increase, new capture window, or changed cooldown should be able to promote a deferred row without re-importing it.
 

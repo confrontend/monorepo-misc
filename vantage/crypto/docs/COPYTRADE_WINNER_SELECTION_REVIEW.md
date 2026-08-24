@@ -61,13 +61,13 @@ This is a realized-trade analysis of the target wallet. It is not a copy-trading
 
 The rules are defined in `src/copytrade/evaluate.ts`:
 
-| Rule | Current requirement |
-|---|---:|
-| Completed usable sells | At least 100 |
-| Usable history span | At least 7 days |
-| Typical outcome | Median return must be positive |
-| Risk flags | None; any risk flag blocks a positive verdict |
-| Requested history coverage | Must not be truncated |
+| Rule                       |                           Current requirement |
+| -------------------------- | --------------------------------------------: |
+| Completed usable sells     |                                  At least 100 |
+| Usable history span        |                               At least 7 days |
+| Typical outcome            |                Median return must be positive |
+| Risk flags                 | None; any risk flag blocks a positive verdict |
+| Requested history coverage |                         Must not be truncated |
 
 Verdict precedence is:
 

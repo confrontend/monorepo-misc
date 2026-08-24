@@ -3,7 +3,10 @@ import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDatabase } from '../src/platform/db/client.js';
 import { applyMigrations } from '../src/platform/db/schema.js';
-import { readFullyCoveredWallets, validateFullyCoveredPeriodDays } from '../src/copytrade/scrutiny/fullyCovered.js';
+import {
+  readFullyCoveredWallets,
+  validateFullyCoveredPeriodDays,
+} from '../src/copytrade/scrutiny/fullyCovered.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');
@@ -11,20 +14,41 @@ const setup = (): DatabaseSync => {
   return database;
 };
 
-const insertCoverage = (database: DatabaseSync, wallet: string, values: { chain?: string; complete?: number; truncated?: number; period?: number; updatedAt?: string }): void => {
-  database.prepare(
-    `INSERT INTO copytrade_wallet_coverage
+const insertCoverage = (
+  database: DatabaseSync,
+  wallet: string,
+  values: {
+    chain?: string;
+    complete?: number;
+    truncated?: number;
+    period?: number;
+    updatedAt?: string;
+  },
+): void => {
+  database
+    .prepare(
+      `INSERT INTO copytrade_wallet_coverage
        (wallet_address, chain, requests_used, truncated, coverage_complete, requested_period_days, stop_reason, updated_at)
      VALUES (?, ?, 2, ?, ?, ?, 'no_more_data', ?)`,
-  ).run(wallet, values.chain ?? 'sol', values.truncated ?? 0, values.complete ?? 1, values.period ?? 30, values.updatedAt ?? '2026-08-21T00:00:00.000Z');
+    )
+    .run(
+      wallet,
+      values.chain ?? 'sol',
+      values.truncated ?? 0,
+      values.complete ?? 1,
+      values.period ?? 30,
+      values.updatedAt ?? '2026-08-21T00:00:00.000Z',
+    );
 };
 
 const insertTrade = (database: DatabaseSync, wallet: string, id: string): void => {
-  database.prepare(
-    `INSERT INTO copytrade_trades
+  database
+    .prepare(
+      `INSERT INTO copytrade_trades
        (wallet_address, chain, tx_hash, event_type, token_address, observed_timestamp, raw_payload, fetched_at, dedup_key)
      VALUES (?, 'sol', ?, 'sell', 'TOKEN', 1787260000, '{}', '2026-08-21T00:00:00.000Z', ?)`,
-  ).run(wallet, id, `${wallet}:${id}`);
+    )
+    .run(wallet, id, `${wallet}:${id}`);
 };
 
 test('fully covered reader applies chain, marker, truncation, and requested-period filters', () => {
@@ -40,13 +64,23 @@ test('fully covered reader applies chain, marker, truncation, and requested-peri
 
     const result = readFullyCoveredWallets(database);
     assert.equal(result.requestedPeriodDays, 30);
-    assert.deepEqual(result.rows, [{
-      walletAddress: 'KEEP', chain: 'sol', periodDays: 30, stopReason: 'no_more_data',
-      updatedAt: '2026-08-21T02:00:00.000Z', storedTradeCount: 2, coverageComplete: true, truncated: false,
-    }]);
+    assert.deepEqual(result.rows, [
+      {
+        walletAddress: 'KEEP',
+        chain: 'sol',
+        periodDays: 30,
+        stopReason: 'no_more_data',
+        updatedAt: '2026-08-21T02:00:00.000Z',
+        storedTradeCount: 2,
+        coverageComplete: true,
+        truncated: false,
+      },
+    ]);
     assert.equal(result.coverageSemantics.label, '100% verified local history coverage');
     assert.equal(result.coverageSemantics.excludesDuneOutcomeCoverage, true);
-  } finally { database.close(); }
+  } finally {
+    database.close();
+  }
 });
 
 test('fully covered period validation is loud and bounded', () => {

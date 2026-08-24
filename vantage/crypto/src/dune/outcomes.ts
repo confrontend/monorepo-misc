@@ -1,12 +1,40 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { readDuneApiKey } from './client/credentials.js';
-import { waitForDuneCapacity, withDuneSubmissionLock } from '../copytrade/simulation/duneScheduler.js';
+import {
+  waitForDuneCapacity,
+  withDuneSubmissionLock,
+} from '../copytrade/simulation/duneScheduler.js';
 import { MIN_SIGNAL_AGE_MS } from './prescreen.js';
 import { archiveJsonWithHash } from '../platform/archive.js';
 
-export type OutcomeCandidate = { id: number; tokenAddress: string; symbol: string | null; signalType: string | null; observedAt: string; marketCap: number | null };
+export type OutcomeCandidate = {
+  id: number;
+  tokenAddress: string;
+  symbol: string | null;
+  signalType: string | null;
+  observedAt: string;
+  marketCap: number | null;
+};
 type Signal = OutcomeCandidate;
-export type DuneOutcome = { signal: Signal; checkpoints: Array<{ label: string; targetTimestamp: string; result: { priceUsd: number | null; status: string; priceHttpStatus: number | null; archivePath: string | null; matchedTradeAt: string | null; matchedTxId: string | null; matchedOuterInstructionIndex: number | null; matchedInnerInstructionIndex: number | null; matchedTradeAgeSeconds: number | null; sourceRunId: number | null } }> };
+export type DuneOutcome = {
+  signal: Signal;
+  checkpoints: Array<{
+    label: string;
+    targetTimestamp: string;
+    result: {
+      priceUsd: number | null;
+      status: string;
+      priceHttpStatus: number | null;
+      archivePath: string | null;
+      matchedTradeAt: string | null;
+      matchedTxId: string | null;
+      matchedOuterInstructionIndex: number | null;
+      matchedInnerInstructionIndex: number | null;
+      matchedTradeAgeSeconds: number | null;
+      sourceRunId: number | null;
+    };
+  }>;
+};
 
 // Every horizon after 'signal' itself. Adding a checkpoint here costs nothing extra against
 // Dune — it's one more UNION ALL row scanned against trade data already fetched for the same
@@ -20,7 +48,10 @@ const CHECKPOINT_OFFSETS: Array<{ label: string; unit: 'minute' | 'hour'; amount
 ];
 export const CHECKPOINT_LABELS = ['signal', ...CHECKPOINT_OFFSETS.map((offset) => offset.label)];
 
-export const listOutcomeCandidates = (database: DatabaseSync, limit?: number): OutcomeCandidate[] => {
+export const listOutcomeCandidates = (
+  database: DatabaseSync,
+  limit?: number,
+): OutcomeCandidate[] => {
   const base = `
     SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap
     FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address
@@ -41,8 +72,16 @@ const LATEST_CHECKPOINT_OFFSET_MS = 3 * 60 * 60_000; // '+3h', the widest CHECKP
 const CHECKPOINT_LOOKBACK_MS = 24 * 60 * 60_000;
 
 const sqlFor = (signals: Signal[]): string => {
-  const values = signals.map((s) => `(${s.id}, '${s.tokenAddress.replaceAll("'", "''")}', '${(s.signalType ?? '').replaceAll("'", "''")}', from_iso8601_timestamp('${s.observedAt}'))`).join(',\n        ');
-  const checkpointUnions = CHECKPOINT_OFFSETS.map((offset) => `UNION ALL SELECT signal_id, token_address, signal_type, signal_at, '${offset.label}', date_add('${offset.unit}', ${offset.amount}, signal_at) FROM target_signals`).join('\n    ');
+  const values = signals
+    .map(
+      (s) =>
+        `(${s.id}, '${s.tokenAddress.replaceAll("'", "''")}', '${(s.signalType ?? '').replaceAll("'", "''")}', from_iso8601_timestamp('${s.observedAt}'))`,
+    )
+    .join(',\n        ');
+  const checkpointUnions = CHECKPOINT_OFFSETS.map(
+    (offset) =>
+      `UNION ALL SELECT signal_id, token_address, signal_type, signal_at, '${offset.label}', date_add('${offset.unit}', ${offset.amount}, signal_at) FROM target_signals`,
+  ).join('\n    ');
   const signalTimesMs = signals.map((s) => Date.parse(s.observedAt));
   const scanFrom = new Date(Math.min(...signalTimesMs) - CHECKPOINT_LOOKBACK_MS).toISOString();
   const scanTo = new Date(Math.max(...signalTimesMs) + LATEST_CHECKPOINT_OFFSET_MS).toISOString();
@@ -53,10 +92,18 @@ const sqlFor = (signals: Signal[]): string => {
 const fetchWithRetry = async (url: string, init: RequestInit, attempts = 3): Promise<Response> => {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try { return await fetch(url, init); }
-    catch (error) { lastError = error; if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1))); }
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts)
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
   }
-  const cause = lastError instanceof Error && lastError.cause instanceof Error ? ` (${lastError.cause.message})` : '';
+  const cause =
+    lastError instanceof Error && lastError.cause instanceof Error
+      ? ` (${lastError.cause.message})`
+      : '';
   throw new Error(`Dune network request failed after ${attempts} attempts${cause}`);
 };
 
@@ -84,92 +131,206 @@ const isCheckpointPending = (targetAt: unknown, completedAt: string | null): boo
   return targetMs > completedMs;
 };
 
-const rowsToOutcomes = (signals: Signal[], rows: Array<Record<string, unknown>>, completedAt: string | null, sourceRunId: number | null = null, requestedAt: string | null = null): DuneOutcome[] => signals.map((signal) => ({
-  signal,
-  checkpoints: rows.filter((row) => Number(row.signal_id) === signal.id).map((row) => {
-    const pending = isCheckpointPending(row.target_at, completedAt);
-    const rawPriceUsd = typeof row.price_usd === 'number' ? row.price_usd : null;
-    const matchedTradeAt = pending ? null : (typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null);
-    const targetMs = parseDuneTimestamp(row.target_at);
-    const matchedMs = parseDuneTimestamp(matchedTradeAt);
-    const queriedTooSoon = !pending && requestedAt !== null && parseDuneTimestamp(requestedAt) !== null && parseDuneTimestamp(signal.observedAt) !== null && parseDuneTimestamp(requestedAt)! < parseDuneTimestamp(signal.observedAt)! + MIN_SIGNAL_AGE_MS;
-    return {
-      label: String(row.checkpoint),
-      targetTimestamp: String(row.target_at),
-      result: {
-        // Raw Dune data (raw_result in the DB, and the archived file) is never modified by
-        // this — only the interpreted value returned here is nulled out for a pending
-        // checkpoint, so the underlying evidence stays intact for later re-inspection.
-        priceUsd: pending || queriedTooSoon ? null : rawPriceUsd,
-        priceHttpStatus: null,
-        archivePath: null,
-        // 'checkpoint not yet reached' means the window hasn't elapsed — re-measuring this
-        // signal later may produce a real value; it is not automatically backfilled.
-        // 'not available' means the window has elapsed but no trade was found at all.
-        status: pending ? 'checkpoint not yet reached' : queriedTooSoon ? 'premature query — needs re-verification' : (rawPriceUsd == null ? 'not available' : 'received'),
-        matchedTradeAt: queriedTooSoon ? null : matchedTradeAt,
-        matchedTxId: pending || queriedTooSoon ? null : (typeof row.matched_tx_id === 'string' ? row.matched_tx_id : null),
-        matchedOuterInstructionIndex: pending || queriedTooSoon ? null : (typeof row.matched_outer_instruction_index === 'number' ? row.matched_outer_instruction_index : null),
-        matchedInnerInstructionIndex: pending || queriedTooSoon ? null : (typeof row.matched_inner_instruction_index === 'number' ? row.matched_inner_instruction_index : null),
-        matchedTradeAgeSeconds: matchedMs !== null && targetMs !== null && !pending && !queriedTooSoon ? (targetMs - matchedMs) / 1000 : null,
-        sourceRunId,
-      },
-    };
-  }),
-}));
+const rowsToOutcomes = (
+  signals: Signal[],
+  rows: Array<Record<string, unknown>>,
+  completedAt: string | null,
+  sourceRunId: number | null = null,
+  requestedAt: string | null = null,
+): DuneOutcome[] =>
+  signals.map((signal) => ({
+    signal,
+    checkpoints: rows
+      .filter((row) => Number(row.signal_id) === signal.id)
+      .map((row) => {
+        const pending = isCheckpointPending(row.target_at, completedAt);
+        const rawPriceUsd = typeof row.price_usd === 'number' ? row.price_usd : null;
+        const matchedTradeAt = pending
+          ? null
+          : typeof row.matched_trade_at === 'string'
+            ? row.matched_trade_at
+            : null;
+        const targetMs = parseDuneTimestamp(row.target_at);
+        const matchedMs = parseDuneTimestamp(matchedTradeAt);
+        const queriedTooSoon =
+          !pending &&
+          requestedAt !== null &&
+          parseDuneTimestamp(requestedAt) !== null &&
+          parseDuneTimestamp(signal.observedAt) !== null &&
+          parseDuneTimestamp(requestedAt)! <
+            parseDuneTimestamp(signal.observedAt)! + MIN_SIGNAL_AGE_MS;
+        return {
+          label: String(row.checkpoint),
+          targetTimestamp: String(row.target_at),
+          result: {
+            // Raw Dune data (raw_result in the DB, and the archived file) is never modified by
+            // this — only the interpreted value returned here is nulled out for a pending
+            // checkpoint, so the underlying evidence stays intact for later re-inspection.
+            priceUsd: pending || queriedTooSoon ? null : rawPriceUsd,
+            priceHttpStatus: null,
+            archivePath: null,
+            // 'checkpoint not yet reached' means the window hasn't elapsed — re-measuring this
+            // signal later may produce a real value; it is not automatically backfilled.
+            // 'not available' means the window has elapsed but no trade was found at all.
+            status: pending
+              ? 'checkpoint not yet reached'
+              : queriedTooSoon
+                ? 'premature query — needs re-verification'
+                : rawPriceUsd == null
+                  ? 'not available'
+                  : 'received',
+            matchedTradeAt: queriedTooSoon ? null : matchedTradeAt,
+            matchedTxId:
+              pending || queriedTooSoon
+                ? null
+                : typeof row.matched_tx_id === 'string'
+                  ? row.matched_tx_id
+                  : null,
+            matchedOuterInstructionIndex:
+              pending || queriedTooSoon
+                ? null
+                : typeof row.matched_outer_instruction_index === 'number'
+                  ? row.matched_outer_instruction_index
+                  : null,
+            matchedInnerInstructionIndex:
+              pending || queriedTooSoon
+                ? null
+                : typeof row.matched_inner_instruction_index === 'number'
+                  ? row.matched_inner_instruction_index
+                  : null,
+            matchedTradeAgeSeconds:
+              matchedMs !== null && targetMs !== null && !pending && !queriedTooSoon
+                ? (targetMs - matchedMs) / 1000
+                : null,
+            sourceRunId,
+          },
+        };
+      }),
+  }));
 
-export const measureDuneOutcomes = async (database: DatabaseSync, signalIds: number[]): Promise<DuneOutcome[]> => {
+export const measureDuneOutcomes = async (
+  database: DatabaseSync,
+  signalIds: number[],
+): Promise<DuneOutcome[]> => {
   const requestedIds = [...new Set(signalIds.filter((id) => Number.isInteger(id)))].slice(0, 25);
   if (!requestedIds.length) throw new Error('Select at least one signal to measure.');
-  const signals = database.prepare(`SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id IN (${requestedIds.map(() => '?').join(',')}) AND g.token_address IS NOT NULL AND g.observed_at IS NOT NULL`).all(...requestedIds) as unknown as Signal[];
-  if (!signals.length) throw new Error('No selected signals have usable token addresses and timestamps.');
-  const inFlightRows = database.prepare(`SELECT id, signal_ids AS signalIds, status FROM dune_outcome_runs WHERE status IN ('submitted', 'running', 'timed_out')`).all() as unknown as Array<{ id: number; signalIds: string; status: string }>;
+  const signals = database
+    .prepare(
+      `SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id IN (${requestedIds.map(() => '?').join(',')}) AND g.token_address IS NOT NULL AND g.observed_at IS NOT NULL`,
+    )
+    .all(...requestedIds) as unknown as Signal[];
+  if (!signals.length)
+    throw new Error('No selected signals have usable token addresses and timestamps.');
+  const inFlightRows = database
+    .prepare(
+      `SELECT id, signal_ids AS signalIds, status FROM dune_outcome_runs WHERE status IN ('submitted', 'running', 'timed_out')`,
+    )
+    .all() as unknown as Array<{ id: number; signalIds: string; status: string }>;
   const inFlight = new Map<number, { runId: number; status: string }>();
   for (const run of inFlightRows) {
     let ids: unknown;
-    try { ids = JSON.parse(run.signalIds); } catch { continue; }
+    try {
+      ids = JSON.parse(run.signalIds);
+    } catch {
+      continue;
+    }
     if (!Array.isArray(ids)) continue;
     for (const rawId of ids) {
       const id = Number(rawId);
       if (Number.isInteger(id)) inFlight.set(id, { runId: run.id, status: run.status });
     }
   }
-  const duplicateIds = signals.filter((signal) => inFlight.has(signal.id)).map((signal) => {
-    const run = inFlight.get(signal.id)!;
-    return `#${signal.id} (run ${run.runId}, ${run.status})`;
-  });
-  if (duplicateIds.length) throw new Error(`Dune request already in flight for ${duplicateIds.join(', ')}. Wait for it to finish; no duplicate request was sent.`);
-  const apiKey = readDuneApiKey(); if (!apiKey) throw new Error('Dune API key not found. Add it to .secrets/dune/api-key.txt.');
-  const query = sqlFor(signals); const requestedAt = new Date().toISOString();
-  const headers = { 'X-DUNE-API-KEY': apiKey, 'content-type': 'application/json', accept: 'application/json' };
+  const duplicateIds = signals
+    .filter((signal) => inFlight.has(signal.id))
+    .map((signal) => {
+      const run = inFlight.get(signal.id)!;
+      return `#${signal.id} (run ${run.runId}, ${run.status})`;
+    });
+  if (duplicateIds.length)
+    throw new Error(
+      `Dune request already in flight for ${duplicateIds.join(', ')}. Wait for it to finish; no duplicate request was sent.`,
+    );
+  const apiKey = readDuneApiKey();
+  if (!apiKey) throw new Error('Dune API key not found. Add it to .secrets/dune/api-key.txt.');
+  const query = sqlFor(signals);
+  const requestedAt = new Date().toISOString();
+  const headers = {
+    'X-DUNE-API-KEY': apiKey,
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
   const submitted = await withDuneSubmissionLock(async () => {
     await waitForDuneCapacity(database, { reconcile: async () => undefined });
-    const inserted = database.prepare(`INSERT INTO dune_outcome_runs (signal_ids, query_sql, status, requested_at) VALUES (?, ?, 'submitted', ?)`).run(JSON.stringify(signals.map((s) => s.id)), query, requestedAt); const runId = Number(inserted.lastInsertRowid);
-    const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', { method: 'POST', headers, body: JSON.stringify({ sql: query, performance: 'medium' }) });
-    const executionRaw = await execute.text(); if (!execute.ok) throw new Error(`Dune execution HTTP ${execute.status}`);
-    const execution = JSON.parse(executionRaw) as { execution_id?: string }; if (!execution.execution_id) throw new Error('Dune did not return an execution id.');
-    database.prepare(`UPDATE dune_outcome_runs SET execution_id = ?, status = 'running' WHERE id = ?`).run(execution.execution_id, runId);
+    const inserted = database
+      .prepare(
+        `INSERT INTO dune_outcome_runs (signal_ids, query_sql, status, requested_at) VALUES (?, ?, 'submitted', ?)`,
+      )
+      .run(JSON.stringify(signals.map((s) => s.id)), query, requestedAt);
+    const runId = Number(inserted.lastInsertRowid);
+    const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ sql: query, performance: 'medium' }),
+    });
+    const executionRaw = await execute.text();
+    if (!execute.ok) throw new Error(`Dune execution HTTP ${execute.status}`);
+    const execution = JSON.parse(executionRaw) as { execution_id?: string };
+    if (!execution.execution_id) throw new Error('Dune did not return an execution id.');
+    database
+      .prepare(`UPDATE dune_outcome_runs SET execution_id = ?, status = 'running' WHERE id = ?`)
+      .run(execution.execution_id, runId);
     return { runId, executionRaw, execution };
   });
   const { runId, executionRaw, execution } = submitted;
-  let state = 'QUERY_STATE_EXECUTING'; let resultRaw = '';
+  let state = 'QUERY_STATE_EXECUTING';
+  let resultRaw = '';
   for (let attempt = 0; attempt < 60 && state !== 'QUERY_STATE_COMPLETED'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    const statusResponse = await fetch(`https://api.dune.com/api/v1/execution/${execution.execution_id}/status`, { headers }); const statusBody = await statusResponse.json() as { state?: string; error?: string }; state = statusBody.state ?? 'QUERY_STATE_FAILED'; if (state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED') { database.prepare(`UPDATE dune_outcome_runs SET status = 'failed', completed_at = ? WHERE id = ?`).run(new Date().toISOString(), runId); throw new Error(statusBody.error ?? `Dune query ${state}`); }
+    const statusResponse = await fetch(
+      `https://api.dune.com/api/v1/execution/${execution.execution_id}/status`,
+      { headers },
+    );
+    const statusBody = (await statusResponse.json()) as { state?: string; error?: string };
+    state = statusBody.state ?? 'QUERY_STATE_FAILED';
+    if (state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED') {
+      database
+        .prepare(`UPDATE dune_outcome_runs SET status = 'failed', completed_at = ? WHERE id = ?`)
+        .run(new Date().toISOString(), runId);
+      throw new Error(statusBody.error ?? `Dune query ${state}`);
+    }
   }
   if (state !== 'QUERY_STATE_COMPLETED') {
     // Keep this run as a durable in-flight marker. Dune may still finish after
     // the local 60-second wait; retrying here would create duplicate work and
     // make the historical evidence ambiguous.
     database.prepare(`UPDATE dune_outcome_runs SET status = 'timed_out' WHERE id = ?`).run(runId);
-    throw new Error(`Dune query did not complete within 60 seconds (run ${runId} remains protected from duplicate retries).`);
+    throw new Error(
+      `Dune query did not complete within 60 seconds (run ${runId} remains protected from duplicate retries).`,
+    );
   }
-  const resultResponse = await fetch(`https://api.dune.com/api/v1/execution/${execution.execution_id}/results`, { headers }); resultRaw = await resultResponse.text(); if (!resultResponse.ok) throw new Error(`Dune results HTTP ${resultResponse.status}`);
-  const { archivePath, sha256 } = archiveJsonWithHash('dune-outcomes', 'dune-outcome', runId, { runId, requestedAt, execution: executionRaw, query, result: JSON.parse(resultRaw) });
+  const resultResponse = await fetch(
+    `https://api.dune.com/api/v1/execution/${execution.execution_id}/results`,
+    { headers },
+  );
+  resultRaw = await resultResponse.text();
+  if (!resultResponse.ok) throw new Error(`Dune results HTTP ${resultResponse.status}`);
+  const { archivePath, sha256 } = archiveJsonWithHash('dune-outcomes', 'dune-outcome', runId, {
+    runId,
+    requestedAt,
+    execution: executionRaw,
+    query,
+    result: JSON.parse(resultRaw),
+  });
   const completedAt = new Date().toISOString();
-  database.prepare(`UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`).run(resultRaw, archivePath, sha256, completedAt, runId);
-  const rows = ((JSON.parse(resultRaw) as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? []);
-   return rowsToOutcomes(signals, rows, completedAt, runId);
+  database
+    .prepare(
+      `UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`,
+    )
+    .run(resultRaw, archivePath, sha256, completedAt, runId);
+  const rows =
+    (JSON.parse(resultRaw) as { result?: { rows?: Array<Record<string, unknown>> } }).result
+      ?.rows ?? [];
+  return rowsToOutcomes(signals, rows, completedAt, runId);
 };
 
 // A single, cheap (one status poll, no waiting) check of one stuck run against Dune's real
@@ -182,9 +343,22 @@ export const reconcileDuneRun = async (
   database: DatabaseSync,
   runId: number,
 ): Promise<'completed' | 'failed' | 'still_running' | 'not_found' | 'no_api_key'> => {
-  const run = database.prepare(`SELECT id, status, execution_id AS executionId, requested_at AS requestedAt, query_sql AS querySql FROM dune_outcome_runs WHERE id = ?`).get(runId) as { id: number; status: string; executionId: string | null; requestedAt: string; querySql: string } | undefined;
+  const run = database
+    .prepare(
+      `SELECT id, status, execution_id AS executionId, requested_at AS requestedAt, query_sql AS querySql FROM dune_outcome_runs WHERE id = ?`,
+    )
+    .get(runId) as
+    | {
+        id: number;
+        status: string;
+        executionId: string | null;
+        requestedAt: string;
+        querySql: string;
+      }
+    | undefined;
   if (!run) return 'not_found';
-  if (!['submitted', 'running', 'timed_out'].includes(run.status)) return run.status === 'completed' ? 'completed' : 'failed';
+  if (!['submitted', 'running', 'timed_out'].includes(run.status))
+    return run.status === 'completed' ? 'completed' : 'failed';
 
   if (!run.executionId) {
     // The process died between submitting the request and recording Dune's execution id, so
@@ -192,7 +366,9 @@ export const reconcileDuneRun = async (
     // is still genuinely in flight, then write it off so its signals become eligible again.
     const ageMs = Date.now() - new Date(run.requestedAt).getTime();
     if (ageMs < 10 * 60_000) return 'still_running';
-    database.prepare(`UPDATE dune_outcome_runs SET status = 'failed', completed_at = ? WHERE id = ?`).run(new Date().toISOString(), runId);
+    database
+      .prepare(`UPDATE dune_outcome_runs SET status = 'failed', completed_at = ? WHERE id = ?`)
+      .run(new Date().toISOString(), runId);
     return 'failed';
   }
 
@@ -202,50 +378,119 @@ export const reconcileDuneRun = async (
 
   let statusBody: { state?: string; error?: string };
   try {
-    const statusResponse = await fetch(`https://api.dune.com/api/v1/execution/${run.executionId}/status`, { headers });
-    statusBody = await statusResponse.json() as { state?: string; error?: string };
-  } catch { return 'still_running'; }
+    const statusResponse = await fetch(
+      `https://api.dune.com/api/v1/execution/${run.executionId}/status`,
+      { headers },
+    );
+    statusBody = (await statusResponse.json()) as { state?: string; error?: string };
+  } catch {
+    return 'still_running';
+  }
 
   const state = statusBody.state ?? '';
   if (state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED') {
-    database.prepare(`UPDATE dune_outcome_runs SET status = 'failed', completed_at = ? WHERE id = ?`).run(new Date().toISOString(), runId);
+    database
+      .prepare(`UPDATE dune_outcome_runs SET status = 'failed', completed_at = ? WHERE id = ?`)
+      .run(new Date().toISOString(), runId);
     return 'failed';
   }
   if (state !== 'QUERY_STATE_COMPLETED') return 'still_running';
 
-  const resultResponse = await fetch(`https://api.dune.com/api/v1/execution/${run.executionId}/results`, { headers });
+  const resultResponse = await fetch(
+    `https://api.dune.com/api/v1/execution/${run.executionId}/results`,
+    { headers },
+  );
   const resultRaw = await resultResponse.text();
   if (!resultResponse.ok) return 'still_running'; // transient Dune-side issue; try again next reconcile pass
 
-  const { archivePath, sha256 } = archiveJsonWithHash('dune-outcomes', 'dune-outcome', runId, { runId, requestedAt: run.requestedAt, query: run.querySql, reconciledFrom: 'status-poll', statusAtReconcile: statusBody, result: JSON.parse(resultRaw) });
+  const { archivePath, sha256 } = archiveJsonWithHash('dune-outcomes', 'dune-outcome', runId, {
+    runId,
+    requestedAt: run.requestedAt,
+    query: run.querySql,
+    reconciledFrom: 'status-poll',
+    statusAtReconcile: statusBody,
+    result: JSON.parse(resultRaw),
+  });
   const completedAt = new Date().toISOString();
-  database.prepare(`UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`).run(resultRaw, archivePath, sha256, completedAt, runId);
+  database
+    .prepare(
+      `UPDATE dune_outcome_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`,
+    )
+    .run(resultRaw, archivePath, sha256, completedAt, runId);
   return 'completed';
 };
 
-export type DuneReconcileSummary = { checked: number; completed: number; failed: number; stillRunning: number; noApiKey: number; runIds: { completed: number[]; failed: number[]; stillRunning: number[] } };
+export type DuneReconcileSummary = {
+  checked: number;
+  completed: number;
+  failed: number;
+  stillRunning: number;
+  noApiKey: number;
+  runIds: { completed: number[]; failed: number[]; stillRunning: number[] };
+};
 
 // Sweeps every stuck run once. Called opportunistically (before a fresh measurement batch, or
 // via an explicit UI action) rather than on a timer, since each check is a real Dune API call.
-export const reconcileStuckDuneRuns = async (database: DatabaseSync): Promise<DuneReconcileSummary> => {
-  const stuckRuns = database.prepare(`SELECT id FROM dune_outcome_runs WHERE status IN ('submitted', 'running', 'timed_out') ORDER BY id ASC`).all() as unknown as Array<{ id: number }>;
-  const summary: DuneReconcileSummary = { checked: stuckRuns.length, completed: 0, failed: 0, stillRunning: 0, noApiKey: 0, runIds: { completed: [], failed: [], stillRunning: [] } };
+export const reconcileStuckDuneRuns = async (
+  database: DatabaseSync,
+): Promise<DuneReconcileSummary> => {
+  const stuckRuns = database
+    .prepare(
+      `SELECT id FROM dune_outcome_runs WHERE status IN ('submitted', 'running', 'timed_out') ORDER BY id ASC`,
+    )
+    .all() as unknown as Array<{ id: number }>;
+  const summary: DuneReconcileSummary = {
+    checked: stuckRuns.length,
+    completed: 0,
+    failed: 0,
+    stillRunning: 0,
+    noApiKey: 0,
+    runIds: { completed: [], failed: [], stillRunning: [] },
+  };
   for (const run of stuckRuns) {
     const outcome = await reconcileDuneRun(database, run.id);
-    if (outcome === 'completed') { summary.completed += 1; summary.runIds.completed.push(run.id); }
-    else if (outcome === 'failed') { summary.failed += 1; summary.runIds.failed.push(run.id); }
-    else if (outcome === 'no_api_key') { summary.noApiKey += 1; break; } // no key configured; further checks would fail identically
-    else { summary.stillRunning += 1; summary.runIds.stillRunning.push(run.id); }
+    if (outcome === 'completed') {
+      summary.completed += 1;
+      summary.runIds.completed.push(run.id);
+    } else if (outcome === 'failed') {
+      summary.failed += 1;
+      summary.runIds.failed.push(run.id);
+    } else if (outcome === 'no_api_key') {
+      summary.noApiKey += 1;
+      break;
+    } // no key configured; further checks would fail identically
+    else {
+      summary.stillRunning += 1;
+      summary.runIds.stillRunning.push(run.id);
+    }
   }
   return summary;
 };
 
 export const readLatestDuneOutcomes = (database: DatabaseSync): DuneOutcome[] => {
-  const run = database.prepare(`SELECT id, signal_ids AS signalIds, raw_result AS rawResult, requested_at AS requestedAt, completed_at AS completedAt FROM dune_outcome_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1`).get() as { id: number; signalIds: string; rawResult: string | null; requestedAt: string | null; completedAt: string | null } | undefined;
+  const run = database
+    .prepare(
+      `SELECT id, signal_ids AS signalIds, raw_result AS rawResult, requested_at AS requestedAt, completed_at AS completedAt FROM dune_outcome_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1`,
+    )
+    .get() as
+    | {
+        id: number;
+        signalIds: string;
+        rawResult: string | null;
+        requestedAt: string | null;
+        completedAt: string | null;
+      }
+    | undefined;
   if (!run?.rawResult) return [];
   const ids = JSON.parse(run.signalIds) as number[];
-  const signals = database.prepare(`SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as unknown as Signal[];
-  const rows = ((JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? []);
+  const signals = database
+    .prepare(
+      `SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id IN (${ids.map(() => '?').join(',')})`,
+    )
+    .all(...ids) as unknown as Signal[];
+  const rows =
+    (JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result
+      ?.rows ?? [];
   return rowsToOutcomes(signals, rows, run.completedAt, run.id, run.requestedAt);
 };
 
@@ -255,27 +500,66 @@ export const readLatestDuneOutcomes = (database: DatabaseSync): DuneOutcome[] =>
  * measurement wins while results for other batches remain visible after refresh.
  */
 export const readAllDuneOutcomes = (database: DatabaseSync): DuneOutcome[] => {
-  const runs = database.prepare(`SELECT id, signal_ids AS signalIds, raw_result AS rawResult, requested_at AS requestedAt, completed_at AS completedAt FROM dune_outcome_runs WHERE status = 'completed' AND raw_result IS NOT NULL ORDER BY id ASC`).all() as unknown as Array<{ id: number; signalIds: string; rawResult: string; requestedAt: string | null; completedAt: string | null }>;
+  const runs = database
+    .prepare(
+      `SELECT id, signal_ids AS signalIds, raw_result AS rawResult, requested_at AS requestedAt, completed_at AS completedAt FROM dune_outcome_runs WHERE status = 'completed' AND raw_result IS NOT NULL ORDER BY id ASC`,
+    )
+    .all() as unknown as Array<{
+    id: number;
+    signalIds: string;
+    rawResult: string;
+    requestedAt: string | null;
+    completedAt: string | null;
+  }>;
   const merged = new Map<number, DuneOutcome>();
   for (const run of runs) {
     let ids: number[];
-    try { ids = JSON.parse(run.signalIds) as number[]; } catch { continue; }
+    try {
+      ids = JSON.parse(run.signalIds) as number[];
+    } catch {
+      continue;
+    }
     if (!ids.length) continue;
-    const signals = database.prepare(`SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as unknown as Signal[];
+    const signals = database
+      .prepare(
+        `SELECT g.id, g.token_address AS tokenAddress, t.symbol, g.signal_type AS signalType, g.observed_at AS observedAt, g.market_cap AS marketCap FROM gmgn_signals g LEFT JOIN tokens t ON t.token_address = g.token_address WHERE g.id IN (${ids.map(() => '?').join(',')})`,
+      )
+      .all(...ids) as unknown as Signal[];
     let rows: Array<Record<string, unknown>> = [];
-    try { rows = ((JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? []); } catch { continue; }
+    try {
+      rows =
+        (JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result
+          ?.rows ?? [];
+    } catch {
+      continue;
+    }
     for (const outcome of rowsToOutcomes(signals, rows, run.completedAt, run.id, run.requestedAt)) {
       const previous = merged.get(outcome.signal.id);
-      if (!previous) { merged.set(outcome.signal.id, outcome); continue; }
-      const previousByLabel = new Map(previous.checkpoints.map((checkpoint) => [checkpoint.label, checkpoint]));
+      if (!previous) {
+        merged.set(outcome.signal.id, outcome);
+        continue;
+      }
+      const previousByLabel = new Map(
+        previous.checkpoints.map((checkpoint) => [checkpoint.label, checkpoint]),
+      );
       for (const checkpoint of outcome.checkpoints) {
         const old = previousByLabel.get(checkpoint.label);
         // Earliest valid observation wins. Later runs still fill missing/pending checkpoints,
         // while sourceRunId and trade-age provenance remain attached to each selected value.
-        if (!old || old.result.status !== 'received' || checkpoint.result.status === 'received' && old.result.status !== 'received') previousByLabel.set(checkpoint.label, checkpoint);
+        if (
+          !old ||
+          old.result.status !== 'received' ||
+          (checkpoint.result.status === 'received' && old.result.status !== 'received')
+        )
+          previousByLabel.set(checkpoint.label, checkpoint);
       }
-      merged.set(outcome.signal.id, { signal: outcome.signal, checkpoints: [...previousByLabel.values()] });
+      merged.set(outcome.signal.id, {
+        signal: outcome.signal,
+        checkpoints: [...previousByLabel.values()],
+      });
     }
   }
-  return [...merged.values()].sort((a, b) => a.signal.observedAt.localeCompare(b.signal.observedAt) || a.signal.id - b.signal.id);
+  return [...merged.values()].sort(
+    (a, b) => a.signal.observedAt.localeCompare(b.signal.observedAt) || a.signal.id - b.signal.id,
+  );
 };

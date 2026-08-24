@@ -324,7 +324,8 @@ const migrations: Migration[] = [
     },
   },
   {
-    description: 'Raw-endpoint import breakdown persisted per browser-import batch (for accurate duplicate-file reporting)',
+    description:
+      'Raw-endpoint import breakdown persisted per browser-import batch (for accurate duplicate-file reporting)',
     up: (database) => {
       database.exec(`
         ALTER TABLE gmgn_browser_import_batches ADD COLUMN raw_endpoints_json TEXT;
@@ -345,7 +346,8 @@ const migrations: Migration[] = [
     // without the constraint, copy every row across untouched, then swap it in. A database that
     // never had the bad constraint (fresh installs from schema.ts's current text) just performs
     // a harmless no-op copy through this same path — no branching on which case applies.
-    description: 'Drop the erroneous UNIQUE constraint on gmgn_smartmoney_wallet_stats.source_sha256 (rebuild — SQLite has no ALTER TABLE DROP CONSTRAINT)',
+    description:
+      'Drop the erroneous UNIQUE constraint on gmgn_smartmoney_wallet_stats.source_sha256 (rebuild — SQLite has no ALTER TABLE DROP CONSTRAINT)',
     up: (database) => {
       database.exec(`
         ALTER TABLE gmgn_smartmoney_wallet_stats RENAME TO gmgn_smartmoney_wallet_stats_old;
@@ -519,8 +521,16 @@ const migrations: Migration[] = [
   {
     description: 'CopyTrade verified complete-history coverage marker',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallet_coverage)').all().map((row) => (row as { name: string }).name));
-      if (!columns.has('coverage_complete')) database.exec('ALTER TABLE copytrade_wallet_coverage ADD COLUMN coverage_complete INTEGER NOT NULL DEFAULT 0');
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_wallet_coverage)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('coverage_complete'))
+        database.exec(
+          'ALTER TABLE copytrade_wallet_coverage ADD COLUMN coverage_complete INTEGER NOT NULL DEFAULT 0',
+        );
     },
   },
   {
@@ -702,7 +712,8 @@ const migrations: Migration[] = [
     //
     // trades_duplicate/trades_daily_capped on the run row make that waste (and the new
     // per-day sampling cap) visible per run, rather than folded silently into trades_fetched.
-    description: 'CopyTrade resume-cursor backfill + per-day sample cap + run-level duplicate/capped counters',
+    description:
+      'CopyTrade resume-cursor backfill + per-day sample cap + run-level duplicate/capped counters',
     up: (database) => {
       database.exec(`
         ALTER TABLE copytrade_wallet_coverage ADD COLUMN resume_cursor TEXT;
@@ -746,7 +757,8 @@ const migrations: Migration[] = [
     // tell them apart — and inferring it from wallet_total (1 wallet = "single") breaks the
     // moment Winners itself narrows to exactly one wallet, which already happens live in this
     // project's own data. An explicit column removes the ambiguity outright.
-    description: 'CopyTrade fetch runs gain an explicit fetch_scope, so each UI fetch box only ever shows status for its own kind of run',
+    description:
+      'CopyTrade fetch runs gain an explicit fetch_scope, so each UI fetch box only ever shows status for its own kind of run',
     up: (database) => {
       database.exec(`
         ALTER TABLE copytrade_fetch_runs ADD COLUMN fetch_scope TEXT NOT NULL DEFAULT 'roster';
@@ -756,7 +768,12 @@ const migrations: Migration[] = [
   {
     description: 'CopyTrade trade-count progress and wallet ETA fields',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_fetch_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
       const additions: Array<[string, string]> = [
         ['expected_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
         ['initial_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
@@ -766,7 +783,8 @@ const migrations: Migration[] = [
         ['current_wallet_started_at', 'TEXT'],
       ];
       for (const [name, definition] of additions) {
-        if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
+        if (!columns.has(name))
+          database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
       }
     },
   },
@@ -779,7 +797,8 @@ const migrations: Migration[] = [
     // NOT NULL wherever GMGN data would land so nothing has to be guessed beyond what's stored
     // verbatim. This historical migration remains for databases created before Top Callers
     // was removed from the active application.
-    description: 'Top Callers scaffolding — leaderboard/callout/checkpoint schema, tracking, collection-run tracking',
+    description:
+      'Top Callers scaffolding — leaderboard/callout/checkpoint schema, tracking, collection-run tracking',
     up: (database) => {
       database.exec(`
         CREATE TABLE top_caller_collection_runs (
@@ -863,7 +882,8 @@ const migrations: Migration[] = [
     },
   },
   {
-    description: 'Top Callers collection run progress columns (per-wallet callouts fetch was a silent black box: 0 the whole run, then a jump to 1)',
+    description:
+      'Top Callers collection run progress columns (per-wallet callouts fetch was a silent black box: 0 the whole run, then a jump to 1)',
     up: (database) => {
       database.exec(`
         ALTER TABLE top_caller_collection_runs ADD COLUMN wallet_total INTEGER;
@@ -878,7 +898,9 @@ const migrations: Migration[] = [
       // multi-statement migration failed. Read the actual schema and add only the
       // missing columns so a restart can safely finish the migration.
       const columns = new Set(
-        database.prepare('PRAGMA table_info(top_caller_collection_runs)').all()
+        database
+          .prepare('PRAGMA table_info(top_caller_collection_runs)')
+          .all()
           .map((row) => (row as { name: string }).name),
       );
       const additions: Array<[string, string]> = [
@@ -894,7 +916,8 @@ const migrations: Migration[] = [
     },
   },
   {
-    description: 'Ensure append-only CopyTrade wallet statistics snapshots exist on upgraded databases',
+    description:
+      'Ensure append-only CopyTrade wallet statistics snapshots exist on upgraded databases',
     up: (database) => {
       // The events table was added to the source definition after some databases had
       // already passed the original migration that created wallet stats. Keep this as a
@@ -914,9 +937,15 @@ const migrations: Migration[] = [
     },
   },
   {
-    description: 'Persist Dune execution status payloads and reported concurrency limits for scheduler recovery',
+    description:
+      'Persist Dune execution status payloads and reported concurrency limits for scheduler recovery',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_copy_simulation_runs)').all().map((row) => (row as { name: string }).name));
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_copy_simulation_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
       const additions: Array<[string, string]> = [
         ['dune_execution_payload', 'TEXT'],
         ['dune_status_payload', 'TEXT'],
@@ -924,37 +953,76 @@ const migrations: Migration[] = [
         ['dune_last_state', 'TEXT'],
         ['dune_last_status_at', 'TEXT'],
       ];
-      for (const [name, definition] of additions) if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`);
-      const outcomeColumns = new Set(database.prepare('PRAGMA table_info(dune_outcome_runs)').all().map((row) => (row as { name: string }).name));
+      for (const [name, definition] of additions)
+        if (!columns.has(name))
+          database.exec(
+            `ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`,
+          );
+      const outcomeColumns = new Set(
+        database
+          .prepare('PRAGMA table_info(dune_outcome_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
       const outcomeAdditions: Array<[string, string]> = [
         ['dune_max_inflight_interactive_executions', 'INTEGER'],
       ];
-      for (const [name, definition] of outcomeAdditions) if (!outcomeColumns.has(name)) database.exec(`ALTER TABLE dune_outcome_runs ADD COLUMN ${name} ${definition}`);
+      for (const [name, definition] of outcomeAdditions)
+        if (!outcomeColumns.has(name))
+          database.exec(`ALTER TABLE dune_outcome_runs ADD COLUMN ${name} ${definition}`);
     },
   },
   {
-    description: 'Backfill Dune scheduler payload columns for databases migrated before scheduler fields were added',
+    description:
+      'Backfill Dune scheduler payload columns for databases migrated before scheduler fields were added',
     up: (database) => {
-      const copyColumns = new Set(database.prepare('PRAGMA table_info(copytrade_copy_simulation_runs)').all().map((row) => (row as { name: string }).name));
+      const copyColumns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_copy_simulation_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
       for (const [name, definition] of [
         ['dune_execution_payload', 'TEXT'],
         ['dune_status_payload', 'TEXT'],
         ['dune_max_inflight_interactive_executions', 'INTEGER'],
         ['dune_last_state', 'TEXT'],
         ['dune_last_status_at', 'TEXT'],
-      ] as const) if (!copyColumns.has(name)) database.exec(`ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`);
-      const outcomeColumns = new Set(database.prepare('PRAGMA table_info(dune_outcome_runs)').all().map((row) => (row as { name: string }).name));
-      if (!outcomeColumns.has('dune_max_inflight_interactive_executions')) database.exec('ALTER TABLE dune_outcome_runs ADD COLUMN dune_max_inflight_interactive_executions INTEGER');
+      ] as const)
+        if (!copyColumns.has(name))
+          database.exec(
+            `ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`,
+          );
+      const outcomeColumns = new Set(
+        database
+          .prepare('PRAGMA table_info(dune_outcome_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!outcomeColumns.has('dune_max_inflight_interactive_executions'))
+        database.exec(
+          'ALTER TABLE dune_outcome_runs ADD COLUMN dune_max_inflight_interactive_executions INTEGER',
+        );
     },
   },
   {
-    description: 'Persist copy-simulation match-window provenance for controlled wide-window retries',
+    description:
+      'Persist copy-simulation match-window provenance for controlled wide-window retries',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_copy_simulation_runs)').all().map((row) => (row as { name: string }).name));
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_copy_simulation_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
       for (const [name, definition] of [
         ['search_window_minutes', 'INTEGER NOT NULL DEFAULT 30'],
-        ["match_source", "TEXT NOT NULL DEFAULT 'precise'"],
-      ] as const) if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`);
+        ['match_source', "TEXT NOT NULL DEFAULT 'precise'"],
+      ] as const)
+        if (!columns.has(name))
+          database.exec(
+            `ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN ${name} ${definition}`,
+          );
     },
   },
   {
@@ -962,7 +1030,12 @@ const migrations: Migration[] = [
     // position by PRAGMA user_version, so inserting a migration in the middle would skip it.
     description: 'Ensure CopyTrade trade-count progress and wallet ETA fields exist',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_fetch_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
       const additions: Array<[string, string]> = [
         ['expected_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
         ['initial_trades_total', 'INTEGER NOT NULL DEFAULT 0'],
@@ -972,7 +1045,8 @@ const migrations: Migration[] = [
         ['current_wallet_started_at', 'TEXT'],
       ];
       for (const [name, definition] of additions) {
-        if (!columns.has(name)) database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
+        if (!columns.has(name))
+          database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
       }
     },
   },
@@ -981,15 +1055,31 @@ const migrations: Migration[] = [
     // coverage_complete was added to the existing migration sequence.
     description: 'Ensure CopyTrade coverage completeness marker exists',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallet_coverage)').all().map((row) => (row as { name: string }).name));
-      if (!columns.has('coverage_complete')) database.exec('ALTER TABLE copytrade_wallet_coverage ADD COLUMN coverage_complete INTEGER NOT NULL DEFAULT 0');
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_wallet_coverage)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('coverage_complete'))
+        database.exec(
+          'ALTER TABLE copytrade_wallet_coverage ADD COLUMN coverage_complete INTEGER NOT NULL DEFAULT 0',
+        );
     },
   },
   {
     description: 'Persist whether the latest GMGN snapshot may be resumed',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
-      if (!columns.has('resume_disabled')) database.exec('ALTER TABLE copytrade_fetch_runs ADD COLUMN resume_disabled INTEGER NOT NULL DEFAULT 0');
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_fetch_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('resume_disabled'))
+        database.exec(
+          'ALTER TABLE copytrade_fetch_runs ADD COLUMN resume_disabled INTEGER NOT NULL DEFAULT 0',
+        );
     },
   },
   {
@@ -1009,8 +1099,14 @@ const migrations: Migration[] = [
     description: 'Persist per-wallet GMGN fetch diagnostics',
     up: (database) => {
       const addIfMissing = (table: string, name: string, definition: string): void => {
-        const columns = new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((row) => (row as { name: string }).name));
-        if (!columns.has(name)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+        const columns = new Set(
+          database
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((row) => (row as { name: string }).name),
+        );
+        if (!columns.has(name))
+          database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
       };
       for (const [name, definition] of [
         ['malformed_rows', 'INTEGER NOT NULL DEFAULT 0'],
@@ -1029,29 +1125,74 @@ const migrations: Migration[] = [
     // migrations before resume_disabled was introduced.
     description: 'Repair resumable CopyTrade fetch state column',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_fetch_runs)').all().map((row) => (row as { name: string }).name));
-      if (!columns.has('resume_disabled')) database.exec('ALTER TABLE copytrade_fetch_runs ADD COLUMN resume_disabled INTEGER NOT NULL DEFAULT 0');
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_fetch_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('resume_disabled'))
+        database.exec(
+          'ALTER TABLE copytrade_fetch_runs ADD COLUMN resume_disabled INTEGER NOT NULL DEFAULT 0',
+        );
     },
   },
   {
     description: 'Persist GMGN wallet icon URLs',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallets)').all().map((row) => (row as { name: string }).name));
-      if (!columns.has('icon_url')) database.exec('ALTER TABLE copytrade_wallets ADD COLUMN icon_url TEXT');
-      const update = database.prepare('UPDATE copytrade_wallets SET icon_url = ? WHERE source_snapshot_id = ? AND wallet_address = ?');
-      const snapshots = database.prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots').all() as unknown as Array<{ id: number; rawPayload: string }>;
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_wallets)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('icon_url'))
+        database.exec('ALTER TABLE copytrade_wallets ADD COLUMN icon_url TEXT');
+      const update = database.prepare(
+        'UPDATE copytrade_wallets SET icon_url = ? WHERE source_snapshot_id = ? AND wallet_address = ?',
+      );
+      const snapshots = database
+        .prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots')
+        .all() as unknown as Array<{ id: number; rawPayload: string }>;
       for (const snapshot of snapshots) {
         let parsed: unknown;
-        try { parsed = JSON.parse(snapshot.rawPayload); } catch { continue; }
-        const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        try {
+          parsed = JSON.parse(snapshot.rawPayload);
+        } catch {
+          continue;
+        }
+        const root =
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : {};
         const data = root.data;
-        const rank = Array.isArray(data) ? data : data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list : root.rank ?? root.list;
+        const rank = Array.isArray(data)
+          ? data
+          : data && typeof data === 'object' && !Array.isArray(data)
+            ? ((data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list)
+            : (root.rank ?? root.list);
         if (!Array.isArray(rank)) continue;
         for (const item of rank) {
           if (!item || typeof item !== 'object') continue;
           const record = item as Record<string, unknown>;
-          const wallet = typeof record.wallet_address === 'string' ? record.wallet_address : typeof record.address === 'string' ? record.address : null;
-          const icon = ['avatar_url', 'avatar', 'icon_url', 'icon', 'logo', 'image_url', 'profile_pic', 'twitter_avatar'].map((key) => record[key]).find((value) => typeof value === 'string' && /^https?:\/\//i.test(value.trim()));
+          const wallet =
+            typeof record.wallet_address === 'string'
+              ? record.wallet_address
+              : typeof record.address === 'string'
+                ? record.address
+                : null;
+          const icon = [
+            'avatar_url',
+            'avatar',
+            'icon_url',
+            'icon',
+            'logo',
+            'image_url',
+            'profile_pic',
+            'twitter_avatar',
+          ]
+            .map((key) => record[key])
+            .find((value) => typeof value === 'string' && /^https?:\/\//i.test(value.trim()));
           if (wallet && typeof icon === 'string') update.run(icon.trim(), snapshot.id, wallet);
         }
       }
@@ -1065,7 +1206,8 @@ const migrations: Migration[] = [
   },
   {
     description: 'Persist Scrutiny GMGN 30d risk results',
-    up: (database) => database.exec(`
+    up: (database) =>
+      database.exec(`
       CREATE TABLE IF NOT EXISTS copytrade_gmgn_risk_stats (
         wallet_address TEXT NOT NULL,
         period TEXT NOT NULL,
@@ -1079,7 +1221,8 @@ const migrations: Migration[] = [
   },
   {
     description: 'Persist before-and-after Dune fetch audits',
-    up: (database) => database.exec(`
+    up: (database) =>
+      database.exec(`
       CREATE TABLE IF NOT EXISTS copytrade_dune_fetch_audits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         requested_at TEXT NOT NULL,
@@ -1106,24 +1249,59 @@ const migrations: Migration[] = [
   {
     description: 'Persist all GMGN wallet tags separately from risk flags',
     up: (database) => {
-      const columns = new Set(database.prepare('PRAGMA table_info(copytrade_wallets)').all().map((row) => (row as { name: string }).name));
-      if (!columns.has('gmgn_tags')) database.exec("ALTER TABLE copytrade_wallets ADD COLUMN gmgn_tags TEXT NOT NULL DEFAULT '[]'");
-      const update = database.prepare('UPDATE copytrade_wallets SET gmgn_tags = ? WHERE source_snapshot_id = ? AND wallet_address = ?');
-      const snapshots = database.prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots').all() as unknown as Array<{ id: number; rawPayload: string }>;
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_wallets)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('gmgn_tags'))
+        database.exec(
+          "ALTER TABLE copytrade_wallets ADD COLUMN gmgn_tags TEXT NOT NULL DEFAULT '[]'",
+        );
+      const update = database.prepare(
+        'UPDATE copytrade_wallets SET gmgn_tags = ? WHERE source_snapshot_id = ? AND wallet_address = ?',
+      );
+      const snapshots = database
+        .prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots')
+        .all() as unknown as Array<{ id: number; rawPayload: string }>;
       for (const snapshot of snapshots) {
         let parsed: unknown;
-        try { parsed = JSON.parse(snapshot.rawPayload); } catch { continue; }
-        const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        try {
+          parsed = JSON.parse(snapshot.rawPayload);
+        } catch {
+          continue;
+        }
+        const root =
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : {};
         const data = root.data;
-        const rank = Array.isArray(data) ? data : data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list : root.rank ?? root.list;
+        const rank = Array.isArray(data)
+          ? data
+          : data && typeof data === 'object' && !Array.isArray(data)
+            ? ((data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list)
+            : (root.rank ?? root.list);
         if (!Array.isArray(rank)) continue;
         for (const item of rank) {
           if (!item || typeof item !== 'object') continue;
           const record = item as Record<string, unknown>;
-          const wallet = typeof record.wallet_address === 'string' ? record.wallet_address : typeof record.address === 'string' ? record.address : null;
-          const common = record.common && typeof record.common === 'object' ? record.common as Record<string, unknown> : null;
+          const wallet =
+            typeof record.wallet_address === 'string'
+              ? record.wallet_address
+              : typeof record.address === 'string'
+                ? record.address
+                : null;
+          const common =
+            record.common && typeof record.common === 'object'
+              ? (record.common as Record<string, unknown>)
+              : null;
           const rawTags = record.tags ?? common?.tags;
-          const tags = Array.isArray(rawTags) ? rawTags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).map((tag) => tag.trim()) : [];
+          const tags = Array.isArray(rawTags)
+            ? rawTags
+                .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+                .map((tag) => tag.trim())
+            : [];
           if (wallet) update.run(JSON.stringify(tags), snapshot.id, wallet);
         }
       }
@@ -1132,22 +1310,49 @@ const migrations: Migration[] = [
   {
     description: 'Backfill GMGN tags nested under common.tags',
     up: (database) => {
-      const update = database.prepare('UPDATE copytrade_wallets SET gmgn_tags = ? WHERE source_snapshot_id = ? AND wallet_address = ?');
-      const snapshots = database.prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots').all() as unknown as Array<{ id: number; rawPayload: string }>;
+      const update = database.prepare(
+        'UPDATE copytrade_wallets SET gmgn_tags = ? WHERE source_snapshot_id = ? AND wallet_address = ?',
+      );
+      const snapshots = database
+        .prepare('SELECT id, raw_payload AS rawPayload FROM gmgn_wallet_rank_snapshots')
+        .all() as unknown as Array<{ id: number; rawPayload: string }>;
       for (const snapshot of snapshots) {
         let parsed: unknown;
-        try { parsed = JSON.parse(snapshot.rawPayload); } catch { continue; }
-        const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        try {
+          parsed = JSON.parse(snapshot.rawPayload);
+        } catch {
+          continue;
+        }
+        const root =
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : {};
         const data = root.data;
-        const rank = Array.isArray(data) ? data : data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list : root.rank ?? root.list;
+        const rank = Array.isArray(data)
+          ? data
+          : data && typeof data === 'object' && !Array.isArray(data)
+            ? ((data as Record<string, unknown>).rank ?? (data as Record<string, unknown>).list)
+            : (root.rank ?? root.list);
         if (!Array.isArray(rank)) continue;
         for (const item of rank) {
           if (!item || typeof item !== 'object') continue;
           const record = item as Record<string, unknown>;
-          const wallet = typeof record.wallet_address === 'string' ? record.wallet_address : typeof record.address === 'string' ? record.address : null;
-          const common = record.common && typeof record.common === 'object' ? record.common as Record<string, unknown> : null;
+          const wallet =
+            typeof record.wallet_address === 'string'
+              ? record.wallet_address
+              : typeof record.address === 'string'
+                ? record.address
+                : null;
+          const common =
+            record.common && typeof record.common === 'object'
+              ? (record.common as Record<string, unknown>)
+              : null;
           const rawTags = record.tags ?? common?.tags;
-          const tags = Array.isArray(rawTags) ? rawTags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).map((tag) => tag.trim()) : [];
+          const tags = Array.isArray(rawTags)
+            ? rawTags
+                .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+                .map((tag) => tag.trim())
+            : [];
           if (wallet) update.run(JSON.stringify(tags), snapshot.id, wallet);
         }
       }
@@ -1178,7 +1383,9 @@ export const applyMigrations = (database: DatabaseSync): void => {
       currentVersion = index + 1;
     } catch (error) {
       database.exec('ROLLBACK;');
-      throw new Error(`Migration ${index + 1} failed (${migration.description}).`, { cause: error });
+      throw new Error(`Migration ${index + 1} failed (${migration.description}).`, {
+        cause: error,
+      });
     }
   }
 };

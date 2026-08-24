@@ -54,7 +54,8 @@ export const parseCsv = (input: string): CsvRecord[] => {
     throw new Error('CSV contains an empty column header.');
   }
 
-  return rows.slice(1)
+  return rows
+    .slice(1)
     .filter((values) => values.some((value) => value.length > 0))
     .map((values, index) => {
       const value: Record<string, string> = {};
@@ -67,4 +68,3 @@ export const parseCsv = (input: string): CsvRecord[] => {
       return { rowNumber: index + 2, value };
     });
 };
-

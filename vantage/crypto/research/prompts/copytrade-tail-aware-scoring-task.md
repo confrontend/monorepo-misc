@@ -21,14 +21,14 @@ and still be strongly profitable.
 This was measured live on real copy-simulation data (737 simulated round trips across 6 wallets)
 and the gap is large, not theoretical:
 
-| Wallet | Median | Mean (equal-weight) | Trades >+100% | Max |
-|---|---|---|---|---|
-| DxM1hfY8 | −4.5% | **+51.4%** | 17 | +1137% |
-| H9TMtTxB | −3.8% | **+30.1%** | 17 | +683% |
-| 7JFSAQbo | +52.6% | **+88.6%** | 55 | +554% |
-| 4BdKaxN8 | −17.9% | −5.2% | 9 | +505% |
-| FAicXNV5 | −3.3% | −1.2% | 5 | +280% |
-| ENkZtLj1 | −5.5% | −9.1% | 0 | +23% |
+| Wallet   | Median | Mean (equal-weight) | Trades >+100% | Max    |
+| -------- | ------ | ------------------- | ------------- | ------ |
+| DxM1hfY8 | −4.5%  | **+51.4%**          | 17            | +1137% |
+| H9TMtTxB | −3.8%  | **+30.1%**          | 17            | +683%  |
+| 7JFSAQbo | +52.6% | **+88.6%**          | 55            | +554%  |
+| 4BdKaxN8 | −17.9% | −5.2%               | 9             | +505%  |
+| FAicXNV5 | −3.3%  | −1.2%               | 5             | +280%  |
+| ENkZtLj1 | −5.5%  | −9.1%               | 0             | +23%   |
 
 Pooled: **median −3.5%, mean +25.7%, 103 of 737 trades over +100%.** The current median-only
 gate rejects DxM1hfY8 and H9TMtTxB, which are the second- and third-best wallets by the metric
@@ -63,7 +63,7 @@ switches the headline number to mean, is wrong.
   trades above +100%. **This is the honesty check on the mean**: 95% means one or two trades are
   carrying everything and the mean is fragile; 40% across many winners is a real distribution.
   Null when the summed return is ≤ 0 (the share is meaningless then — do not emit a negative or
-  >100% figure, and do not clamp it into looking sane).
+  > 100% figure, and do not clamp it into looking sane).
 
 Constants for the thresholds (`TAIL_THRESHOLD_PERCENT = 100`, `EXTREME_TAIL_THRESHOLD_PERCENT =
 300`) next to the existing tunables, not inline numbers.
@@ -95,8 +95,8 @@ existing median comparison:
   the mean depends on a few extreme winners, and a high share means it's fragile.
 
 Add one short explanatory line to the Copy Simulation section (reuse `InfoTip`, matching the
-existing pattern) stating plainly: *median is the typical copy; mean is what equal-size copying
-would have returned; they can disagree and both are real.* Do not bury this — the whole point is
+existing pattern) stating plainly: _median is the typical copy; mean is what equal-size copying
+would have returned; they can disagree and both are real._ Do not bury this — the whole point is
 that a reader currently sees only half the picture.
 
 Every numeric field is nullable — render `null` as an em dash, never `0`.

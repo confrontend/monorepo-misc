@@ -146,8 +146,8 @@ introduce a new visual language. It is a single page; no subtabs.
   Green above $100, red below, neutral at exactly $100 or `null`.
 - **When median and average disagree in sign, say so.** Render a warning line beneath the
   table naming the wallets affected, e.g.
-  *"chingchong: average +18.2% but $100 → $12. One large win hides many losses. Median is the
-  honest number."* Derive this from the returned values; do not hardcode names.
+  _"chingchong: average +18.2% but $100 → $12. One large win hides many losses. Median is the
+  honest number."_ Derive this from the returned values; do not hardcode names.
 - **Verdict cell** shows the icon plus label, and on hover/title lists `failedRules` in plain
   words. Do not print raw rule identifiers to the user.
 - **Risk flags** render as small chips next to the trader name.
@@ -156,7 +156,7 @@ introduce a new visual language. It is a single page; no subtabs.
   do not drop its first line, which states that GMGN does not publish its criteria.
   `riskEvidence` holds the same numbers if you want them in columns.
   **Do not present this evidence as proof of wash trading.** Measured live, it does not
-  separate flagged from unflagged wallets — two untagged wallets scored *higher* on fast round
+  separate flagged from unflagged wallets — two untagged wallets scored _higher_ on fast round
   trips than three tagged ones. It is context for a human, not a detector.
 - **Reuse existing CSS classes.** `.quality-grid` / `.quality-metric` for the stat tiles,
   the existing table wrapper pattern for the table. Only add new classes where nothing fits.

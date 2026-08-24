@@ -87,19 +87,37 @@ const asOptionalName = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 
 const asOptionalIcon = (item: RankItem): string | null => {
-  for (const key of ['avatar_url', 'avatar', 'icon_url', 'icon', 'logo', 'image_url', 'profile_pic', 'twitter_avatar']) {
+  for (const key of [
+    'avatar_url',
+    'avatar',
+    'icon_url',
+    'icon',
+    'logo',
+    'image_url',
+    'profile_pic',
+    'twitter_avatar',
+  ]) {
     const value = item[key];
     if (typeof value === 'string' && /^https?:\/\//i.test(value.trim())) return value.trim();
   }
   return null;
 };
 
-const extractGmgnTags = (tags: unknown): string[] => !Array.isArray(tags)
-  ? []
-  : tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).map((tag) => tag.trim());
-const itemGmgnTags = (item: RankItem): string[] => extractGmgnTags(item.tags ?? (item.common && typeof item.common === 'object' ? (item.common as Record<string, unknown>).tags : undefined));
-const extractRiskFlags = (tags: unknown): string[] => extractGmgnTags(tags).filter((tag) => RISK_TAGS.has(tag));
-
+const extractGmgnTags = (tags: unknown): string[] =>
+  !Array.isArray(tags)
+    ? []
+    : tags
+        .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+        .map((tag) => tag.trim());
+const itemGmgnTags = (item: RankItem): string[] =>
+  extractGmgnTags(
+    item.tags ??
+      (item.common && typeof item.common === 'object'
+        ? (item.common as Record<string, unknown>).tags
+        : undefined),
+  );
+const extractRiskFlags = (tags: unknown): string[] =>
+  extractGmgnTags(tags).filter((tag) => RISK_TAGS.has(tag));
 
 type RankItem = Record<string, unknown>;
 
@@ -111,25 +129,35 @@ type RankItem = Record<string, unknown>;
 export const readLatestRankSnapshot = (
   database: DatabaseSync,
 ): { snapshotId: number | null; capturedAt: string | null; rank: RankItem[] } => {
-  const row = database.prepare(
-    `SELECT s.id, COALESCE(p.captured_at, s.captured_at) AS capturedAt, s.raw_payload AS rawPayload
+  const row = database
+    .prepare(
+      `SELECT s.id, COALESCE(p.captured_at, s.captured_at) AS capturedAt, s.raw_payload AS rawPayload
      FROM gmgn_wallet_rank_snapshots s
      LEFT JOIN gmgn_wallet_rank_capture_provenance p ON p.id = (
        SELECT p2.id FROM gmgn_wallet_rank_capture_provenance p2
        WHERE p2.snapshot_id = s.id ORDER BY p2.captured_at DESC, p2.id DESC LIMIT 1
      )
      ORDER BY capturedAt DESC, s.id DESC LIMIT 1`,
-  ).get() as { id: number; capturedAt: string; rawPayload: string } | undefined;
+    )
+    .get() as { id: number; capturedAt: string; rawPayload: string } | undefined;
   if (!row) return { snapshotId: null, capturedAt: null, rank: [] };
 
   let parsed: unknown;
-  try { parsed = JSON.parse(row.rawPayload); } catch { return { snapshotId: row.id, capturedAt: row.capturedAt, rank: [] }; }
-  const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as { data?: unknown; rank?: unknown; list?: unknown } : {};
+  try {
+    parsed = JSON.parse(row.rawPayload);
+  } catch {
+    return { snapshotId: row.id, capturedAt: row.capturedAt, rank: [] };
+  }
+  const root =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as { data?: unknown; rank?: unknown; list?: unknown })
+      : {};
   const data = root.data;
   const rank = Array.isArray(data)
     ? data
     : data && typeof data === 'object' && !Array.isArray(data)
-      ? ((data as { rank?: unknown; list?: unknown }).rank ?? (data as { rank?: unknown; list?: unknown }).list)
+      ? ((data as { rank?: unknown; list?: unknown }).rank ??
+        (data as { rank?: unknown; list?: unknown }).list)
       : (root.rank ?? root.list);
   if (!Array.isArray(rank)) return { snapshotId: row.id, capturedAt: row.capturedAt, rank: [] };
   return {
@@ -145,23 +173,32 @@ export const readRankSnapshot = (
   database: DatabaseSync,
   snapshotId: number,
 ): { snapshotId: number | null; capturedAt: string | null; rank: RankItem[] } => {
-  const row = database.prepare(
-    `SELECT id, captured_at AS capturedAt, raw_payload AS rawPayload
+  const row = database
+    .prepare(
+      `SELECT id, captured_at AS capturedAt, raw_payload AS rawPayload
      FROM gmgn_wallet_rank_snapshots WHERE id = ?`,
-  ).get(snapshotId) as { id: number; capturedAt: string; rawPayload: string } | undefined;
+    )
+    .get(snapshotId) as { id: number; capturedAt: string; rawPayload: string } | undefined;
   if (!row) return { snapshotId: null, capturedAt: null, rank: [] };
   try {
-    const parsed = JSON.parse(row.rawPayload) as { data?: unknown; rank?: unknown; list?: unknown } | null;
+    const parsed = JSON.parse(row.rawPayload) as {
+      data?: unknown;
+      rank?: unknown;
+      list?: unknown;
+    } | null;
     const data = parsed?.data;
     const rank = Array.isArray(data)
       ? data
       : data && typeof data === 'object' && !Array.isArray(data)
-        ? ((data as { rank?: unknown; list?: unknown }).rank ?? (data as { rank?: unknown; list?: unknown }).list)
+        ? ((data as { rank?: unknown; list?: unknown }).rank ??
+          (data as { rank?: unknown; list?: unknown }).list)
         : (parsed?.rank ?? parsed?.list);
     return {
       snapshotId: row.id,
       capturedAt: row.capturedAt,
-      rank: Array.isArray(rank) ? rank.filter((item): item is RankItem => item !== null && typeof item === 'object') : [],
+      rank: Array.isArray(rank)
+        ? rank.filter((item): item is RankItem => item !== null && typeof item === 'object')
+        : [],
     };
   } catch {
     return { snapshotId: row.id, capturedAt: row.capturedAt, rank: [] };
@@ -172,8 +209,12 @@ const parseQuery = (raw: string | null): Record<string, unknown> => {
   if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch { return {}; }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 };
 
 /** Exact request context for a leaderboard snapshot. Legacy snapshots predate the provenance
@@ -182,8 +223,9 @@ export const readLeaderboardProvenance = (
   database: DatabaseSync,
   snapshotId: number,
 ): LeaderboardProvenance | null => {
-  const row = database.prepare(
-    `SELECT s.id AS snapshotId, COALESCE(p.captured_at, s.captured_at) AS capturedAt,
+  const row = database
+    .prepare(
+      `SELECT s.id AS snapshotId, COALESCE(p.captured_at, s.captured_at) AS capturedAt,
             COALESCE(p.window, s.window) AS window, COALESCE(p.orderby, s.orderby) AS orderby,
             p.request_path AS requestPath, p.request_query_json AS requestQueryJson
      FROM gmgn_wallet_rank_snapshots s
@@ -192,7 +234,17 @@ export const readLeaderboardProvenance = (
        WHERE p2.snapshot_id = s.id ORDER BY p2.captured_at DESC, p2.id DESC LIMIT 1
      )
      WHERE s.id = ?`,
-  ).get(snapshotId) as { snapshotId: number; capturedAt: string; window: string | null; orderby: string | null; requestPath: string | null; requestQueryJson: string | null } | undefined;
+    )
+    .get(snapshotId) as
+    | {
+        snapshotId: number;
+        capturedAt: string;
+        window: string | null;
+        orderby: string | null;
+        requestPath: string | null;
+        requestQueryJson: string | null;
+      }
+    | undefined;
   if (!row) return null;
   const { requestQueryJson, ...provenance } = row;
   return { ...provenance, requestQuery: parseQuery(requestQueryJson) };
@@ -215,24 +267,42 @@ export type LeaderboardSnapshotStatus = {
  *  never gain provenance retroactively (see docs/COPYTRADE_PROSPECTIVE_VALIDATION_PLAN.md §1).
  *  The hash covers window/orderby/requestPath/requestQuery so two captures only count as "the
  *  same filter" when every one of those matches, not just the coarse window/orderby pair. */
-export const filterHashFor = (provenance: Pick<LeaderboardProvenance, 'window' | 'orderby' | 'requestPath' | 'requestQuery'>): string =>
-  createHash('sha256').update(JSON.stringify({
-    window: provenance.window, orderby: provenance.orderby,
-    requestPath: provenance.requestPath, requestQuery: provenance.requestQuery,
-  })).digest('hex');
+export const filterHashFor = (
+  provenance: Pick<LeaderboardProvenance, 'window' | 'orderby' | 'requestPath' | 'requestQuery'>,
+): string =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        window: provenance.window,
+        orderby: provenance.orderby,
+        requestPath: provenance.requestPath,
+        requestQuery: provenance.requestQuery,
+      }),
+    )
+    .digest('hex');
 
-export const listLeaderboardSnapshotStatuses = (database: DatabaseSync): LeaderboardSnapshotStatus[] => {
-  const rows = database.prepare(
-    `SELECT s.id AS snapshotId, s.captured_at AS snapshotCapturedAt,
+export const listLeaderboardSnapshotStatuses = (
+  database: DatabaseSync,
+): LeaderboardSnapshotStatus[] => {
+  const rows = database
+    .prepare(
+      `SELECT s.id AS snapshotId, s.captured_at AS snapshotCapturedAt,
             p.id AS provenanceId, p.captured_at AS provenanceCapturedAt,
             p.window AS window, p.orderby AS orderby,
             p.request_path AS requestPath, p.request_query_json AS requestQueryJson
      FROM gmgn_wallet_rank_snapshots s
      LEFT JOIN gmgn_wallet_rank_capture_provenance p ON p.snapshot_id = s.id
      ORDER BY s.id ASC`,
-  ).all() as unknown as Array<{
-    snapshotId: number; snapshotCapturedAt: string; provenanceId: number | null; provenanceCapturedAt: string | null;
-    window: string | null; orderby: string | null; requestPath: string | null; requestQueryJson: string | null;
+    )
+    .all() as unknown as Array<{
+    snapshotId: number;
+    snapshotCapturedAt: string;
+    provenanceId: number | null;
+    provenanceCapturedAt: string | null;
+    window: string | null;
+    orderby: string | null;
+    requestPath: string | null;
+    requestQueryJson: string | null;
   }>;
   return rows.map((row) => {
     const provenanced = row.provenanceId !== null;
@@ -243,7 +313,12 @@ export const listLeaderboardSnapshotStatuses = (database: DatabaseSync): Leaderb
       window: row.window,
       orderby: row.orderby,
       filterHash: provenanced
-        ? filterHashFor({ window: row.window, orderby: row.orderby, requestPath: row.requestPath, requestQuery: parseQuery(row.requestQueryJson) })
+        ? filterHashFor({
+            window: row.window,
+            orderby: row.orderby,
+            requestPath: row.requestPath,
+            requestQuery: parseQuery(row.requestQueryJson),
+          })
         : null,
     };
   });
@@ -270,24 +345,41 @@ export type CaptureHealth = {
  *  filter for a legacy snapshot — an absent filter hash stays absent. */
 export const readCaptureHealth = (database: DatabaseSync, now = new Date()): CaptureHealth => {
   const statuses = listLeaderboardSnapshotStatuses(database);
-  const legacySnapshotCount = statuses.filter((status) => status.provenanceStatus === 'legacy_unprovenanced').length;
+  const legacySnapshotCount = statuses.filter(
+    (status) => status.provenanceStatus === 'legacy_unprovenanced',
+  ).length;
   const provenancedSnapshotCount = statuses.length - legacySnapshotCount;
-  const latestProvenancedSnapshotId = [...statuses]
-    .filter((status) => status.provenanceStatus === 'provenanced')
-    .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
-    .at(-1)?.snapshotId ?? null;
+  const latestProvenancedSnapshotId =
+    [...statuses]
+      .filter((status) => status.provenanceStatus === 'provenanced')
+      .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
+      .at(-1)?.snapshotId ?? null;
   if (statuses.length === 0) {
     return {
-      latestSnapshotAt: null, latestSnapshotId: null, latestProvenanceStatus: null, latestFilterHash: null,
-      latestProvenancedSnapshotId, hoursSinceLastCapture: null, distinctCaptureDatesForLatestFilter: 0,
-      legacySnapshotCount, provenancedSnapshotCount,
+      latestSnapshotAt: null,
+      latestSnapshotId: null,
+      latestProvenanceStatus: null,
+      latestFilterHash: null,
+      latestProvenancedSnapshotId,
+      hoursSinceLastCapture: null,
+      distinctCaptureDatesForLatestFilter: 0,
+      legacySnapshotCount,
+      provenancedSnapshotCount,
     };
   }
-  const latest = [...statuses].sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))[statuses.length - 1];
-  const hoursSinceLastCapture = Math.round(((now.getTime() - Date.parse(latest.capturedAt)) / 3_600_000) * 100) / 100;
-  const distinctCaptureDatesForLatestFilter = latest.filterHash === null ? 0 : new Set(
-    statuses.filter((status) => status.filterHash === latest.filterHash).map((status) => status.capturedAt.slice(0, 10)),
-  ).size;
+  const latest = [...statuses].sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))[
+    statuses.length - 1
+  ];
+  const hoursSinceLastCapture =
+    Math.round(((now.getTime() - Date.parse(latest.capturedAt)) / 3_600_000) * 100) / 100;
+  const distinctCaptureDatesForLatestFilter =
+    latest.filterHash === null
+      ? 0
+      : new Set(
+          statuses
+            .filter((status) => status.filterHash === latest.filterHash)
+            .map((status) => status.capturedAt.slice(0, 10)),
+        ).size;
   return {
     latestSnapshotAt: latest.capturedAt,
     latestSnapshotId: latest.snapshotId,
@@ -313,31 +405,59 @@ export const readWalletRankHistory = (
 ): WalletRankHistory[] => {
   if (walletAddresses.length === 0) return [];
   const wanted = new Set(walletAddresses);
-  const captures = database.prepare(
-    `SELECT s.id AS snapshotId, s.captured_at AS snapshotCapturedAt, s.raw_payload AS rawPayload,
+  const captures = database
+    .prepare(
+      `SELECT s.id AS snapshotId, s.captured_at AS snapshotCapturedAt, s.raw_payload AS rawPayload,
             p.id AS provenanceId, p.captured_at AS provenanceCapturedAt
      FROM gmgn_wallet_rank_snapshots s
      LEFT JOIN gmgn_wallet_rank_capture_provenance p ON p.snapshot_id = s.id
      ORDER BY COALESCE(p.captured_at, s.captured_at) ASC, s.id ASC, p.id ASC`,
-  ).all() as unknown as Array<{ snapshotId: number; snapshotCapturedAt: string; rawPayload: string; provenanceId: number | null; provenanceCapturedAt: string | null }>;
+    )
+    .all() as unknown as Array<{
+    snapshotId: number;
+    snapshotCapturedAt: string;
+    rawPayload: string;
+    provenanceId: number | null;
+    provenanceCapturedAt: string | null;
+  }>;
 
   type Acc = Omit<WalletRankHistory, 'topFiveMembershipPercent'> & { ranks: number[] };
-  const state = new Map<string, Acc>(walletAddresses.map((walletAddress) => [walletAddress, {
-    walletAddress, leaderboardCaptures: captures.length, appearances: 0, topFiveAppearances: 0,
-    currentRank: null, bestRank: null, worstRank: null, firstObservedAt: null, lastObservedAt: null,
-    ranks: [] as number[],
-  }]));
+  const state = new Map<string, Acc>(
+    walletAddresses.map((walletAddress) => [
+      walletAddress,
+      {
+        walletAddress,
+        leaderboardCaptures: captures.length,
+        appearances: 0,
+        topFiveAppearances: 0,
+        currentRank: null,
+        bestRank: null,
+        worstRank: null,
+        firstObservedAt: null,
+        lastObservedAt: null,
+        ranks: [] as number[],
+      },
+    ]),
+  );
 
   for (const capture of captures) {
     let rank: unknown;
-    try { rank = (JSON.parse(capture.rawPayload) as { data?: { rank?: unknown } })?.data?.rank; } catch { continue; }
+    try {
+      rank = (JSON.parse(capture.rawPayload) as { data?: { rank?: unknown } })?.data?.rank;
+    } catch {
+      continue;
+    }
     if (!Array.isArray(rank)) continue;
     const capturedAt = capture.provenanceCapturedAt ?? capture.snapshotCapturedAt;
     rank.forEach((item, index) => {
       if (!item || typeof item !== 'object') return;
       const record = item as Record<string, unknown>;
-      const address = typeof record.wallet_address === 'string' ? record.wallet_address
-        : typeof record.address === 'string' ? record.address : null;
+      const address =
+        typeof record.wallet_address === 'string'
+          ? record.wallet_address
+          : typeof record.address === 'string'
+            ? record.address
+            : null;
       if (!address || !wanted.has(address)) return;
       const entry = state.get(address)!;
       const position = index + 1;
@@ -352,17 +472,26 @@ export const readWalletRankHistory = (
 
   return [...state.values()].map(({ ranks, ...entry }) => ({
     ...entry,
-    topFiveMembershipPercent: entry.leaderboardCaptures === 0 ? null
-      : Math.round((entry.topFiveAppearances / entry.leaderboardCaptures) * 1000) / 10,
+    topFiveMembershipPercent:
+      entry.leaderboardCaptures === 0
+        ? null
+        : Math.round((entry.topFiveAppearances / entry.leaderboardCaptures) * 1000) / 10,
     bestRank: ranks.length ? Math.min(...ranks) : null,
     worstRank: ranks.length ? Math.max(...ranks) : null,
   }));
 };
 
-export const rankItemToWallet = (item: RankItem, index: number, chain: string): RosterWallet | null => {
-  const walletAddress = typeof item.wallet_address === 'string' && item.wallet_address.length > 0
-    ? item.wallet_address
-    : typeof item.address === 'string' && item.address.length > 0 ? item.address : null;
+export const rankItemToWallet = (
+  item: RankItem,
+  index: number,
+  chain: string,
+): RosterWallet | null => {
+  const walletAddress =
+    typeof item.wallet_address === 'string' && item.wallet_address.length > 0
+      ? item.wallet_address
+      : typeof item.address === 'string' && item.address.length > 0
+        ? item.address
+        : null;
   if (!walletAddress) return null;
   return {
     walletAddress,
@@ -384,12 +513,20 @@ export const compareLatestRosterSnapshots = (
 ): RosterComparison => {
   const chain = options.chain ?? 'sol';
   const limit = Math.max(1, Math.min(100, Math.trunc(options.limit ?? 100)));
-  const snapshots = database.prepare(
-    `SELECT id FROM gmgn_wallet_rank_snapshots ORDER BY captured_at DESC, id DESC LIMIT 2`,
-  ).all() as unknown as Array<{ id: number }>;
-  const currentSnapshot = snapshots[0] ? readRankSnapshot(database, snapshots[0].id) : { snapshotId: null, capturedAt: null, rank: [] };
-  const previousSnapshot = snapshots[1] ? readRankSnapshot(database, snapshots[1].id) : { snapshotId: null, capturedAt: null, rank: [] };
-  const toWallets = (snapshot: typeof currentSnapshot): RosterWallet[] => snapshot.rank.slice(0, limit).map((item, index) => rankItemToWallet(item, index, chain)).filter((wallet): wallet is RosterWallet => wallet !== null);
+  const snapshots = database
+    .prepare(`SELECT id FROM gmgn_wallet_rank_snapshots ORDER BY captured_at DESC, id DESC LIMIT 2`)
+    .all() as unknown as Array<{ id: number }>;
+  const currentSnapshot = snapshots[0]
+    ? readRankSnapshot(database, snapshots[0].id)
+    : { snapshotId: null, capturedAt: null, rank: [] };
+  const previousSnapshot = snapshots[1]
+    ? readRankSnapshot(database, snapshots[1].id)
+    : { snapshotId: null, capturedAt: null, rank: [] };
+  const toWallets = (snapshot: typeof currentSnapshot): RosterWallet[] =>
+    snapshot.rank
+      .slice(0, limit)
+      .map((item, index) => rankItemToWallet(item, index, chain))
+      .filter((wallet): wallet is RosterWallet => wallet !== null);
   const current = toWallets(currentSnapshot);
   const previous = toWallets(previousSnapshot);
   const previousSet = new Set(previous.map((wallet) => wallet.walletAddress));
@@ -422,9 +559,11 @@ export const syncCopyTradeRoster = (
   const chain = options.chain ?? 'sol';
   const addedAt = (options.now ?? new Date()).toISOString();
   const { snapshotId, capturedAt, rank } = readLatestRankSnapshot(database);
-  if (snapshotId === null) return { snapshotId: null, capturedAt: null, added: 0, alreadyPresent: 0, total: 0 };
+  if (snapshotId === null)
+    return { snapshotId: null, capturedAt: null, added: 0, alreadyPresent: 0, total: 0 };
 
-  const limited = typeof options.limit === 'number' && options.limit > 0 ? rank.slice(0, options.limit) : rank;
+  const limited =
+    typeof options.limit === 'number' && options.limit > 0 ? rank.slice(0, options.limit) : rank;
   const insert = database.prepare(
     `INSERT OR IGNORE INTO copytrade_wallets
        (wallet_address, chain, name, icon_url, source_snapshot_id, rank_position,
@@ -441,13 +580,29 @@ export const syncCopyTradeRoster = (
     const wallet = rankItemToWallet(item, index, chain);
     if (!wallet) continue;
     const result = insert.run(
-      wallet.walletAddress, wallet.chain, wallet.name, wallet.iconUrl, snapshotId, wallet.rankPosition,
-      wallet.reportedPnl30d, wallet.reportedWinrate30d, JSON.stringify(wallet.riskFlags), JSON.stringify(wallet.gmgnTags), addedAt,
+      wallet.walletAddress,
+      wallet.chain,
+      wallet.name,
+      wallet.iconUrl,
+      snapshotId,
+      wallet.rankPosition,
+      wallet.reportedPnl30d,
+      wallet.reportedWinrate30d,
+      JSON.stringify(wallet.riskFlags),
+      JSON.stringify(wallet.gmgnTags),
+      addedAt,
     );
     // Existing snapshot rows may have been created before GMGN moved these labels under
     // common.tags. Refresh the labels without creating a duplicate roster row.
-    updateTags.run(JSON.stringify(wallet.riskFlags), JSON.stringify(wallet.gmgnTags), wallet.walletAddress, wallet.chain, snapshotId);
-    if (result.changes > 0) added += 1; else alreadyPresent += 1;
+    updateTags.run(
+      JSON.stringify(wallet.riskFlags),
+      JSON.stringify(wallet.gmgnTags),
+      wallet.walletAddress,
+      wallet.chain,
+      snapshotId,
+    );
+    if (result.changes > 0) added += 1;
+    else alreadyPresent += 1;
   }
   return { snapshotId, capturedAt, added, alreadyPresent, total: added + alreadyPresent };
 };
@@ -474,14 +629,18 @@ export const listRosterWallets = (
   const scope = options.allSnapshots
     ? `id IN (SELECT MAX(id) FROM copytrade_wallets WHERE chain = ? GROUP BY wallet_address)`
     : `source_snapshot_id = ?`;
-  const rows = database.prepare(
-    `SELECT wallet_address AS walletAddress, chain, name, icon_url AS iconUrl, rank_position AS rankPosition,
+  const rows = database
+    .prepare(
+      `SELECT wallet_address AS walletAddress, chain, name, icon_url AS iconUrl, rank_position AS rankPosition,
             reported_pnl_30d AS reportedPnl30d, reported_winrate_30d AS reportedWinrate30d,
             risk_flags AS riskFlags, gmgn_tags AS gmgnTags
      FROM copytrade_wallets
      WHERE chain = ? AND ${scope}
      ORDER BY rank_position IS NULL, rank_position ASC, wallet_address ASC`,
-  ).all(chain, options.allSnapshots ? chain : latestSnapshotId) as unknown as Array<Omit<RosterWallet, 'riskFlags' | 'gmgnTags'> & { riskFlags: string; gmgnTags: string }>;
+    )
+    .all(chain, options.allSnapshots ? chain : latestSnapshotId) as unknown as Array<
+    Omit<RosterWallet, 'riskFlags' | 'gmgnTags'> & { riskFlags: string; gmgnTags: string }
+  >;
 
   const wallets = rows.map((row) => {
     // Unparseable flags mean "we do not know", and the safe reading of "we do not know" is
@@ -491,16 +650,24 @@ export const listRosterWallets = (
     let riskFlags: string[] = [UNKNOWN_RISK_FLAG];
     try {
       const parsed: unknown = JSON.parse(row.riskFlags);
-      if (Array.isArray(parsed)) riskFlags = parsed.filter((flag): flag is string => typeof flag === 'string');
-    } catch { /* keep the unknown marker */ }
+      if (Array.isArray(parsed))
+        riskFlags = parsed.filter((flag): flag is string => typeof flag === 'string');
+    } catch {
+      /* keep the unknown marker */
+    }
     let gmgnTags: string[] = [];
     try {
       const parsed: unknown = JSON.parse(row.gmgnTags);
-      if (Array.isArray(parsed)) gmgnTags = parsed.filter((tag): tag is string => typeof tag === 'string');
-    } catch { /* migration backfills legacy rows */ }
+      if (Array.isArray(parsed))
+        gmgnTags = parsed.filter((tag): tag is string => typeof tag === 'string');
+    } catch {
+      /* migration backfills legacy rows */
+    }
     return { ...row, riskFlags, gmgnTags };
   });
-  return typeof options.limit === 'number' && options.limit > 0 ? wallets.slice(0, options.limit) : wallets;
+  return typeof options.limit === 'number' && options.limit > 0
+    ? wallets.slice(0, options.limit)
+    : wallets;
 };
 
 /** Base58, Solana address alphabet only (excludes 0/O/I/l — those never appear in a real
@@ -524,15 +691,19 @@ export type SingleTraderLookup =
  * 'not_found', not silently treated as an address.
  */
 export const resolveSingleTrader = (
-  database: DatabaseSync, query: string, chain = 'sol',
+  database: DatabaseSync,
+  query: string,
+  chain = 'sol',
 ): SingleTraderLookup => {
   const trimmed = query.trim();
   if (SOL_ADDRESS_PATTERN.test(trimmed)) return { kind: 'address', walletAddress: trimmed };
-  const row = database.prepare(
-    `SELECT wallet_address AS walletAddress, name FROM copytrade_wallets
+  const row = database
+    .prepare(
+      `SELECT wallet_address AS walletAddress, name FROM copytrade_wallets
      WHERE chain = ? AND name IS NOT NULL AND LOWER(name) = LOWER(?)
      ORDER BY added_at DESC LIMIT 1`,
-  ).get(chain, trimmed) as { walletAddress: string; name: string } | undefined;
+    )
+    .get(chain, trimmed) as { walletAddress: string; name: string } | undefined;
   if (row) return { kind: 'name_match', walletAddress: row.walletAddress, matchedName: row.name };
   return { kind: 'not_found', query: trimmed };
 };

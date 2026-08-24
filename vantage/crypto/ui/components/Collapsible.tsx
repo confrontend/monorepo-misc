@@ -12,7 +12,11 @@ export const Collapsible = ({ summary, children, className, open, onToggle }: Co
   <details
     className={className}
     open={open}
-    onToggle={onToggle ? (event: SyntheticEvent<HTMLDetailsElement>) => onToggle(event.currentTarget.open) : undefined}
+    onToggle={
+      onToggle
+        ? (event: SyntheticEvent<HTMLDetailsElement>) => onToggle(event.currentTarget.open)
+        : undefined
+    }
   >
     <summary>{summary}</summary>
     {children}

@@ -1,62 +1,176 @@
 <!doctype html>
 <html>
-<head>
-<meta charset="utf-8" />
-<title>GMGN Signal Capture</title>
-<style>
-  body { font: 13px system-ui, sans-serif; width: 540px; padding: 12px; background: #101614; color: #e9f2ed; }
-  h1 { font-size: 13px; margin: 0 0 8px; color: #83d6b0; text-transform: uppercase; letter-spacing: .06em; }
-  #version { color: #5f8a76; font-weight: 400; text-transform: none; letter-spacing: normal; }
-  #status { margin: 0 0 10px; color: #a6b6ae; line-height: 1.4; }
-  button { width: 100%; padding: 9px; margin-top: 6px; cursor: pointer; border-radius: 6px; border: 1px solid #2d5648; background: #182720; color: #e9f2ed; font: inherit; }
-  button:hover { background: #20352b; }
-  #toggle.active { background: #72d8aa; color: #112118; border-color: #72d8aa; font-weight: 600; }
-  #investigate.active { background: #e5bd67; color: #211a0c; border-color: #e5bd67; font-weight: 700; }
-  #riskAuto.active { background: #72d8aa; color: #112118; border-color: #72d8aa; font-weight: 600; }
-  .route-stats { margin-top: 9px; color: #c4d9ce; font-size: 12px; font-variant-numeric: tabular-nums; }
-  small { display: block; margin-top: 10px; color: #71877c; line-height: 1.4; }
-  .route-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .route-card { border: 1px solid #2d5648; border-radius: 8px; padding: 10px; background: #121e19; }
-  .route-card > summary { cursor: pointer; list-style: none; }
-  .route-card > summary::-webkit-details-marker { display: none; }
-  .route-card > summary::before { content: '▸'; display: inline-block; margin-right: 6px; color: #83d6b0; transition: transform .15s ease; }
-  .route-card[open] > summary::before { transform: rotate(90deg); }
-  .route-card h2 { display: inline; font-size: 12px; margin: 0; color: #83d6b0; text-transform: uppercase; letter-spacing: .05em; }
-  .route-card p { min-height: 48px; margin: 0; color: #a6b6ae; line-height: 1.35; font-size: 12px; }
-  .route-card button { margin-top: 7px; }
-  @media (max-width: 420px) { body { width: 260px; } .route-grid { grid-template-columns: 1fr; } }
-</style>
-</head>
-<body>
-  <h1>GMGN Signal Capture <span id="version"></span></h1>
-  <div id="status">Loading…</div>
-  <div class="route-grid">
-    <details class="route-card">
-      <summary><h2>Signal capture</h2></summary>
-      <p>Stores the known GMGN signal and related research events. To update the app's top-100 roster, open GMGN's wallet leaderboard while capture is on, then export this JSON and upload it in the app.</p>
-      <button id="toggle">Start capture</button>
-      <button id="export">Export captured JSON</button>
-      <button id="clear">Clear signal data</button>
-      <div id="capture-stats" class="route-stats">0 event batches · 0 coverage windows</div>
-    </details>
-    <details class="route-card">
-      <summary><h2>Investigation sampling</h2></summary>
-      <p>Samples unique fetch/XHR/WebSocket URLs and representative payloads.</p>
-      <button id="investigate">Start investigation sampling</button>
-      <button id="exportInvestigation">Export investigation JSON</button>
-      <button id="clearInvestigation">Clear investigation data</button>
-      <div id="investigation-stats" class="route-stats">0 unique endpoints · 0 sampled hits</div>
-    </details>
-    <details class="route-card">
-      <summary><h2>Wallet risk details</h2></summary>
-      <p>When enabled, passively captures GMGN’s own 30-day JSON risk response when GMGN requests it. The extension never requests this data itself. Cookies are never saved or exported.</p>
-      <button id="riskAuto">Enable 30d risk capture</button>
-      <button id="exportRisk">Export 30d risk JSON</button>
-      <button id="clearRisk">Clear risk data</button>
-      <div id="risk-stats" class="route-stats">0 wallet risk response(s)</div>
-    </details>
-  </div>
-  <small>These routes are independent. Investigation sampling is opt-in and does not alter normal signal storage. Nothing leaves your machine except the file you choose to export.</small>
-  <script src="popup.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>GMGN Signal Capture</title>
+    <style>
+      body {
+        font:
+          13px system-ui,
+          sans-serif;
+        width: 540px;
+        padding: 12px;
+        background: #101614;
+        color: #e9f2ed;
+      }
+      h1 {
+        font-size: 13px;
+        margin: 0 0 8px;
+        color: #83d6b0;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      #version {
+        color: #5f8a76;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+      }
+      #status {
+        margin: 0 0 10px;
+        color: #a6b6ae;
+        line-height: 1.4;
+      }
+      button {
+        width: 100%;
+        padding: 9px;
+        margin-top: 6px;
+        cursor: pointer;
+        border-radius: 6px;
+        border: 1px solid #2d5648;
+        background: #182720;
+        color: #e9f2ed;
+        font: inherit;
+      }
+      button:hover {
+        background: #20352b;
+      }
+      #toggle.active {
+        background: #72d8aa;
+        color: #112118;
+        border-color: #72d8aa;
+        font-weight: 600;
+      }
+      #investigate.active {
+        background: #e5bd67;
+        color: #211a0c;
+        border-color: #e5bd67;
+        font-weight: 700;
+      }
+      #riskAuto.active {
+        background: #72d8aa;
+        color: #112118;
+        border-color: #72d8aa;
+        font-weight: 600;
+      }
+      .route-stats {
+        margin-top: 9px;
+        color: #c4d9ce;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      small {
+        display: block;
+        margin-top: 10px;
+        color: #71877c;
+        line-height: 1.4;
+      }
+      .route-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .route-card {
+        border: 1px solid #2d5648;
+        border-radius: 8px;
+        padding: 10px;
+        background: #121e19;
+      }
+      .route-card > summary {
+        cursor: pointer;
+        list-style: none;
+      }
+      .route-card > summary::-webkit-details-marker {
+        display: none;
+      }
+      .route-card > summary::before {
+        content: '▸';
+        display: inline-block;
+        margin-right: 6px;
+        color: #83d6b0;
+        transition: transform 0.15s ease;
+      }
+      .route-card[open] > summary::before {
+        transform: rotate(90deg);
+      }
+      .route-card h2 {
+        display: inline;
+        font-size: 12px;
+        margin: 0;
+        color: #83d6b0;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .route-card p {
+        min-height: 48px;
+        margin: 0;
+        color: #a6b6ae;
+        line-height: 1.35;
+        font-size: 12px;
+      }
+      .route-card button {
+        margin-top: 7px;
+      }
+      @media (max-width: 420px) {
+        body {
+          width: 260px;
+        }
+        .route-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>GMGN Signal Capture <span id="version"></span></h1>
+    <div id="status">Loading…</div>
+    <div class="route-grid">
+      <details class="route-card">
+        <summary><h2>Signal capture</h2></summary>
+        <p>
+          Stores the known GMGN signal and related research events. To update the app's top-100
+          roster, open GMGN's wallet leaderboard while capture is on, then export this JSON and
+          upload it in the app.
+        </p>
+        <button id="toggle">Start capture</button>
+        <button id="export">Export captured JSON</button>
+        <button id="clear">Clear signal data</button>
+        <div id="capture-stats" class="route-stats">0 event batches · 0 coverage windows</div>
+      </details>
+      <details class="route-card">
+        <summary><h2>Investigation sampling</h2></summary>
+        <p>Samples unique fetch/XHR/WebSocket URLs and representative payloads.</p>
+        <button id="investigate">Start investigation sampling</button>
+        <button id="exportInvestigation">Export investigation JSON</button>
+        <button id="clearInvestigation">Clear investigation data</button>
+        <div id="investigation-stats" class="route-stats">0 unique endpoints · 0 sampled hits</div>
+      </details>
+      <details class="route-card">
+        <summary><h2>Wallet risk details</h2></summary>
+        <p>
+          When enabled, passively captures GMGN’s own 30-day JSON risk response when GMGN requests
+          it. The extension never requests this data itself. Cookies are never saved or exported.
+        </p>
+        <button id="riskAuto">Enable 30d risk capture</button>
+        <button id="exportRisk">Export 30d risk JSON</button>
+        <button id="clearRisk">Clear risk data</button>
+        <div id="risk-stats" class="route-stats">0 wallet risk response(s)</div>
+      </details>
+    </div>
+    <small
+      >These routes are independent. Investigation sampling is opt-in and does not alter normal
+      signal storage. Nothing leaves your machine except the file you choose to export.</small
+    >
+    <script src="popup.js"></script>
+  </body>
 </html>

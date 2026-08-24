@@ -20,8 +20,10 @@ export const TRADE_AGE_POLICY = {
     '+7d': 24 * 60 * 60,
   } as Record<string, number>,
 } as const;
-const DISCLAIMER = 'Descriptive research only. This summarizes signals already measured; it is not proof that any signal type is profitable or predictive going forward.';
-const STALE_NOTE = 'A "stale" comparison means no new trade happened before this checkpoint, so the last known price was reused instead of a real observation. Stale comparisons are excluded from up %/avg/median below — only genuine new-trade comparisons count toward them.';
+const DISCLAIMER =
+  'Descriptive research only. This summarizes signals already measured; it is not proof that any signal type is profitable or predictive going forward.';
+const STALE_NOTE =
+  'A "stale" comparison means no new trade happened before this checkpoint, so the last known price was reused instead of a real observation. Stale comparisons are excluded from up %/avg/median below — only genuine new-trade comparisons count toward them.';
 
 export interface SignalPatternGroup {
   key: string;
@@ -71,8 +73,20 @@ export interface SignalPatternReport {
   sourceRunIds: number[];
 }
 
-type CheckpointPrice = { priceUsd: number | null; matchedTradeAt: string | null; matchedTradeAgeSeconds?: number | null } | undefined;
-type Comparison = { status: 'missing' | 'stale' | 'fresh'; returnPct: number | null; tokenAddress: string; baselineAgeSeconds: number | null; targetAgeSeconds: number | null };
+type CheckpointPrice =
+  | {
+      priceUsd: number | null;
+      matchedTradeAt: string | null;
+      matchedTradeAgeSeconds?: number | null;
+    }
+  | undefined;
+type Comparison = {
+  status: 'missing' | 'stale' | 'fresh';
+  returnPct: number | null;
+  tokenAddress: string;
+  baselineAgeSeconds: number | null;
+  targetAgeSeconds: number | null;
+};
 
 /**
  * A checkpoint only counts as a genuine ("fresh") observation when a new trade was matched
@@ -80,43 +94,90 @@ type Comparison = { status: 'missing' | 'stale' | 'fresh'; returnPct: number | n
  * same last-known trade (no new trading activity in that window), the "0% change" it would
  * otherwise report is an artifact of no data, not evidence the price held steady.
  */
-const classifyComparison = (base: CheckpointPrice, target: CheckpointPrice, tokenAddress: string, horizon: string): Comparison => {
+const classifyComparison = (
+  base: CheckpointPrice,
+  target: CheckpointPrice,
+  tokenAddress: string,
+  horizon: string,
+): Comparison => {
   const baselineAgeSeconds = base?.matchedTradeAgeSeconds ?? null;
   const targetAgeSeconds = target?.matchedTradeAgeSeconds ?? null;
-  if (!base || !target || base.priceUsd === null || target.priceUsd === null || base.priceUsd === 0) return { status: 'missing', returnPct: null, tokenAddress, baselineAgeSeconds, targetAgeSeconds };
+  if (!base || !target || base.priceUsd === null || target.priceUsd === null || base.priceUsd === 0)
+    return {
+      status: 'missing',
+      returnPct: null,
+      tokenAddress,
+      baselineAgeSeconds,
+      targetAgeSeconds,
+    };
   const maxTargetAgeSeconds = TRADE_AGE_POLICY.targetMaxSeconds[horizon] ?? Infinity;
   // Older archived runs may not carry the derived age fields. Preserve those rows for
   // audit/backward compatibility; enforce the cutoff whenever the source provides an age.
-  if ((baselineAgeSeconds !== null && (baselineAgeSeconds < 0 || baselineAgeSeconds > TRADE_AGE_POLICY.baselineMaxSeconds)) ||
-      (targetAgeSeconds !== null && (targetAgeSeconds < 0 || targetAgeSeconds > maxTargetAgeSeconds))) {
-    return { status: 'missing', returnPct: null, tokenAddress, baselineAgeSeconds, targetAgeSeconds };
+  if (
+    (baselineAgeSeconds !== null &&
+      (baselineAgeSeconds < 0 || baselineAgeSeconds > TRADE_AGE_POLICY.baselineMaxSeconds)) ||
+    (targetAgeSeconds !== null && (targetAgeSeconds < 0 || targetAgeSeconds > maxTargetAgeSeconds))
+  ) {
+    return {
+      status: 'missing',
+      returnPct: null,
+      tokenAddress,
+      baselineAgeSeconds,
+      targetAgeSeconds,
+    };
   }
-  if (base.matchedTradeAt !== null && base.matchedTradeAt === target.matchedTradeAt) return { status: 'stale', returnPct: null, tokenAddress, baselineAgeSeconds, targetAgeSeconds };
-  return { status: 'fresh', returnPct: ((target.priceUsd - base.priceUsd) / base.priceUsd) * 100, tokenAddress, baselineAgeSeconds, targetAgeSeconds };
+  if (base.matchedTradeAt !== null && base.matchedTradeAt === target.matchedTradeAt)
+    return { status: 'stale', returnPct: null, tokenAddress, baselineAgeSeconds, targetAgeSeconds };
+  return {
+    status: 'fresh',
+    returnPct: ((target.priceUsd - base.priceUsd) / base.priceUsd) * 100,
+    tokenAddress,
+    baselineAgeSeconds,
+    targetAgeSeconds,
+  };
 };
 
-const summarizeGroup = (key: string, entries: Comparison[], nCaptured: number, nMatured: number, captureDates: number, nRepeatedExcluded: number): SignalPatternGroup => {
+const summarizeGroup = (
+  key: string,
+  entries: Comparison[],
+  nCaptured: number,
+  nMatured: number,
+  captureDates: number,
+  nRepeatedExcluded: number,
+): SignalPatternGroup => {
   const nMissing = entries.filter((entry) => entry.status === 'missing').length;
   const nStale = entries.filter((entry) => entry.status === 'stale').length;
   const fresh = entries.filter((entry) => entry.status === 'fresh' && entry.returnPct !== null);
   const freshReturns = fresh.map((entry) => entry.returnPct as number);
   const upCount = freshReturns.filter((value) => value > 0).length;
   const sorted = [...freshReturns].sort((a, b) => a - b);
-  const percentile = (fraction: number): number | null => sorted.length ? sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1))] : null;
+  const percentile = (fraction: number): number | null =>
+    sorted.length
+      ? sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1))]
+      : null;
   const medianReturnPct = percentile(0.5);
-  const avgReturnPct = freshReturns.length ? freshReturns.reduce((sum, value) => sum + value, 0) / freshReturns.length : null;
+  const avgReturnPct = freshReturns.length
+    ? freshReturns.reduce((sum, value) => sum + value, 0) / freshReturns.length
+    : null;
   const p25ReturnPct = percentile(0.25);
   const worstReturnPct = sorted.length ? sorted[0] : null;
   const bestReturnPct = sorted.length ? sorted[sorted.length - 1] : null;
   // nMatured is the deduped first-observation population. Repeats never dilute or
   // inflate coverage, and captureDates is supplied from fresh deduped rows only.
   const coveragePct = nMatured ? (freshReturns.length / nMatured) * 100 : null;
-  const reliable = freshReturns.length >= MIN_RELIABLE_SAMPLE && new Set(fresh.map((entry) => entry.tokenAddress)).size >= MIN_RELIABLE_SAMPLE && (coveragePct ?? 0) >= MIN_COVERAGE_PCT && captureDates >= MIN_CAPTURE_DATES;
+  const reliable =
+    freshReturns.length >= MIN_RELIABLE_SAMPLE &&
+    new Set(fresh.map((entry) => entry.tokenAddress)).size >= MIN_RELIABLE_SAMPLE &&
+    (coveragePct ?? 0) >= MIN_COVERAGE_PCT &&
+    captureDates >= MIN_CAPTURE_DATES;
   const verdict: SignalPatternGroup['verdict'] = !reliable
     ? 'insufficient data'
-    : medianReturnPct !== null && medianReturnPct > 0 && (upCount / freshReturns.length) >= 0.5 && (avgReturnPct ?? -Infinity) >= 0
+    : medianReturnPct !== null &&
+        medianReturnPct > 0 &&
+        upCount / freshReturns.length >= 0.5 &&
+        (avgReturnPct ?? -Infinity) >= 0
       ? 'promising but fragile'
-      : medianReturnPct !== null && medianReturnPct > 0 && (upCount / freshReturns.length) >= 0.5
+      : medianReturnPct !== null && medianReturnPct > 0 && upCount / freshReturns.length >= 0.5
         ? 'mixed'
         : 'weak';
   return {
@@ -132,11 +193,21 @@ const summarizeGroup = (key: string, entries: Comparison[], nCaptured: number, n
     coveragePct,
     captureDates,
     nRepeatedExcluded,
-    maxBaselineTradeAgeSeconds: Math.max(...fresh.map((entry) => entry.baselineAgeSeconds ?? -Infinity), -Infinity) === -Infinity ? null : Math.max(...fresh.map((entry) => entry.baselineAgeSeconds ?? -Infinity)),
-    maxTargetTradeAgeSeconds: Math.max(...fresh.map((entry) => entry.targetAgeSeconds ?? -Infinity), -Infinity) === -Infinity ? null : Math.max(...fresh.map((entry) => entry.targetAgeSeconds ?? -Infinity)),
+    maxBaselineTradeAgeSeconds:
+      Math.max(...fresh.map((entry) => entry.baselineAgeSeconds ?? -Infinity), -Infinity) ===
+      -Infinity
+        ? null
+        : Math.max(...fresh.map((entry) => entry.baselineAgeSeconds ?? -Infinity)),
+    maxTargetTradeAgeSeconds:
+      Math.max(...fresh.map((entry) => entry.targetAgeSeconds ?? -Infinity), -Infinity) ===
+      -Infinity
+        ? null
+        : Math.max(...fresh.map((entry) => entry.targetAgeSeconds ?? -Infinity)),
     upCount,
     upPct: freshReturns.length ? (upCount / freshReturns.length) * 100 : null,
-    avgReturnPct: freshReturns.length ? freshReturns.reduce((sum, value) => sum + value, 0) / freshReturns.length : null,
+    avgReturnPct: freshReturns.length
+      ? freshReturns.reduce((sum, value) => sum + value, 0) / freshReturns.length
+      : null,
     medianReturnPct,
     p25ReturnPct,
     worstReturnPct,
@@ -153,10 +224,23 @@ const summarizeGroup = (key: string, entries: Comparison[], nCaptured: number, n
  * Groups are ranked by median, not average — a single outlier trade can swing an average by
  * a huge margin while barely moving the median, so median is the more honest "typical outcome."
  */
-export const computeSignalPatternReport = (database: DatabaseSync, now = new Date()): SignalPatternReport => {
-  const sourceRunIds = (database.prepare(`SELECT id FROM dune_outcome_runs WHERE status = 'completed' AND raw_result IS NOT NULL ORDER BY id ASC`).all() as unknown as Array<{ id: number }>).map((row) => row.id);
+export const computeSignalPatternReport = (
+  database: DatabaseSync,
+  now = new Date(),
+): SignalPatternReport => {
+  const sourceRunIds = (
+    database
+      .prepare(
+        `SELECT id FROM dune_outcome_runs WHERE status = 'completed' AND raw_result IS NOT NULL ORDER BY id ASC`,
+      )
+      .all() as unknown as Array<{ id: number }>
+  ).map((row) => row.id);
   const outcomes = readAllDuneOutcomes(database);
-  const horizonLabels = [...new Set(outcomes.flatMap((outcome) => outcome.checkpoints.map((checkpoint) => checkpoint.label)))].filter((label) => label !== 'signal');
+  const horizonLabels = [
+    ...new Set(
+      outcomes.flatMap((outcome) => outcome.checkpoints.map((checkpoint) => checkpoint.label)),
+    ),
+  ].filter((label) => label !== 'signal');
 
   const horizons: SignalPatternHorizonReport[] = horizonLabels.map((horizon) => {
     const byType = new Map<string, Comparison[]>();
@@ -166,10 +250,15 @@ export const computeSignalPatternReport = (database: DatabaseSync, now = new Dat
     const byTypeRepeated = new Map<string, number>();
     const overallEntries: Comparison[] = [];
     const firstByTokenType = new Set<string>();
-    let overallCaptured = 0; let overallMatured = 0; let overallRepeated = 0; const overallDates = new Set<string>();
+    let overallCaptured = 0;
+    let overallMatured = 0;
+    let overallRepeated = 0;
+    const overallDates = new Set<string>();
     for (const outcome of outcomes) {
       const base = outcome.checkpoints.find((checkpoint) => checkpoint.label === 'signal')?.result;
-      const targetCheckpoint = outcome.checkpoints.find((checkpoint) => checkpoint.label === horizon);
+      const targetCheckpoint = outcome.checkpoints.find(
+        (checkpoint) => checkpoint.label === horizon,
+      );
       const target = targetCheckpoint?.result;
       const entry = classifyComparison(base, target, outcome.signal.tokenAddress, horizon);
       const key = outcome.signal.signalType ?? 'unknown';
@@ -178,7 +267,11 @@ export const computeSignalPatternReport = (database: DatabaseSync, now = new Dat
       overallCaptured += 1;
       byTypeCaptured.set(key, (byTypeCaptured.get(key) ?? 0) + 1);
       const tokenTypeKey = `${key}\u0000${outcome.signal.tokenAddress}`;
-      if (firstByTokenType.has(tokenTypeKey)) { overallRepeated += 1; byTypeRepeated.set(key, (byTypeRepeated.get(key) ?? 0) + 1); continue; }
+      if (firstByTokenType.has(tokenTypeKey)) {
+        overallRepeated += 1;
+        byTypeRepeated.set(key, (byTypeRepeated.get(key) ?? 0) + 1);
+        continue;
+      }
       firstByTokenType.add(tokenTypeKey);
       if (matured) {
         overallMatured += 1;
@@ -194,9 +287,29 @@ export const computeSignalPatternReport = (database: DatabaseSync, now = new Dat
       overallEntries.push(entry);
     }
     const groups = [...byType.entries()]
-      .map(([key, entries]) => summarizeGroup(key, entries, byTypeCaptured.get(key) ?? 0, byTypeMatured.get(key) ?? 0, byTypeDates.get(key)?.size ?? 0, byTypeRepeated.get(key) ?? 0))
+      .map(([key, entries]) =>
+        summarizeGroup(
+          key,
+          entries,
+          byTypeCaptured.get(key) ?? 0,
+          byTypeMatured.get(key) ?? 0,
+          byTypeDates.get(key)?.size ?? 0,
+          byTypeRepeated.get(key) ?? 0,
+        ),
+      )
       .sort((a, b) => (b.medianReturnPct ?? -Infinity) - (a.medianReturnPct ?? -Infinity));
-    return { horizon, overall: summarizeGroup('overall', overallEntries, overallCaptured, overallMatured, overallDates.size, overallRepeated), groups };
+    return {
+      horizon,
+      overall: summarizeGroup(
+        'overall',
+        overallEntries,
+        overallCaptured,
+        overallMatured,
+        overallDates.size,
+        overallRepeated,
+      ),
+      groups,
+    };
   });
 
   return {
@@ -219,24 +332,66 @@ export const computeSignalPatternReport = (database: DatabaseSync, now = new Dat
 export interface SignalPatternSnapshot {
   id: number;
   computedAt: string;
-  params: { groupBy: string; upThreshold: number; minReliableSample: number; minCoveragePct: number; minCaptureDates: number; analysisUnit: string };
+  params: {
+    groupBy: string;
+    upThreshold: number;
+    minReliableSample: number;
+    minCoveragePct: number;
+    minCaptureDates: number;
+    analysisUnit: string;
+  };
   sourceRunIds: number[];
   report: SignalPatternReport;
 }
 
-export const saveSignalPatternSnapshot = (database: DatabaseSync, report: SignalPatternReport): SignalPatternSnapshot => {
-  const params = { groupBy: report.groupBy, upThreshold: report.upThreshold, minReliableSample: report.minReliableSample, minCoveragePct: report.minCoveragePct, minCaptureDates: report.minCaptureDates, analysisUnit: report.analysisUnit };
-  const inserted = database.prepare(`
+export const saveSignalPatternSnapshot = (
+  database: DatabaseSync,
+  report: SignalPatternReport,
+): SignalPatternSnapshot => {
+  const params = {
+    groupBy: report.groupBy,
+    upThreshold: report.upThreshold,
+    minReliableSample: report.minReliableSample,
+    minCoveragePct: report.minCoveragePct,
+    minCaptureDates: report.minCaptureDates,
+    analysisUnit: report.analysisUnit,
+  };
+  const inserted = database
+    .prepare(
+      `
     INSERT INTO signal_pattern_snapshots (computed_at, params_json, source_run_ids_json, report_json) VALUES (?, ?, ?, ?)
-  `).run(report.computedAt, JSON.stringify(params), JSON.stringify(report.sourceRunIds), JSON.stringify(report));
-  return { id: Number(inserted.lastInsertRowid), computedAt: report.computedAt, params, sourceRunIds: report.sourceRunIds, report };
+  `,
+    )
+    .run(
+      report.computedAt,
+      JSON.stringify(params),
+      JSON.stringify(report.sourceRunIds),
+      JSON.stringify(report),
+    );
+  return {
+    id: Number(inserted.lastInsertRowid),
+    computedAt: report.computedAt,
+    params,
+    sourceRunIds: report.sourceRunIds,
+    report,
+  };
 };
 
 export const listSignalPatternSnapshots = (database: DatabaseSync): SignalPatternSnapshot[] => {
-  const rows = database.prepare(`
+  const rows = database
+    .prepare(
+      `
     SELECT id, computed_at AS computedAt, params_json AS paramsJson, source_run_ids_json AS sourceRunIdsJson, report_json AS reportJson
     FROM signal_pattern_snapshots ORDER BY id DESC
-  `).all() as unknown as Array<{ id: number; computedAt: string; paramsJson: string; sourceRunIdsJson: string; reportJson: string }>;
+  `,
+    )
+    .all() as unknown as Array<{
+    id: number;
+    computedAt: string;
+    paramsJson: string;
+    sourceRunIdsJson: string;
+    reportJson: string;
+  }>;
   return rows.map((row) => ({
     id: row.id,
     computedAt: row.computedAt,
@@ -279,11 +434,18 @@ const parseRawPayload = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== 'string') return null;
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-  } catch { return null; }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 };
 
-const asRecord = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 
 /**
  * Returns null (excluded from the subgroup, counted separately as unextractable) whenever the
@@ -292,7 +454,10 @@ const asRecord = (value: unknown): Record<string, unknown> | null => value && ty
  * real rows, likely clock skew between GMGN's data sources) is treated the same way rather
  * than silently clipped into the youngest bucket.
  */
-const extractSingleProperty = (property: 'launchPlatform' | 'tokenAge', rawPayload: Record<string, unknown> | null): string | null => {
+const extractSingleProperty = (
+  property: 'launchPlatform' | 'tokenAge',
+  rawPayload: Record<string, unknown> | null,
+): string | null => {
   if (!rawPayload) return null;
   const data = asRecord(rawPayload.data);
   const curData = asRecord(rawPayload.cur_data);
@@ -315,7 +480,10 @@ const extractSingleProperty = (property: 'launchPlatform' | 'tokenAge', rawPaylo
  * partial combinations are excluded and counted, same conservative rule as the single-property
  * views, rather than mixing a real platform with a guessed/blank age or vice versa.
  */
-const extractSubgroupValue = (property: SubgroupProperty, rawPayload: Record<string, unknown> | null): string | null => {
+const extractSubgroupValue = (
+  property: SubgroupProperty,
+  rawPayload: Record<string, unknown> | null,
+): string | null => {
   if (property !== 'combined') return extractSingleProperty(property, rawPayload);
   const platform = extractSingleProperty('launchPlatform', rawPayload);
   const age = extractSingleProperty('tokenAge', rawPayload);
@@ -347,23 +515,40 @@ export interface SignalPatternSubgroupReport {
  * many were tested, rather than looking meaningful in isolation — there is no statistical
  * multiple-comparisons correction here, just visibility into the number of comparisons made.
  */
-export const computeSignalPatternSubgroupReport = (database: DatabaseSync, property: SubgroupProperty, now = new Date()): SignalPatternSubgroupReport => {
+export const computeSignalPatternSubgroupReport = (
+  database: DatabaseSync,
+  property: SubgroupProperty,
+  now = new Date(),
+): SignalPatternSubgroupReport => {
   const outcomes = readAllDuneOutcomes(database);
   const ids = outcomes.map((outcome) => outcome.signal.id);
   const rawPayloadRows = ids.length
-    ? database.prepare(`SELECT id, raw_payload AS rawPayload FROM gmgn_signals WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as unknown as Array<{ id: number; rawPayload: string | null }>
+    ? (database
+        .prepare(
+          `SELECT id, raw_payload AS rawPayload FROM gmgn_signals WHERE id IN (${ids.map(() => '?').join(',')})`,
+        )
+        .all(...ids) as unknown as Array<{ id: number; rawPayload: string | null }>)
     : [];
-  const rawPayloadById = new Map(rawPayloadRows.map((row) => [row.id, parseRawPayload(row.rawPayload)]));
+  const rawPayloadById = new Map(
+    rawPayloadRows.map((row) => [row.id, parseRawPayload(row.rawPayload)]),
+  );
 
   let nUnextractable = 0;
   const bucketBySignalId = new Map<number, string>();
   for (const outcome of outcomes) {
     const value = extractSubgroupValue(property, rawPayloadById.get(outcome.signal.id) ?? null);
-    if (value === null) { nUnextractable += 1; continue; }
+    if (value === null) {
+      nUnextractable += 1;
+      continue;
+    }
     bucketBySignalId.set(outcome.signal.id, value);
   }
 
-  const horizonLabels = [...new Set(outcomes.flatMap((outcome) => outcome.checkpoints.map((checkpoint) => checkpoint.label)))].filter((label) => label !== 'signal');
+  const horizonLabels = [
+    ...new Set(
+      outcomes.flatMap((outcome) => outcome.checkpoints.map((checkpoint) => checkpoint.label)),
+    ),
+  ].filter((label) => label !== 'signal');
 
   const horizons: SignalPatternSubgroupHorizonReport[] = horizonLabels.map((horizon) => {
     const byKey = new Map<string, Comparison[]>();
@@ -377,14 +562,19 @@ export const computeSignalPatternSubgroupReport = (database: DatabaseSync, prope
       if (bucketValue === undefined) continue;
       const key = `${outcome.signal.signalType ?? 'unknown'}::${bucketValue}`;
       const base = outcome.checkpoints.find((checkpoint) => checkpoint.label === 'signal')?.result;
-      const targetCheckpoint = outcome.checkpoints.find((checkpoint) => checkpoint.label === horizon);
+      const targetCheckpoint = outcome.checkpoints.find(
+        (checkpoint) => checkpoint.label === horizon,
+      );
       const target = targetCheckpoint?.result;
       const entry = classifyComparison(base, target, outcome.signal.tokenAddress, horizon);
       const targetMs = Date.parse(targetCheckpoint?.targetTimestamp ?? '');
       const matured = !Number.isNaN(targetMs) && targetMs <= now.getTime();
       byKeyCaptured.set(key, (byKeyCaptured.get(key) ?? 0) + 1);
       const tokenKey = `${key} ${outcome.signal.tokenAddress}`;
-      if (firstByTokenKey.has(tokenKey)) { byKeyRepeated.set(key, (byKeyRepeated.get(key) ?? 0) + 1); continue; }
+      if (firstByTokenKey.has(tokenKey)) {
+        byKeyRepeated.set(key, (byKeyRepeated.get(key) ?? 0) + 1);
+        continue;
+      }
       firstByTokenKey.add(tokenKey);
       if (matured) {
         byKeyMatured.set(key, (byKeyMatured.get(key) ?? 0) + 1);
@@ -397,7 +587,16 @@ export const computeSignalPatternSubgroupReport = (database: DatabaseSync, prope
       byKey.get(key)!.push(entry);
     }
     const groups = [...byKey.entries()]
-      .map(([key, entries]) => summarizeGroup(key, entries, byKeyCaptured.get(key) ?? 0, byKeyMatured.get(key) ?? 0, byKeyDates.get(key)?.size ?? 0, byKeyRepeated.get(key) ?? 0))
+      .map(([key, entries]) =>
+        summarizeGroup(
+          key,
+          entries,
+          byKeyCaptured.get(key) ?? 0,
+          byKeyMatured.get(key) ?? 0,
+          byKeyDates.get(key)?.size ?? 0,
+          byKeyRepeated.get(key) ?? 0,
+        ),
+      )
       .sort((a, b) => (b.medianReturnPct ?? -Infinity) - (a.medianReturnPct ?? -Infinity));
     return { horizon, cellCount: groups.length, nUnextractable, groups };
   });

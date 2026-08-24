@@ -11,7 +11,11 @@ type StatusBannerProps = {
 export const StatusBanner = ({ tone, children, as = 'p', role, title }: StatusBannerProps) => {
   const Tag = as;
   return (
-    <Tag className={tone === 'warning' ? 'copytrade-status-warning' : 'muted'} role={role} title={title}>
+    <Tag
+      className={tone === 'warning' ? 'copytrade-status-warning' : 'muted'}
+      role={role}
+      title={title}
+    >
       {children}
     </Tag>
   );

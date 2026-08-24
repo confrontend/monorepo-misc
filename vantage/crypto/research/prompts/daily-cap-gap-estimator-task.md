@@ -22,23 +22,23 @@ trusts a wallet at exactly 100% Dune coverage (`TRUSTED_DUNE_COVERAGE_PERCENT`, 
 that, a wallet just sits there — the panel was deliberately built conservative, refusing to guess
 whether a gap is safe.
 
-The origin idea, from the user directly: *"we mark wallets with missing data as non-candidates
+The origin idea, from the user directly: _"we mark wallets with missing data as non-candidates
 because we fear an important trade happened during the gap — but if we have the wallet's general
 liquidity, or its P&L before and after that range, we can estimate whether a huge gain or loss
-happened, and if not, trust that we didn't miss much."*
+happened, and if not, trust that we didn't miss much."_
 
 That idea does **not** apply uniformly to every kind of gap in this project — a prior review
 (see `progress.md`, 2026-08-22) worked out exactly where it does and doesn't fit. Read that
 history before writing code, because it rules out two tempting but wrong places to apply this:
 
 1. **Dune-unmatched trades** (median coverage 54.5%) — this is a scattered, per-trade gap, not a
-   bounded window, and it has already been measured as *biased*: unmatched trades are ~2x more
+   bounded window, and it has already been measured as _biased_: unmatched trades are ~2x more
    likely to be >100% winners (20.5% vs 12.1%) than matched ones, because Dune fails to match
    thin, newly-launched tokens — exactly where outsized moves happen. A before/after estimate
    cannot fix a biased-missingness problem; it would need a per-trade liquidity proxy, which is a
    different, larger effort. **Do not attempt this here.**
 2. **GMGN older-history truncation** — paging walks newest→oldest with no skipping
-   (`fetch.ts:750` area), so a truncated wallet is missing everything *older* than a cutoff. There
+   (`fetch.ts:750` area), so a truncated wallet is missing everything _older_ than a cutoff. There
    is no "after" side to bracket against. Before/after comparison structurally does not apply.
 
 **The one gap shape this idea genuinely fits**: the **daily insert cap**
@@ -81,7 +81,7 @@ estimate whether the capped day plausibly hid a result-changing trade:
     capped days — a snapshot close enough in time to bracket a specific day tightly may simply not
     exist. If it doesn't, the estimate is **`insufficient`**, not a guess.
 - Compare the realized-PnL delta across the bracketing snapshots against what the wallet's own
-  *stored, uncapped* trades from that same window already explain. Only the **unexplained
+  _stored, uncapped_ trades from that same window already explain. Only the **unexplained
   remainder** is candidate evidence of a hidden trade.
 - Convert the unexplained remainder into a plain magnitude check against the wallet's own typical
   trade size (e.g. compare it to the wallet's median or largest stored `cost_usd` round trip) —
@@ -99,13 +99,14 @@ estimate whether the capped day plausibly hid a result-changing trade:
 
 In `computeEliminationReport` (`eliminationFilter.ts:86`), add a **second, explicit path** to
 `trustworthy` that is only reachable when:
+
 - Dune coverage is 100% everywhere **except** day(s) covered by a daily cap, and
 - every one of those capped days independently resolves to `small_gap` (never `insufficient`,
   never `large_gap` — one bad day disqualifies the whole wallet from this path).
 
 Do not lower `TRUSTED_DUNE_COVERAGE_PERCENT` itself, and do not touch the existing 100%-coverage
 path. Add a field to `WalletEliminationEntry` (e.g. `trustworthyVia: 'full_coverage' |
-'bounded_gap_estimate' | null`) so the UI and any future reader can always see *why* a wallet was
+'bounded_gap_estimate' | null`) so the UI and any future reader can always see _why_ a wallet was
 trusted, not just that it was.
 
 ## Requirements

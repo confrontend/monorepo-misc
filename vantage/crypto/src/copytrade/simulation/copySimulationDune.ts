@@ -17,7 +17,12 @@ import { archiveJsonWithHash } from '../../platform/archive.js';
  * flipped relative to sqlFor in outcomes.ts.
  */
 
-export type CopySimulationTarget = { tradeId: number; tokenAddress: string; delayedTargetAtIso: string; direction?: 'after' | 'before' };
+export type CopySimulationTarget = {
+  tradeId: number;
+  tokenAddress: string;
+  delayedTargetAtIso: string;
+  direction?: 'after' | 'before';
+};
 export type CopySimulationMatchSource = 'precise' | 'wide_window';
 export type DunePollUpdate = {
   executionId: string;
@@ -75,10 +80,16 @@ export const DUNE_STATUS_POLL_INTERVAL_MS = 5_000;
  * recovered by reconcileStuckCopySimulationRuns on the next run/status pass. */
 export const DUNE_MAX_POLL_DURATION_MS = 30 * 60_000;
 
-export const sqlFor = (targets: CopySimulationTarget[], searchWindowMinutes = PRECISE_SEARCH_WINDOW_MINUTES): string => {
-  const values = targets.map((t) =>
-    `(${t.tradeId}, '${t.tokenAddress.replaceAll("'", "''")}', from_iso8601_timestamp('${t.delayedTargetAtIso}'), '${t.direction ?? 'after'}')`,
-  ).join(',\n        ');
+export const sqlFor = (
+  targets: CopySimulationTarget[],
+  searchWindowMinutes = PRECISE_SEARCH_WINDOW_MINUTES,
+): string => {
+  const values = targets
+    .map(
+      (t) =>
+        `(${t.tradeId}, '${t.tokenAddress.replaceAll("'", "''")}', from_iso8601_timestamp('${t.delayedTargetAtIso}'), '${t.direction ?? 'after'}')`,
+    )
+    .join(',\n        ');
   // Bounds the trade scan to the earliest/latest moment any target in this batch could possibly
   // match, padded by the search window on the correct side per direction. Without this,
   // `normalized_trades` scanned every trade dex_solana.trades has ever recorded for the matched
@@ -126,19 +137,36 @@ const fetchWithRetry = async (url: string, init: RequestInit, attempts = 5): Pro
       const response = await fetch(url, init);
       if (response.status !== 429 || attempt + 1 >= attempts) return response;
       const retryAfter = Number(response.headers.get('retry-after') ?? '');
-      const resetRaw = response.headers.get('x-ratelimit-reset') ?? response.headers.get('ratelimit-reset');
+      const resetRaw =
+        response.headers.get('x-ratelimit-reset') ?? response.headers.get('ratelimit-reset');
       const reset = Number(resetRaw ?? '');
-      const resetDelay = Number.isFinite(reset) && reset > 0
-        ? (reset > 1_000_000 ? reset - Date.now() : reset * 1000 - Date.now())
-        : 0;
-      const delayMs = Number.isFinite(retryAfter) && retryAfter >= 0
-        ? retryAfter * 1000
-        : resetDelay > 0 ? resetDelay : 2_000 * (attempt + 1);
-      await new Promise((resolve) => setTimeout(resolve, delayMs + Math.floor(Math.random() * 500)));
+      const resetDelay =
+        Number.isFinite(reset) && reset > 0
+          ? reset > 1_000_000
+            ? reset - Date.now()
+            : reset * 1000 - Date.now()
+          : 0;
+      const delayMs =
+        Number.isFinite(retryAfter) && retryAfter >= 0
+          ? retryAfter * 1000
+          : resetDelay > 0
+            ? resetDelay
+            : 2_000 * (attempt + 1);
+      await new Promise((resolve) =>
+        setTimeout(resolve, delayMs + Math.floor(Math.random() * 500)),
+      );
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts)
+        await new Promise((resolve) =>
+          setTimeout(resolve, 500 * (attempt + 1) + Math.floor(Math.random() * 250)),
+        );
     }
-    catch (error) { lastError = error; if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1) + Math.floor(Math.random() * 250))); }
   }
-  const cause = lastError instanceof Error && lastError.cause instanceof Error ? ` (${lastError.cause.message})` : '';
+  const cause =
+    lastError instanceof Error && lastError.cause instanceof Error
+      ? ` (${lastError.cause.message})`
+      : '';
   throw new Error(`Dune network request failed after ${attempts} attempts${cause}`);
 };
 
@@ -153,16 +181,20 @@ const parseDuneTimestamp = (value: unknown): number | null => {
  *  (status 'no_trade_in_window'), so "we asked and got nothing" is never confused with "we
  *  never asked." */
 export const rowsToMatches = (
-  targets: CopySimulationTarget[], rows: Array<Record<string, unknown>>, matchSource: CopySimulationMatchSource = 'precise',
+  targets: CopySimulationTarget[],
+  rows: Array<Record<string, unknown>>,
+  matchSource: CopySimulationMatchSource = 'precise',
 ): CopySimulationMatch[] => {
   const byTradeId = new Map(rows.map((row) => [Number(row.trade_id), row]));
   return targets.map((target) => {
     const row = byTradeId.get(target.tradeId);
-    const matchedTradeAt = row && typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null;
+    const matchedTradeAt =
+      row && typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null;
     const priceUsd = row && typeof row.price_usd === 'number' ? row.price_usd : null;
     const matchedMs = parseDuneTimestamp(matchedTradeAt);
     const targetMs = parseDuneTimestamp(target.delayedTargetAtIso);
-    const gapSeconds = matchedMs !== null && targetMs !== null ? (matchedMs - targetMs) / 1000 : null;
+    const gapSeconds =
+      matchedMs !== null && targetMs !== null ? (matchedMs - targetMs) / 1000 : null;
     return {
       tradeId: target.tradeId,
       matchedTradeAt,
@@ -178,16 +210,21 @@ export const rowsToMatches = (
 
 /** Trade ids already covered by a submitted/running/timed_out/completed run — never re-asked. */
 export const alreadyCoveredTradeIds = (database: DatabaseSync): Set<number> => {
-  const rows = database.prepare(
-    `SELECT trade_refs AS tradeRefs FROM copytrade_copy_simulation_runs
+  const rows = database
+    .prepare(
+      `SELECT trade_refs AS tradeRefs FROM copytrade_copy_simulation_runs
      WHERE status IN ('submitted', 'running', 'timed_out', 'completed')`,
-  ).all() as unknown as Array<{ tradeRefs: string }>;
+    )
+    .all() as unknown as Array<{ tradeRefs: string }>;
   const covered = new Set<number>();
   for (const row of rows) {
     try {
       const ids = JSON.parse(row.tradeRefs) as unknown;
-      if (Array.isArray(ids)) for (const id of ids) if (Number.isInteger(id)) covered.add(Number(id));
-    } catch { /* a malformed row covers nothing; it will surface via the run's own status */ }
+      if (Array.isArray(ids))
+        for (const id of ids) if (Number.isInteger(id)) covered.add(Number(id));
+    } catch {
+      /* a malformed row covers nothing; it will surface via the run's own status */
+    }
   }
   return covered;
 };
@@ -199,37 +236,68 @@ export const alreadyCoveredTradeIds = (database: DatabaseSync): Set<number> => {
  * Caller is responsible for excluding already-covered trade ids first (alreadyCoveredTradeIds).
  */
 export const runCopySimulationDuneBatch = async (
-  database: DatabaseSync, targets: CopySimulationTarget[], options: { onStatus?: (update: DunePollUpdate) => void; shouldStop?: () => boolean; searchWindowMinutes?: number; matchSource?: CopySimulationMatchSource } = {},
+  database: DatabaseSync,
+  targets: CopySimulationTarget[],
+  options: {
+    onStatus?: (update: DunePollUpdate) => void;
+    shouldStop?: () => boolean;
+    searchWindowMinutes?: number;
+    matchSource?: CopySimulationMatchSource;
+  } = {},
 ): Promise<{ runId: number; matches: CopySimulationMatch[] }> => {
   if (!targets.length) throw new Error('No trade targets to query.');
   const batch = targets.slice(0, MAX_TARGETS_PER_RUN);
 
   const keyFor = (t: CopySimulationTarget): string => `${t.tokenAddress}|${t.delayedTargetAtIso}`;
   const uniqueByKey = new Map<string, CopySimulationTarget>();
-  for (const target of batch) if (!uniqueByKey.has(keyFor(target))) uniqueByKey.set(keyFor(target), target);
+  for (const target of batch)
+    if (!uniqueByKey.has(keyFor(target))) uniqueByKey.set(keyFor(target), target);
   const uniqueTargets = [...uniqueByKey.values()];
 
   const apiKey = readDuneApiKey();
   if (!apiKey) throw new Error('Dune API key not found. Add it to .secrets/dune/api-key.txt.');
   const searchWindowMinutes = options.searchWindowMinutes ?? PRECISE_SEARCH_WINDOW_MINUTES;
   const matchSource = options.matchSource ?? 'precise';
-  if (!Number.isFinite(searchWindowMinutes) || searchWindowMinutes < PRECISE_SEARCH_WINDOW_MINUTES) throw new Error('Dune search window must be at least the precise 5-minute window.');
+  if (!Number.isFinite(searchWindowMinutes) || searchWindowMinutes < PRECISE_SEARCH_WINDOW_MINUTES)
+    throw new Error('Dune search window must be at least the precise 5-minute window.');
   const query = sqlFor(uniqueTargets, searchWindowMinutes);
   const requestedAt = new Date().toISOString();
-  const headers = { 'X-DUNE-API-KEY': apiKey, 'content-type': 'application/json', accept: 'application/json' };
+  const headers = {
+    'X-DUNE-API-KEY': apiKey,
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
   const submitted = await withDuneSubmissionLock(async () => {
-    await waitForDuneCapacity(database, { shouldStop: options.shouldStop, reconcile: async () => { await reconcileStuckCopySimulationRuns(database); } });
-    const inserted = database.prepare(
-      `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, search_window_minutes, match_source)
+    await waitForDuneCapacity(database, {
+      shouldStop: options.shouldStop,
+      reconcile: async () => {
+        await reconcileStuckCopySimulationRuns(database);
+      },
+    });
+    const inserted = database
+      .prepare(
+        `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, search_window_minutes, match_source)
        VALUES (?, ?, 'submitted', ?, ?, ?)`,
-    ).run(JSON.stringify(batch.map((t) => t.tradeId)), query, requestedAt, searchWindowMinutes, matchSource);
+      )
+      .run(
+        JSON.stringify(batch.map((t) => t.tradeId)),
+        query,
+        requestedAt,
+        searchWindowMinutes,
+        matchSource,
+      );
     const runId = Number(inserted.lastInsertRowid);
     const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', {
-      method: 'POST', headers, body: JSON.stringify({ sql: query, performance: 'medium' }),
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ sql: query, performance: 'medium' }),
     });
     const executionRaw = await execute.text();
     if (!execute.ok) {
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`)
+      database
+        .prepare(
+          `UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`,
+        )
         .run(new Date().toISOString(), runId);
       // Dune's response body carries the actual reason (e.g. "this api request would exceed
       // your configured datapoint limit per billing cycle") — discarding it and keeping only
@@ -239,18 +307,40 @@ export const runCopySimulationDuneBatch = async (
       try {
         const parsed = JSON.parse(executionRaw) as { error?: unknown };
         if (typeof parsed.error === 'string' && parsed.error.trim()) reason = parsed.error.trim();
-      } catch { /* not JSON: fall through to the raw text below */ }
+      } catch {
+        /* not JSON: fall through to the raw text below */
+      }
       if (!reason && executionRaw.trim()) reason = executionRaw.trim().slice(0, 300);
-      throw new Error(reason ? `Dune execution HTTP ${execute.status}: ${reason}` : `Dune execution HTTP ${execute.status}`);
+      throw new Error(
+        reason
+          ? `Dune execution HTTP ${execute.status}: ${reason}`
+          : `Dune execution HTTP ${execute.status}`,
+      );
     }
-    const execution = JSON.parse(executionRaw) as { execution_id?: string; max_inflight_interactive_executions?: number };
+    const execution = JSON.parse(executionRaw) as {
+      execution_id?: string;
+      max_inflight_interactive_executions?: number;
+    };
     if (!execution.execution_id) {
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`)
+      database
+        .prepare(
+          `UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`,
+        )
         .run(new Date().toISOString(), runId);
       throw new Error('Dune did not return an execution id.');
     }
-    database.prepare(`UPDATE copytrade_copy_simulation_runs SET execution_id = ?, status = 'running', dune_execution_payload = ?, dune_max_inflight_interactive_executions = ? WHERE id = ?`)
-      .run(execution.execution_id, executionRaw, typeof execution.max_inflight_interactive_executions === 'number' ? execution.max_inflight_interactive_executions : null, runId);
+    database
+      .prepare(
+        `UPDATE copytrade_copy_simulation_runs SET execution_id = ?, status = 'running', dune_execution_payload = ?, dune_max_inflight_interactive_executions = ? WHERE id = ?`,
+      )
+      .run(
+        execution.execution_id,
+        executionRaw,
+        typeof execution.max_inflight_interactive_executions === 'number'
+          ? execution.max_inflight_interactive_executions
+          : null,
+        runId,
+      );
     return { runId, executionRaw, execution };
   });
   const { runId, executionRaw, execution } = submitted;
@@ -262,58 +352,147 @@ export const runCopySimulationDuneBatch = async (
   let pollCount = 0;
   while (state !== 'QUERY_STATE_COMPLETED') {
     if (Date.now() - pollStartedAt >= DUNE_MAX_POLL_DURATION_MS) {
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'timed_out' WHERE id = ?`).run(runId);
-      throw new Error(`Dune query exceeded the ${Math.round(DUNE_MAX_POLL_DURATION_MS / 60_000)}-minute poll limit; it remains resumable as run ${runId}.`);
+      database
+        .prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'timed_out' WHERE id = ?`)
+        .run(runId);
+      throw new Error(
+        `Dune query exceeded the ${Math.round(DUNE_MAX_POLL_DURATION_MS / 60_000)}-minute poll limit; it remains resumable as run ${runId}.`,
+      );
     }
-    if (options.shouldStop?.()) throw new Error(`Stopped while waiting for Dune execution ${executionId}.`);
-    await new Promise((resolve) => setTimeout(resolve, DUNE_STATUS_POLL_INTERVAL_MS + Math.floor(Math.random() * 750)));
+    if (options.shouldStop?.())
+      throw new Error(`Stopped while waiting for Dune execution ${executionId}.`);
+    await new Promise((resolve) =>
+      setTimeout(resolve, DUNE_STATUS_POLL_INTERVAL_MS + Math.floor(Math.random() * 750)),
+    );
     pollCount += 1;
-    options.onStatus?.({ executionId, state, pollCount, elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000), isExecutionFinished: false, executionCostCredits: null, requestPhase: 'status_requesting', statusHttpStatus: null, statusRequestMs: null, statusPayload: null });
+    options.onStatus?.({
+      executionId,
+      state,
+      pollCount,
+      elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000),
+      isExecutionFinished: false,
+      executionCostCredits: null,
+      requestPhase: 'status_requesting',
+      statusHttpStatus: null,
+      statusRequestMs: null,
+      statusPayload: null,
+    });
     const statusRequestedAt = Date.now();
-    const statusResponse = await fetchWithRetry(`https://api.dune.com/api/v1/execution/${executionId}/status`, { headers, signal: AbortSignal.timeout(20_000) });
+    const statusResponse = await fetchWithRetry(
+      `https://api.dune.com/api/v1/execution/${executionId}/status`,
+      { headers, signal: AbortSignal.timeout(20_000) },
+    );
     const statusRequestMs = Date.now() - statusRequestedAt;
     const statusRaw = await statusResponse.text();
-    const statusBody = JSON.parse(statusRaw) as { state?: string; error?: string; is_execution_finished?: boolean; execution_cost_credits?: number; max_inflight_interactive_executions?: number };
+    const statusBody = JSON.parse(statusRaw) as {
+      state?: string;
+      error?: string;
+      is_execution_finished?: boolean;
+      execution_cost_credits?: number;
+      max_inflight_interactive_executions?: number;
+    };
     state = statusBody.state ?? 'QUERY_STATE_FAILED';
-    database.prepare(`UPDATE copytrade_copy_simulation_runs
+    database
+      .prepare(
+        `UPDATE copytrade_copy_simulation_runs
       SET dune_status_payload = ?, dune_max_inflight_interactive_executions = ?, dune_last_state = ?, dune_last_status_at = ?
-      WHERE id = ?`).run(statusRaw, typeof statusBody.max_inflight_interactive_executions === 'number' ? statusBody.max_inflight_interactive_executions : null, state, new Date().toISOString(), runId);
+      WHERE id = ?`,
+      )
+      .run(
+        statusRaw,
+        typeof statusBody.max_inflight_interactive_executions === 'number'
+          ? statusBody.max_inflight_interactive_executions
+          : null,
+        state,
+        new Date().toISOString(),
+        runId,
+      );
     if (!statusResponse.ok) throw new Error(`Dune status HTTP ${statusResponse.status}`);
     options.onStatus?.({
       executionId,
       state,
       pollCount,
       elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000),
-      isExecutionFinished: statusBody.is_execution_finished === true || state === 'QUERY_STATE_COMPLETED' || state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED',
-      executionCostCredits: typeof statusBody.execution_cost_credits === 'number' ? statusBody.execution_cost_credits : null,
-      requestPhase: 'status_received', statusHttpStatus: statusResponse.status, statusRequestMs, statusPayload: statusRaw,
+      isExecutionFinished:
+        statusBody.is_execution_finished === true ||
+        state === 'QUERY_STATE_COMPLETED' ||
+        state === 'QUERY_STATE_FAILED' ||
+        state === 'QUERY_STATE_CANCELLED',
+      executionCostCredits:
+        typeof statusBody.execution_cost_credits === 'number'
+          ? statusBody.execution_cost_credits
+          : null,
+      requestPhase: 'status_received',
+      statusHttpStatus: statusResponse.status,
+      statusRequestMs,
+      statusPayload: statusRaw,
     });
     if (state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED') {
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`)
+      database
+        .prepare(
+          `UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`,
+        )
         .run(new Date().toISOString(), runId);
       throw new Error(statusBody.error ?? `Dune query ${state}`);
     }
   }
 
-  options.onStatus?.({ executionId, state, pollCount, elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000), isExecutionFinished: true, executionCostCredits: null, requestPhase: 'results_requesting', statusHttpStatus: null, statusRequestMs: null, statusPayload: null });
+  options.onStatus?.({
+    executionId,
+    state,
+    pollCount,
+    elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000),
+    isExecutionFinished: true,
+    executionCostCredits: null,
+    requestPhase: 'results_requesting',
+    statusHttpStatus: null,
+    statusRequestMs: null,
+    statusPayload: null,
+  });
   const resultRequestedAt = Date.now();
-  const resultResponse = await fetchWithRetry(`https://api.dune.com/api/v1/execution/${executionId}/results`, { headers, signal: AbortSignal.timeout(20_000) });
+  const resultResponse = await fetchWithRetry(
+    `https://api.dune.com/api/v1/execution/${executionId}/results`,
+    { headers, signal: AbortSignal.timeout(20_000) },
+  );
   const resultRaw = await resultResponse.text();
-  options.onStatus?.({ executionId, state, pollCount, elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000), isExecutionFinished: true, executionCostCredits: null, requestPhase: 'results_received', statusHttpStatus: resultResponse.status, statusRequestMs: Date.now() - resultRequestedAt, statusPayload: resultRaw });
+  options.onStatus?.({
+    executionId,
+    state,
+    pollCount,
+    elapsedSeconds: Math.round((Date.now() - pollStartedAt) / 1000),
+    isExecutionFinished: true,
+    executionCostCredits: null,
+    requestPhase: 'results_received',
+    statusHttpStatus: resultResponse.status,
+    statusRequestMs: Date.now() - resultRequestedAt,
+    statusPayload: resultRaw,
+  });
   if (!resultResponse.ok) throw new Error(`Dune results HTTP ${resultResponse.status}`);
 
-  const { archivePath, sha256 } = archiveJsonWithHash('copy-simulation', 'copy-simulation', runId, { runId, requestedAt, execution: executionRaw, query, result: JSON.parse(resultRaw) });
+  const { archivePath, sha256 } = archiveJsonWithHash('copy-simulation', 'copy-simulation', runId, {
+    runId,
+    requestedAt,
+    execution: executionRaw,
+    query,
+    result: JSON.parse(resultRaw),
+  });
   const completedAt = new Date().toISOString();
-  database.prepare(
-    `UPDATE copytrade_copy_simulation_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`,
-  ).run(resultRaw, archivePath, sha256, completedAt, runId);
+  database
+    .prepare(
+      `UPDATE copytrade_copy_simulation_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`,
+    )
+    .run(resultRaw, archivePath, sha256, completedAt, runId);
 
-  const rows = ((JSON.parse(resultRaw) as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? []);
+  const rows =
+    (JSON.parse(resultRaw) as { result?: { rows?: Array<Record<string, unknown>> } }).result
+      ?.rows ?? [];
   const uniqueMatches = rowsToMatches(uniqueTargets, rows, matchSource);
-  const matchByKey = new Map(uniqueMatches.map((match) => {
-    const target = uniqueTargets.find((t) => t.tradeId === match.tradeId)!;
-    return [keyFor(target), match] as const;
-  }));
+  const matchByKey = new Map(
+    uniqueMatches.map((match) => {
+      const target = uniqueTargets.find((t) => t.tradeId === match.tradeId)!;
+      return [keyFor(target), match] as const;
+    }),
+  );
   // Fan the deduplicated result back out to every trade that shared the same (token, delayed
   // timestamp) key, preserving each trade's own id in the returned match.
   const matches: CopySimulationMatch[] = batch.map((target) => {
@@ -324,7 +503,11 @@ export const runCopySimulationDuneBatch = async (
 };
 
 export type CopySimulationReconcileSummary = {
-  checked: number; completed: number; failed: number; stillRunning: number; noApiKey: number;
+  checked: number;
+  completed: number;
+  failed: number;
+  stillRunning: number;
+  noApiKey: number;
 };
 
 /**
@@ -343,56 +526,134 @@ export type CopySimulationReconcileSummary = {
 export const reconcileStuckCopySimulationRuns = async (
   database: DatabaseSync,
 ): Promise<CopySimulationReconcileSummary> => {
-  const stuck = database.prepare(
-    `SELECT id, status, execution_id AS executionId, dune_execution_payload AS executionPayload, requested_at AS requestedAt, query_sql AS querySql
+  const stuck = database
+    .prepare(
+      `SELECT id, status, execution_id AS executionId, dune_execution_payload AS executionPayload, requested_at AS requestedAt, query_sql AS querySql
      FROM copytrade_copy_simulation_runs WHERE status IN ('submitted', 'running', 'timed_out') ORDER BY id ASC`,
-  ).all() as unknown as Array<{ id: number; status: string; executionId: string | null; executionPayload: string | null; requestedAt: string; querySql: string }>;
+    )
+    .all() as unknown as Array<{
+    id: number;
+    status: string;
+    executionId: string | null;
+    executionPayload: string | null;
+    requestedAt: string;
+    querySql: string;
+  }>;
 
-  const summary: CopySimulationReconcileSummary = { checked: stuck.length, completed: 0, failed: 0, stillRunning: 0, noApiKey: 0 };
+  const summary: CopySimulationReconcileSummary = {
+    checked: stuck.length,
+    completed: 0,
+    failed: 0,
+    stillRunning: 0,
+    noApiKey: 0,
+  };
   if (!stuck.length) return summary;
 
   const apiKey = readDuneApiKey();
-  if (!apiKey) { summary.noApiKey = stuck.length; return summary; }
+  if (!apiKey) {
+    summary.noApiKey = stuck.length;
+    return summary;
+  }
   const headers = { 'X-DUNE-API-KEY': apiKey, accept: 'application/json' };
 
   for (const run of stuck) {
     if (!run.executionId) {
       const ageMs = Date.now() - new Date(run.requestedAt).getTime();
-      if (ageMs < 10 * 60_000) { summary.stillRunning += 1; continue; }
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`).run(new Date().toISOString(), run.id);
+      if (ageMs < 10 * 60_000) {
+        summary.stillRunning += 1;
+        continue;
+      }
+      database
+        .prepare(
+          `UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`,
+        )
+        .run(new Date().toISOString(), run.id);
       summary.failed += 1;
       continue;
     }
 
-    let statusBody: { state?: string; error?: string; max_inflight_interactive_executions?: number };
+    let statusBody: {
+      state?: string;
+      error?: string;
+      max_inflight_interactive_executions?: number;
+    };
     let statusRaw = '';
     try {
-      const statusResponse = await fetchWithRetry(`https://api.dune.com/api/v1/execution/${run.executionId}/status`, { headers, signal: AbortSignal.timeout(20_000) });
+      const statusResponse = await fetchWithRetry(
+        `https://api.dune.com/api/v1/execution/${run.executionId}/status`,
+        { headers, signal: AbortSignal.timeout(20_000) },
+      );
       statusRaw = await statusResponse.text();
       statusBody = JSON.parse(statusRaw) as typeof statusBody;
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET dune_status_payload = ?, dune_max_inflight_interactive_executions = ?, dune_last_state = ?, dune_last_status_at = ? WHERE id = ?`).run(statusRaw, typeof statusBody.max_inflight_interactive_executions === 'number' ? statusBody.max_inflight_interactive_executions : null, statusBody.state ?? null, new Date().toISOString(), run.id);
+      database
+        .prepare(
+          `UPDATE copytrade_copy_simulation_runs SET dune_status_payload = ?, dune_max_inflight_interactive_executions = ?, dune_last_state = ?, dune_last_status_at = ? WHERE id = ?`,
+        )
+        .run(
+          statusRaw,
+          typeof statusBody.max_inflight_interactive_executions === 'number'
+            ? statusBody.max_inflight_interactive_executions
+            : null,
+          statusBody.state ?? null,
+          new Date().toISOString(),
+          run.id,
+        );
       if (!statusResponse.ok) throw new Error(`Dune status HTTP ${statusResponse.status}`);
-    } catch { summary.stillRunning += 1; continue; }
+    } catch {
+      summary.stillRunning += 1;
+      continue;
+    }
 
     const state = statusBody.state ?? '';
     if (state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED') {
-      database.prepare(`UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`).run(new Date().toISOString(), run.id);
+      database
+        .prepare(
+          `UPDATE copytrade_copy_simulation_runs SET status = 'failed', completed_at = ? WHERE id = ?`,
+        )
+        .run(new Date().toISOString(), run.id);
       summary.failed += 1;
       continue;
     }
-    if (state !== 'QUERY_STATE_COMPLETED') { summary.stillRunning += 1; continue; }
+    if (state !== 'QUERY_STATE_COMPLETED') {
+      summary.stillRunning += 1;
+      continue;
+    }
 
     let resultRaw: string;
     try {
-      const resultResponse = await fetchWithRetry(`https://api.dune.com/api/v1/execution/${run.executionId}/results`, { headers, signal: AbortSignal.timeout(20_000) });
+      const resultResponse = await fetchWithRetry(
+        `https://api.dune.com/api/v1/execution/${run.executionId}/results`,
+        { headers, signal: AbortSignal.timeout(20_000) },
+      );
       resultRaw = await resultResponse.text();
-      if (!resultResponse.ok) { summary.stillRunning += 1; continue; }
-    } catch { summary.stillRunning += 1; continue; }
+      if (!resultResponse.ok) {
+        summary.stillRunning += 1;
+        continue;
+      }
+    } catch {
+      summary.stillRunning += 1;
+      continue;
+    }
 
-    const { archivePath, sha256 } = archiveJsonWithHash('copy-simulation', 'copy-simulation', run.id, { runId: run.id, requestedAt: run.requestedAt, execution: run.executionPayload, query: run.querySql, reconciledFrom: 'status-poll', statusAtReconcile: statusBody, result: JSON.parse(resultRaw) });
-    database.prepare(
-      `UPDATE copytrade_copy_simulation_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`,
-    ).run(resultRaw, archivePath, sha256, new Date().toISOString(), run.id);
+    const { archivePath, sha256 } = archiveJsonWithHash(
+      'copy-simulation',
+      'copy-simulation',
+      run.id,
+      {
+        runId: run.id,
+        requestedAt: run.requestedAt,
+        execution: run.executionPayload,
+        query: run.querySql,
+        reconciledFrom: 'status-poll',
+        statusAtReconcile: statusBody,
+        result: JSON.parse(resultRaw),
+      },
+    );
+    database
+      .prepare(
+        `UPDATE copytrade_copy_simulation_runs SET status = 'completed', raw_result = ?, archive_path = ?, archive_sha256 = ?, completed_at = ? WHERE id = ?`,
+      )
+      .run(resultRaw, archivePath, sha256, new Date().toISOString(), run.id);
     summary.completed += 1;
   }
   return summary;
@@ -401,23 +662,44 @@ export const reconcileStuckCopySimulationRuns = async (
 /** Reads every completed run's matches, merged by trade id (a trade covered by more than one
  *  run keeps its earliest completed match — append-only history, same convention as
  *  readAllDuneOutcomes). */
-export const readAllCopySimulationMatches = (database: DatabaseSync): Map<number, CopySimulationMatch> => {
-  const runs = database.prepare(
-    `SELECT id, trade_refs AS tradeRefs, raw_result AS rawResult, completed_at AS completedAt, match_source AS matchSource
+export const readAllCopySimulationMatches = (
+  database: DatabaseSync,
+): Map<number, CopySimulationMatch> => {
+  const runs = database
+    .prepare(
+      `SELECT id, trade_refs AS tradeRefs, raw_result AS rawResult, completed_at AS completedAt, match_source AS matchSource
      FROM copytrade_copy_simulation_runs WHERE status = 'completed' AND raw_result IS NOT NULL ORDER BY id ASC`,
-  ).all() as unknown as Array<{ id: number; tradeRefs: string; rawResult: string; completedAt: string | null; matchSource: CopySimulationMatchSource | null }>;
+    )
+    .all() as unknown as Array<{
+    id: number;
+    tradeRefs: string;
+    rawResult: string;
+    completedAt: string | null;
+    matchSource: CopySimulationMatchSource | null;
+  }>;
   const merged = new Map<number, CopySimulationMatch>();
   for (const run of runs) {
     let ids: number[];
-    try { ids = JSON.parse(run.tradeRefs) as number[]; } catch { continue; }
+    try {
+      ids = JSON.parse(run.tradeRefs) as number[];
+    } catch {
+      continue;
+    }
     if (!ids.length) continue;
     let rows: Array<Record<string, unknown>> = [];
-    try { rows = ((JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? []); } catch { continue; }
+    try {
+      rows =
+        (JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result
+          ?.rows ?? [];
+    } catch {
+      continue;
+    }
     const byTradeId = new Map(rows.map((row) => [Number(row.trade_id), row]));
     const source = run.matchSource === 'wide_window' ? 'wide_window' : 'precise';
     for (const id of ids) {
       const row = byTradeId.get(id);
-      const matchedTradeAt = row && typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null;
+      const matchedTradeAt =
+        row && typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null;
       const priceUsd = row && typeof row.price_usd === 'number' ? row.price_usd : null;
       const next: CopySimulationMatch = {
         tradeId: id,
@@ -435,9 +717,14 @@ export const readAllCopySimulationMatches = (database: DatabaseSync): Map<number
       // A wide-window no-match is terminal for the controlled retry path. Prefer it over an
       // earlier precise no-match so a later run cannot keep treating the same target as retryable
       // forever. A precise match still wins over a wide match for provenance quality.
-      const score = (match: CopySimulationMatch): number => (match.status === 'matched'
-        ? (match.matchSource === 'precise' ? 0 : 1)
-        : (match.matchSource === 'wide_window' ? 2 : 3));
+      const score = (match: CopySimulationMatch): number =>
+        match.status === 'matched'
+          ? match.matchSource === 'precise'
+            ? 0
+            : 1
+          : match.matchSource === 'wide_window'
+            ? 2
+            : 3;
       if (!previous || score(next) < score(previous)) merged.set(id, next);
     }
   }

@@ -2,8 +2,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { median } from '../scrutiny/evaluate.js';
 import { readWalletCoverageRows } from '../screening/fetch.js';
 import {
-  MAX_TARGETS_PER_RUN, alreadyCoveredTradeIds, readAllCopySimulationMatches, reconcileStuckCopySimulationRuns,
-  runCopySimulationDuneBatch, type CopySimulationMatch, type CopySimulationTarget, type DunePollUpdate,
+  MAX_TARGETS_PER_RUN,
+  alreadyCoveredTradeIds,
+  readAllCopySimulationMatches,
+  reconcileStuckCopySimulationRuns,
+  runCopySimulationDuneBatch,
+  type CopySimulationMatch,
+  type CopySimulationTarget,
+  type DunePollUpdate,
 } from './copySimulationDune.js';
 
 /**
@@ -32,7 +38,11 @@ export const DEFAULT_COPIER_DELAY_SECONDS = 15;
  *  it, while still rejecting the rare multi-minute-stale tail rather than silently using it. */
 export const MAX_MATCH_GAP_SECONDS = 300;
 
-const isUsableCopyMatch = (match: CopySimulationMatch | undefined, eventTimestamp: number, delaySeconds: number): boolean => {
+const isUsableCopyMatch = (
+  match: CopySimulationMatch | undefined,
+  eventTimestamp: number,
+  delaySeconds: number,
+): boolean => {
   if (match?.status !== 'matched' || !match.matchedTradeAt) return false;
   const matchedMs = Date.parse(match.matchedTradeAt);
   if (Number.isNaN(matchedMs)) return false;
@@ -113,19 +123,47 @@ export type FixedStakePortfolioReport = {
  * remain explicitly unpriced. Realized and mark-to-market P&L are reported separately. */
 export const simulateFixedStakePortfolio = (
   trades: FixedStakePortfolioTrade[],
-  options: { startingCapitalUsd?: number; stakePerTradeUsd?: number; maxOpenPositions?: number } = {},
+  options: {
+    startingCapitalUsd?: number;
+    stakePerTradeUsd?: number;
+    maxOpenPositions?: number;
+  } = {},
 ): FixedStakePortfolioReport => {
   const startingCapitalUsd = options.startingCapitalUsd ?? COPY_PORTFOLIO_STARTING_CAPITAL_USD;
   const stakePerTradeUsd = options.stakePerTradeUsd ?? COPY_PORTFOLIO_STAKE_USD;
   const maxOpenPositions = options.maxOpenPositions ?? COPY_PORTFOLIO_MAX_OPEN_POSITIONS;
-  const valid = trades.filter((trade) => Number.isFinite(trade.returnRatio) && trade.exitAt >= trade.entryAt);
-  if (valid.length === 0) return {
-    startingCapitalUsd, stakePerTradeUsd, maxOpenPositions, endingCapitalUsd: startingCapitalUsd,
-    realizedPnlUsd: 0, markToMarketPnlUsd: 0, openPositionsMarked: 0, openPositionsUnpriced: 0, eligibleTrades: 0, copiedTrades: 0, skippedInsufficientCash: 0,
-    skippedMaxOpenPositions: 0, maxConcurrentPositions: 0, gasFeeSol: 0, gasFeeUsd: 0, gasCostComplete: true, capitalPath: [], tradeCapitalPath: [],
-  };
+  const valid = trades.filter(
+    (trade) => Number.isFinite(trade.returnRatio) && trade.exitAt >= trade.entryAt,
+  );
+  if (valid.length === 0)
+    return {
+      startingCapitalUsd,
+      stakePerTradeUsd,
+      maxOpenPositions,
+      endingCapitalUsd: startingCapitalUsd,
+      realizedPnlUsd: 0,
+      markToMarketPnlUsd: 0,
+      openPositionsMarked: 0,
+      openPositionsUnpriced: 0,
+      eligibleTrades: 0,
+      copiedTrades: 0,
+      skippedInsufficientCash: 0,
+      skippedMaxOpenPositions: 0,
+      maxConcurrentPositions: 0,
+      gasFeeSol: 0,
+      gasFeeUsd: 0,
+      gasCostComplete: true,
+      capitalPath: [],
+      tradeCapitalPath: [],
+    };
 
-  type PortfolioEvent = { at: number; kind: 'entry' | 'exit'; trade: FixedStakePortfolioTrade; positionKey: string; stakeUsd: number };
+  type PortfolioEvent = {
+    at: number;
+    kind: 'entry' | 'exit';
+    trade: FixedStakePortfolioTrade;
+    positionKey: string;
+    stakeUsd: number;
+  };
   const stakeFor = (trade: FixedStakePortfolioTrade): number => trade.stakeUsd ?? stakePerTradeUsd;
   const positionGroups = new Map<string, { trade: FixedStakePortfolioTrade; stakeUsd: number }>();
   for (const trade of valid) {
@@ -136,14 +174,29 @@ export const simulateFixedStakePortfolio = (
   }
   const events: PortfolioEvent[] = [];
   for (const [positionKey, group] of positionGroups) {
-    events.push({ at: group.trade.entryAt, kind: 'entry', trade: group.trade, positionKey, stakeUsd: group.stakeUsd });
+    events.push({
+      at: group.trade.entryAt,
+      kind: 'entry',
+      trade: group.trade,
+      positionKey,
+      stakeUsd: group.stakeUsd,
+    });
   }
   for (const trade of valid) {
     if (trade.isOpenAtCutoff) continue;
-    events.push({ at: trade.exitAt, kind: 'exit', trade, positionKey: String(trade.positionId ?? trade.id), stakeUsd: stakeFor(trade) });
+    events.push({
+      at: trade.exitAt,
+      kind: 'exit',
+      trade,
+      positionKey: String(trade.positionId ?? trade.id),
+      stakeUsd: stakeFor(trade),
+    });
   }
-  events.sort((left, right) => left.at - right.at
-    || (left.kind === right.kind ? left.trade.id - right.trade.id : left.kind === 'exit' ? -1 : 1));
+  events.sort(
+    (left, right) =>
+      left.at - right.at ||
+      (left.kind === right.kind ? left.trade.id - right.trade.id : left.kind === 'exit' ? -1 : 1),
+  );
 
   let cash = startingCapitalUsd;
   let copiedTrades = 0;
@@ -156,14 +209,21 @@ export const simulateFixedStakePortfolio = (
   const open = new Map<string, number>();
   const acceptedPositions = new Set<string>();
   const dailyEquity = new Map<string, number>();
-  const tradeCapitalPath: { trade: number; tradeId?: number; day: string; capitalUsd: number }[] = [];
+  const tradeCapitalPath: { trade: number; tradeId?: number; day: string; capitalUsd: number }[] =
+    [];
   const firstDay = new Date(events[0].at * 1000).toISOString().slice(0, 10);
   const equity = (): number => cash + [...open.values()].reduce((sum, value) => sum + value, 0);
 
   for (const event of events) {
     if (event.kind === 'entry') {
-      if (open.size >= maxOpenPositions) { skippedMaxOpenPositions += 1; continue; }
-      if (cash + 1e-9 < event.stakeUsd) { skippedInsufficientCash += 1; continue; }
+      if (open.size >= maxOpenPositions) {
+        skippedMaxOpenPositions += 1;
+        continue;
+      }
+      if (cash + 1e-9 < event.stakeUsd) {
+        skippedInsufficientCash += 1;
+        continue;
+      }
       cash -= event.stakeUsd;
       open.set(event.positionKey, event.stakeUsd);
       acceptedPositions.add(event.positionKey);
@@ -171,7 +231,10 @@ export const simulateFixedStakePortfolio = (
       if (event.trade.entryGasFeeSol !== undefined) {
         gasFeeSol += event.trade.entryGasFeeSol;
         if (event.trade.entryGasFeeUsd == null) gasCostComplete = false;
-        else { gasFeeUsd += event.trade.entryGasFeeUsd; cash -= event.trade.entryGasFeeUsd; }
+        else {
+          gasFeeUsd += event.trade.entryGasFeeUsd;
+          cash -= event.trade.entryGasFeeUsd;
+        }
       }
     } else if (acceptedPositions.has(event.positionKey)) {
       const remaining = open.get(event.positionKey) ?? 0;
@@ -184,14 +247,22 @@ export const simulateFixedStakePortfolio = (
       if (event.trade.exitGasFeeSol !== undefined) {
         gasFeeSol += event.trade.exitGasFeeSol;
         if (event.trade.exitGasFeeUsd == null) gasCostComplete = false;
-        else { gasFeeUsd += event.trade.exitGasFeeUsd; cash -= event.trade.exitGasFeeUsd; }
+        else {
+          gasFeeUsd += event.trade.exitGasFeeUsd;
+          cash -= event.trade.exitGasFeeUsd;
+        }
       } else {
         cash -= event.trade.gasFeeUsd ?? 0;
         gasFeeSol += event.trade.gasFeeSol;
         if (event.trade.gasFeeUsd == null) gasCostComplete = false;
         else gasFeeUsd += event.trade.gasFeeUsd;
       }
-      tradeCapitalPath.push({ trade: tradeCapitalPath.length + 1, tradeId: event.trade.id, day: new Date(event.at * 1000).toISOString(), capitalUsd: round(equity(), 2) });
+      tradeCapitalPath.push({
+        trade: tradeCapitalPath.length + 1,
+        tradeId: event.trade.id,
+        day: new Date(event.at * 1000).toISOString(),
+        capitalUsd: round(equity(), 2),
+      });
     }
     const day = new Date(event.at * 1000).toISOString().slice(0, 10);
     dailyEquity.set(day, equity());
@@ -202,7 +273,11 @@ export const simulateFixedStakePortfolio = (
   let openPositionsUnpriced = 0;
   for (const [positionKey, remainingStake] of open) {
     const entry = positionGroups.get(positionKey)?.trade;
-    if (entry?.cutoffReturnRatio === null || entry?.cutoffReturnRatio === undefined || !Number.isFinite(entry.cutoffReturnRatio)) {
+    if (
+      entry?.cutoffReturnRatio === null ||
+      entry?.cutoffReturnRatio === undefined ||
+      !Number.isFinite(entry.cutoffReturnRatio)
+    ) {
       openPositionsUnpriced += 1;
       continue;
     }
@@ -213,34 +288,67 @@ export const simulateFixedStakePortfolio = (
   }
   const endingCapitalUsd = round(equity(), 2);
   return {
-    startingCapitalUsd, stakePerTradeUsd, maxOpenPositions, endingCapitalUsd,
+    startingCapitalUsd,
+    stakePerTradeUsd,
+    maxOpenPositions,
+    endingCapitalUsd,
     realizedPnlUsd: round(endingCapitalUsd - startingCapitalUsd - markToMarketPnlUsd, 2),
-    markToMarketPnlUsd: round(markToMarketPnlUsd, 2), openPositionsMarked, openPositionsUnpriced,
-    eligibleTrades: valid.length, copiedTrades, skippedInsufficientCash, skippedMaxOpenPositions,
-    maxConcurrentPositions, gasFeeSol: round(gasFeeSol, 6), gasFeeUsd: round(gasFeeUsd, 2), gasCostComplete,
+    markToMarketPnlUsd: round(markToMarketPnlUsd, 2),
+    openPositionsMarked,
+    openPositionsUnpriced,
+    eligibleTrades: valid.length,
+    copiedTrades,
+    skippedInsufficientCash,
+    skippedMaxOpenPositions,
+    maxConcurrentPositions,
+    gasFeeSol: round(gasFeeSol, 6),
+    gasFeeUsd: round(gasFeeUsd, 2),
+    gasCostComplete,
     tradeCapitalPath,
     capitalPath: [
       { day: `${firstDay} start`, capitalUsd: startingCapitalUsd },
-      ...[...dailyEquity.entries()].sort(([left], [right]) => left.localeCompare(right))
+      ...[...dailyEquity.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
         .map(([day, capitalUsd]) => ({ day, capitalUsd: round(capitalUsd, 2) })),
     ],
   };
 };
 
 type TradeRow = {
-  id: number; walletAddress: string; observedTimestamp: number; eventType: string;
-  tokenAddress: string; tokenSymbol: string | null; tokenAmount: string | null; costUsd: string | null; buyCostUsd: string | null; priceUsd: string | null; gasUsd: string | null;
+  id: number;
+  walletAddress: string;
+  observedTimestamp: number;
+  eventType: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  tokenAmount: string | null;
+  costUsd: string | null;
+  buyCostUsd: string | null;
+  priceUsd: string | null;
+  gasUsd: string | null;
 };
 
 type RoundTrip = {
-  walletAddress: string; tokenAddress: string; tokenSymbol: string | null;
-  buyTradeId: number; buyAt: number; sellTradeId: number; sellAt: number;
-  walletReturnRatio: number | null; buyGasUsd: number | null; sellGasUsd: number | null; copyFraction: number;
+  walletAddress: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  buyTradeId: number;
+  buyAt: number;
+  sellTradeId: number;
+  sellAt: number;
+  walletReturnRatio: number | null;
+  buyGasUsd: number | null;
+  sellGasUsd: number | null;
+  copyFraction: number;
 };
 
 type OpenPosition = {
-  walletAddress: string; tokenAddress: string; tokenSymbol: string | null;
-  buyTradeId: number; buyAt: number; remainingFraction: number;
+  walletAddress: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  buyTradeId: number;
+  buyAt: number;
+  remainingFraction: number;
 };
 
 const parseAmount = (value: string | null): number | null => {
@@ -257,7 +365,16 @@ const round = (value: number, places: number): number => {
 /** FIFO lot pairing with proportional sell allocation. A wallet can sell a position in many
  * fragments; each fragment consumes only its share of the original copied stake. */
 const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): RoundTrip[] => {
-  type BuyLot = { id: number; timestamp: number; walletAddress: string; tokenAddress: string; tokenSymbol: string | null; gasUsd: number | null; originalAmount: number | null; remainingAmount: number | null };
+  type BuyLot = {
+    id: number;
+    timestamp: number;
+    walletAddress: string;
+    tokenAddress: string;
+    tokenSymbol: string | null;
+    gasUsd: number | null;
+    originalAmount: number | null;
+    remainingAmount: number | null;
+  };
   const buysByWalletToken = new Map<string, BuyLot[]>();
   const roundTrips: RoundTrip[] = [];
   for (const row of rows) {
@@ -265,7 +382,16 @@ const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): R
     if (row.eventType === 'buy') {
       const amount = parseAmount(row.tokenAmount);
       const list = buysByWalletToken.get(key) ?? [];
-      list.push({ id: row.id, timestamp: row.observedTimestamp, walletAddress: row.walletAddress, tokenAddress: row.tokenAddress, tokenSymbol: row.tokenSymbol, gasUsd: row.gasUsd === null ? null : parseAmount(row.gasUsd), originalAmount: amount, remainingAmount: amount });
+      list.push({
+        id: row.id,
+        timestamp: row.observedTimestamp,
+        walletAddress: row.walletAddress,
+        tokenAddress: row.tokenAddress,
+        tokenSymbol: row.tokenSymbol,
+        gasUsd: row.gasUsd === null ? null : parseAmount(row.gasUsd),
+        originalAmount: amount,
+        remainingAmount: amount,
+      });
       buysByWalletToken.set(key, list);
       continue;
     }
@@ -275,22 +401,36 @@ const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): R
 
     const proceeds = parseAmount(row.costUsd);
     const costBasis = parseAmount(row.buyCostUsd);
-    const walletReturnRatio = proceeds !== null && costBasis !== null && costBasis > 0 ? (proceeds - costBasis) / costBasis : null;
+    const walletReturnRatio =
+      proceeds !== null && costBasis !== null && costBasis > 0
+        ? (proceeds - costBasis) / costBasis
+        : null;
 
     const sellAmount = parseAmount(row.tokenAmount);
     let remainingToAllocate = sellAmount !== null && sellAmount > 0 ? sellAmount : null;
     for (const buy of lots) {
       if (buy.remainingAmount !== null && buy.remainingAmount <= 0) continue;
-      const allocation = remainingToAllocate === null || buy.remainingAmount === null
-        ? 1
-        : Math.min(remainingToAllocate, buy.remainingAmount);
+      const allocation =
+        remainingToAllocate === null || buy.remainingAmount === null
+          ? 1
+          : Math.min(remainingToAllocate, buy.remainingAmount);
       if (allocation <= 0) continue;
-      const copyFraction = buy.originalAmount !== null && buy.originalAmount > 0
-        ? Math.min(1, allocation / buy.originalAmount) : 1;
+      const copyFraction =
+        buy.originalAmount !== null && buy.originalAmount > 0
+          ? Math.min(1, allocation / buy.originalAmount)
+          : 1;
       roundTrips.push({
-        walletAddress: row.walletAddress, tokenAddress: row.tokenAddress, tokenSymbol: row.tokenSymbol,
-        buyTradeId: buy.id, buyAt: buy.timestamp, sellTradeId: row.id, sellAt: row.observedTimestamp,
-        walletReturnRatio, buyGasUsd: buy.gasUsd, sellGasUsd: row.gasUsd === null ? null : parseAmount(row.gasUsd), copyFraction,
+        walletAddress: row.walletAddress,
+        tokenAddress: row.tokenAddress,
+        tokenSymbol: row.tokenSymbol,
+        buyTradeId: buy.id,
+        buyAt: buy.timestamp,
+        sellTradeId: row.id,
+        sellAt: row.observedTimestamp,
+        walletReturnRatio,
+        buyGasUsd: buy.gasUsd,
+        sellGasUsd: row.gasUsd === null ? null : parseAmount(row.gasUsd),
+        copyFraction,
       });
       if (buy.remainingAmount !== null) buy.remainingAmount -= allocation;
       if (remainingToAllocate !== null) {
@@ -301,25 +441,42 @@ const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): R
   }
   for (const lots of buysByWalletToken.values()) {
     for (const buy of lots) {
-      if (buy.originalAmount !== null && buy.originalAmount > 0 && (buy.remainingAmount ?? 0) > 1e-9) {
-        openPositions.push({ walletAddress: buy.walletAddress, tokenAddress: buy.tokenAddress, tokenSymbol: buy.tokenSymbol, buyTradeId: buy.id, buyAt: buy.timestamp, remainingFraction: Math.min(1, (buy.remainingAmount ?? 0) / buy.originalAmount) });
+      if (
+        buy.originalAmount !== null &&
+        buy.originalAmount > 0 &&
+        (buy.remainingAmount ?? 0) > 1e-9
+      ) {
+        openPositions.push({
+          walletAddress: buy.walletAddress,
+          tokenAddress: buy.tokenAddress,
+          tokenSymbol: buy.tokenSymbol,
+          buyTradeId: buy.id,
+          buyAt: buy.timestamp,
+          remainingFraction: Math.min(1, (buy.remainingAmount ?? 0) / buy.originalAmount),
+        });
       }
     }
   }
   return roundTrips;
 };
 
-const readTradeRows = (database: DatabaseSync, walletAddresses: string[], chain: string): TradeRow[] => {
+const readTradeRows = (
+  database: DatabaseSync,
+  walletAddresses: string[],
+  chain: string,
+): TradeRow[] => {
   if (!walletAddresses.length) return [];
   const placeholders = walletAddresses.map(() => '?').join(',');
-  return database.prepare(
-    `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp, event_type AS eventType,
+  return database
+    .prepare(
+      `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp, event_type AS eventType,
             token_address AS tokenAddress, token_symbol AS tokenSymbol, token_amount AS tokenAmount, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd,
             price_usd AS priceUsd, gas_usd AS gasUsd
      FROM copytrade_trades
      WHERE chain = ? AND wallet_address IN (${placeholders}) AND event_type IN ('buy', 'sell')
      ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
-  ).all(chain, ...walletAddresses) as unknown as TradeRow[];
+    )
+    .all(chain, ...walletAddresses) as unknown as TradeRow[];
 };
 
 const groupTradeRows = (rows: TradeRow[]): Map<string, TradeRow[]> => {
@@ -333,14 +490,19 @@ const groupTradeRows = (rows: TradeRow[]): Map<string, TradeRow[]> => {
 };
 
 const readRecentRoundTrips = (
-  database: DatabaseSync, walletAddresses: string[], chain: string, periodDays?: number, now = new Date(),
+  database: DatabaseSync,
+  walletAddresses: string[],
+  chain: string,
+  periodDays?: number,
+  now = new Date(),
 ): RoundTrip[] => {
   if (!walletAddresses.length) return [];
   const rows = readTradeRows(database, walletAddresses, chain);
 
   const byWallet = groupTradeRows(rows);
   const roundTrips: RoundTrip[] = [];
-  const cutoff = periodDays && periodDays > 0 ? now.getTime() / 1000 - periodDays * 24 * 60 * 60 : null;
+  const cutoff =
+    periodDays && periodDays > 0 ? now.getTime() / 1000 - periodDays * 24 * 60 * 60 : null;
   // Preserve the caller's wallet order. The SQL query orders rows by address for deterministic
   // pairing, but the fetch queue intentionally passes wallets from lowest to highest activity.
   for (const walletAddress of walletAddresses) {
@@ -357,7 +519,11 @@ const readRecentRoundTrips = (
 };
 
 const readRecentOpenPositions = (
-  database: DatabaseSync, walletAddresses: string[], chain: string, periodDays: number | undefined, now: Date,
+  database: DatabaseSync,
+  walletAddresses: string[],
+  chain: string,
+  periodDays: number | undefined,
+  now: Date,
 ): OpenPosition[] => {
   if (!periodDays || periodDays <= 0 || walletAddresses.length === 0) return [];
   const cutoff = now.getTime() / 1000 - periodDays * 24 * 60 * 60;
@@ -366,7 +532,12 @@ const readRecentOpenPositions = (
   for (const walletAddress of walletAddresses) {
     const walletOpen: OpenPosition[] = [];
     pairRoundTrips(byWallet.get(walletAddress) ?? [], walletOpen);
-    open.push(...walletOpen.filter((position) => position.buyAt >= cutoff && position.buyAt <= cutoff + periodDays * 24 * 60 * 60));
+    open.push(
+      ...walletOpen.filter(
+        (position) =>
+          position.buyAt >= cutoff && position.buyAt <= cutoff + periodDays * 24 * 60 * 60,
+      ),
+    );
   }
   return open;
 };
@@ -385,7 +556,12 @@ type CopySimulationTargetPlan = {
 const planCopySimulationTargets = (
   database: DatabaseSync,
   options: {
-    walletAddresses: string[]; chain: string; periodDays?: number; copierDelaySeconds: number; retryNoMatch?: boolean; now?: Date;
+    walletAddresses: string[];
+    chain: string;
+    periodDays?: number;
+    copierDelaySeconds: number;
+    retryNoMatch?: boolean;
+    now?: Date;
     /** Callers that already read these for the same wallets/chain/periodDays/now (e.g.
      *  computeCopySimulationReport) pass them in to skip a second identical SQL read + pairing
      *  pass — at high per-wallet trade volume that pairing pass is not free. Only valid when the
@@ -395,23 +571,38 @@ const planCopySimulationTargets = (
   },
 ): CopySimulationTargetPlan => {
   const now = options.now ?? new Date();
-  const roundTrips = options.precomputed?.roundTrips ?? readRecentRoundTrips(database, options.walletAddresses, options.chain, options.periodDays, now);
-  const openPositions = options.precomputed?.openPositions ?? readRecentOpenPositions(database, options.walletAddresses, options.chain, options.periodDays, now);
+  const roundTrips =
+    options.precomputed?.roundTrips ??
+    readRecentRoundTrips(database, options.walletAddresses, options.chain, options.periodDays, now);
+  const openPositions =
+    options.precomputed?.openPositions ??
+    readRecentOpenPositions(
+      database,
+      options.walletAddresses,
+      options.chain,
+      options.periodDays,
+      now,
+    );
   const covered = alreadyCoveredTradeIds(database);
   const existingMatches = options.retryNoMatch ? readAllCopySimulationMatches(database) : null;
   const targets: CopySimulationTarget[] = [];
   const seenTradeIds = new Set<number>();
 
   for (const trip of roundTrips) {
-    for (const [tradeId, timestamp] of [[trip.buyTradeId, trip.buyAt], [trip.sellTradeId, trip.sellAt]] as const) {
+    for (const [tradeId, timestamp] of [
+      [trip.buyTradeId, trip.buyAt],
+      [trip.sellTradeId, trip.sellAt],
+    ] as const) {
       const existing = existingMatches?.get(tradeId);
-      const retryableNoMatch = options.retryNoMatch === true
-        && existing?.status === 'no_trade_in_window'
-        && existing.matchSource !== 'wide_window';
+      const retryableNoMatch =
+        options.retryNoMatch === true &&
+        existing?.status === 'no_trade_in_window' &&
+        existing.matchSource !== 'wide_window';
       if ((!retryableNoMatch && covered.has(tradeId)) || seenTradeIds.has(tradeId)) continue;
       seenTradeIds.add(tradeId);
       targets.push({
-        tradeId, tokenAddress: trip.tokenAddress,
+        tradeId,
+        tokenAddress: trip.tokenAddress,
         delayedTargetAtIso: new Date((timestamp + options.copierDelaySeconds) * 1000).toISOString(),
       });
     }
@@ -422,21 +613,41 @@ const planCopySimulationTargets = (
     const tradeId = -Math.abs(position.buyTradeId);
     if (covered.has(tradeId) || seenTradeIds.has(tradeId)) continue;
     seenTradeIds.add(tradeId);
-    targets.push({ tradeId, tokenAddress: position.tokenAddress, delayedTargetAtIso: cutoffAtIso, direction: 'before' });
+    targets.push({
+      tradeId,
+      tokenAddress: position.tokenAddress,
+      delayedTargetAtIso: cutoffAtIso,
+      direction: 'before',
+    });
   }
 
- const allTargetIds = new Set(roundTrips.flatMap((trip) => [trip.buyTradeId, trip.sellTradeId]));
- const matchedBefore = options.retryNoMatch && existingMatches
-    ? roundTrips.filter((trip) => isUsableCopyMatch(existingMatches.get(trip.buyTradeId), trip.buyAt, options.copierDelaySeconds) && isUsableCopyMatch(existingMatches.get(trip.sellTradeId), trip.sellAt, options.copierDelaySeconds)).length
-    : null;
- return {
-   targets,
-   retryableTargetsBefore: options.retryNoMatch ? targets.length : null,
-    coverageBeforePercent: options.retryNoMatch && roundTrips.length > 0 && matchedBefore !== null
-      ? Math.round((matchedBefore / roundTrips.length) * 1000) / 10 : null,
+  const allTargetIds = new Set(roundTrips.flatMap((trip) => [trip.buyTradeId, trip.sellTradeId]));
+  const matchedBefore =
+    options.retryNoMatch && existingMatches
+      ? roundTrips.filter(
+          (trip) =>
+            isUsableCopyMatch(
+              existingMatches.get(trip.buyTradeId),
+              trip.buyAt,
+              options.copierDelaySeconds,
+            ) &&
+            isUsableCopyMatch(
+              existingMatches.get(trip.sellTradeId),
+              trip.sellAt,
+              options.copierDelaySeconds,
+            ),
+        ).length
+      : null;
+  return {
+    targets,
+    retryableTargetsBefore: options.retryNoMatch ? targets.length : null,
+    coverageBeforePercent:
+      options.retryNoMatch && roundTrips.length > 0 && matchedBefore !== null
+        ? Math.round((matchedBefore / roundTrips.length) * 1000) / 10
+        : null,
     allTargetIds,
     roundTrips,
- };
+  };
 };
 
 /**
@@ -451,23 +662,97 @@ const planCopySimulationTargets = (
  */
 export const runCopySimulationBatch = async (
   database: DatabaseSync,
-  options: { walletAddresses: string[]; chain?: string; periodDays?: number; copierDelaySeconds?: number; shouldStop?: () => boolean; retryNoMatch?: boolean; searchWindowMinutes?: number; onPlan?: (plan: { targetsTotal: number; batchesTotal: number; retryableTargetsBefore: number | null; coverageBeforePercent: number | null }) => void; onBatchStart?: (progress: { targetsTotal: number; targetsProcessed: number; batchesRun: number; currentBatch: number; batchesTotal: number; batchTargets: number }) => void; onBatchEnd?: (outcome: { currentBatch: number; batchTargets: number; runId: number | null; error: string | null }) => void; onDuneStatus?: (status: DunePollUpdate) => void; onProgress?: (progress: { targetsTotal: number; targetsProcessed: number; batchesRun: number; currentBatch: number; batchesTotal: number }) => void },
-): Promise<{ runIds: number[]; targetsSubmitted: number; batchesRun: number; exhausted: boolean; cancelled: boolean; targetsTotal: number; failedBatches: string[]; retryableTargetsBefore: number | null; retryableTargetsRemaining: number | null; coverageBeforePercent: number | null; coverageAfterPercent: number | null }> => {
+  options: {
+    walletAddresses: string[];
+    chain?: string;
+    periodDays?: number;
+    copierDelaySeconds?: number;
+    shouldStop?: () => boolean;
+    retryNoMatch?: boolean;
+    searchWindowMinutes?: number;
+    onPlan?: (plan: {
+      targetsTotal: number;
+      batchesTotal: number;
+      retryableTargetsBefore: number | null;
+      coverageBeforePercent: number | null;
+    }) => void;
+    onBatchStart?: (progress: {
+      targetsTotal: number;
+      targetsProcessed: number;
+      batchesRun: number;
+      currentBatch: number;
+      batchesTotal: number;
+      batchTargets: number;
+    }) => void;
+    onBatchEnd?: (outcome: {
+      currentBatch: number;
+      batchTargets: number;
+      runId: number | null;
+      error: string | null;
+    }) => void;
+    onDuneStatus?: (status: DunePollUpdate) => void;
+    onProgress?: (progress: {
+      targetsTotal: number;
+      targetsProcessed: number;
+      batchesRun: number;
+      currentBatch: number;
+      batchesTotal: number;
+    }) => void;
+  },
+): Promise<{
+  runIds: number[];
+  targetsSubmitted: number;
+  batchesRun: number;
+  exhausted: boolean;
+  cancelled: boolean;
+  targetsTotal: number;
+  failedBatches: string[];
+  retryableTargetsBefore: number | null;
+  retryableTargetsRemaining: number | null;
+  coverageBeforePercent: number | null;
+  coverageAfterPercent: number | null;
+}> => {
   const chain = options.chain ?? 'sol';
   const delaySeconds = options.copierDelaySeconds ?? DEFAULT_COPIER_DELAY_SECONDS;
   // Recover anything that timed out locally but finished on Dune's side before planning new
   // work — otherwise those targets stay counted as "covered" forever and are silently skipped
   // below, which is how two earlier runs permanently lost 300 targets each.
   await reconcileStuckCopySimulationRuns(database);
-  const plan = planCopySimulationTargets(database, { ...options, chain, copierDelaySeconds: delaySeconds });
+  const plan = planCopySimulationTargets(database, {
+    ...options,
+    chain,
+    copierDelaySeconds: delaySeconds,
+  });
   const { targets, retryableTargetsBefore, coverageBeforePercent, allTargetIds, roundTrips } = plan;
   if (!targets.length) {
-    options.onPlan?.({ targetsTotal: 0, batchesTotal: 0, retryableTargetsBefore, coverageBeforePercent });
-    return { runIds: [], targetsSubmitted: 0, batchesRun: 0, exhausted: false, cancelled: false, targetsTotal: 0, failedBatches: [], retryableTargetsBefore, retryableTargetsRemaining: 0, coverageBeforePercent, coverageAfterPercent: coverageBeforePercent };
+    options.onPlan?.({
+      targetsTotal: 0,
+      batchesTotal: 0,
+      retryableTargetsBefore,
+      coverageBeforePercent,
+    });
+    return {
+      runIds: [],
+      targetsSubmitted: 0,
+      batchesRun: 0,
+      exhausted: false,
+      cancelled: false,
+      targetsTotal: 0,
+      failedBatches: [],
+      retryableTargetsBefore,
+      retryableTargetsRemaining: 0,
+      coverageBeforePercent,
+      coverageAfterPercent: coverageBeforePercent,
+    };
   }
 
   const batchesTotal = Math.ceil(targets.length / MAX_TARGETS_PER_RUN);
-  options.onPlan?.({ targetsTotal: targets.length, batchesTotal, retryableTargetsBefore, coverageBeforePercent });
+  options.onPlan?.({
+    targetsTotal: targets.length,
+    batchesTotal,
+    retryableTargetsBefore,
+    coverageBeforePercent,
+  });
 
   const runIds: number[] = [];
   let submitted = 0;
@@ -478,9 +763,19 @@ export const runCopySimulationBatch = async (
   // not a cap on total work. The shared Dune scheduler remains sequential and rate-limited;
   // shouldStop is the user-controlled way to interrupt a long run.
   while (submitted < targets.length) {
-    if (options.shouldStop?.()) { cancelled = true; break; }
+    if (options.shouldStop?.()) {
+      cancelled = true;
+      break;
+    }
     const batch = targets.slice(submitted, submitted + MAX_TARGETS_PER_RUN);
-    options.onBatchStart?.({ targetsTotal: targets.length, targetsProcessed: submitted, batchesRun, currentBatch: batchesRun + 1, batchesTotal, batchTargets: batch.length });
+    options.onBatchStart?.({
+      targetsTotal: targets.length,
+      targetsProcessed: submitted,
+      batchesRun,
+      currentBatch: batchesRun + 1,
+      batchesTotal,
+      batchTargets: batch.length,
+    });
     // One batch failing must not abandon the rest. Targets are ordered by wallet, so batch 1 is
     // essentially the first wallet's trades — letting its Dune timeout propagate meant a single
     // slow query silently cost every remaining batch, which read as "the run stops after the
@@ -488,52 +783,94 @@ export const runCopySimulationBatch = async (
     // failure loses only that batch; the failed run row already records why (and keeps its
     // targets protected from an immediate duplicate retry).
     try {
-      const { runId } = await runCopySimulationDuneBatch(database, batch, { onStatus: options.onDuneStatus, shouldStop: options.shouldStop, searchWindowMinutes: options.searchWindowMinutes, matchSource: options.retryNoMatch ? 'wide_window' : 'precise' });
+      const { runId } = await runCopySimulationDuneBatch(database, batch, {
+        onStatus: options.onDuneStatus,
+        shouldStop: options.shouldStop,
+        searchWindowMinutes: options.searchWindowMinutes,
+        matchSource: options.retryNoMatch ? 'wide_window' : 'precise',
+      });
       runIds.push(runId);
-      options.onBatchEnd?.({ currentBatch: batchesRun + 1, batchTargets: batch.length, runId, error: null });
+      options.onBatchEnd?.({
+        currentBatch: batchesRun + 1,
+        batchTargets: batch.length,
+        runId,
+        error: null,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failedBatches.push(message);
-      options.onBatchEnd?.({ currentBatch: batchesRun + 1, batchTargets: batch.length, runId: null, error: message });
+      options.onBatchEnd?.({
+        currentBatch: batchesRun + 1,
+        batchTargets: batch.length,
+        runId: null,
+        error: message,
+      });
     }
     submitted += batch.length;
     batchesRun += 1;
-    options.onProgress?.({ targetsTotal: targets.length, targetsProcessed: submitted, batchesRun, currentBatch: batchesRun + 1, batchesTotal });
+    options.onProgress?.({
+      targetsTotal: targets.length,
+      targetsProcessed: submitted,
+      batchesRun,
+      currentBatch: batchesRun + 1,
+      batchesTotal,
+    });
   }
   const afterMatches = options.retryNoMatch ? readAllCopySimulationMatches(database) : null;
-  const matchedAfter = options.retryNoMatch && afterMatches
-    ? roundTrips.filter((trip) => isUsableCopyMatch(afterMatches.get(trip.buyTradeId), trip.buyAt, delaySeconds) && isUsableCopyMatch(afterMatches.get(trip.sellTradeId), trip.sellAt, delaySeconds)).length
-    : null;
- const coverageAfterPercent = options.retryNoMatch && allTargetIds.size > 0 && matchedAfter !== null
-    ? Math.round((matchedAfter / roundTrips.length) * 1000) / 10
-    : null;
-  const retryableTargetsRemaining = options.retryNoMatch && afterMatches
-    ? [...allTargetIds].filter((tradeId) => {
-      const match = afterMatches.get(tradeId);
-      return match?.status === 'no_trade_in_window' && match.matchSource !== 'wide_window';
-    }).length
-    : null;
+  const matchedAfter =
+    options.retryNoMatch && afterMatches
+      ? roundTrips.filter(
+          (trip) =>
+            isUsableCopyMatch(afterMatches.get(trip.buyTradeId), trip.buyAt, delaySeconds) &&
+            isUsableCopyMatch(afterMatches.get(trip.sellTradeId), trip.sellAt, delaySeconds),
+        ).length
+      : null;
+  const coverageAfterPercent =
+    options.retryNoMatch && allTargetIds.size > 0 && matchedAfter !== null
+      ? Math.round((matchedAfter / roundTrips.length) * 1000) / 10
+      : null;
+  const retryableTargetsRemaining =
+    options.retryNoMatch && afterMatches
+      ? [...allTargetIds].filter((tradeId) => {
+          const match = afterMatches.get(tradeId);
+          return match?.status === 'no_trade_in_window' && match.matchSource !== 'wide_window';
+        }).length
+      : null;
   return {
-    runIds, targetsSubmitted: submitted, batchesRun,
-    exhausted: failedBatches.length > 0 || (submitted < targets.length && !cancelled), cancelled, targetsTotal: targets.length,
+    runIds,
+    targetsSubmitted: submitted,
+    batchesRun,
+    exhausted: failedBatches.length > 0 || (submitted < targets.length && !cancelled),
+    cancelled,
+    targetsTotal: targets.length,
     failedBatches,
-    retryableTargetsBefore, retryableTargetsRemaining, coverageBeforePercent, coverageAfterPercent,
+    retryableTargetsBefore,
+    retryableTargetsRemaining,
+    coverageBeforePercent,
+    coverageAfterPercent,
   };
 };
 
 export type CopySimulationTradeResult = {
   /** Local source id for the wallet buy. Used only for point-in-time feature joins. */
   buyTradeId?: number;
-  tokenAddress: string; tokenSymbol: string | null;
+  tokenAddress: string;
+  tokenSymbol: string | null;
   /** Original wallet round-trip timing, retained for the per-trade audit view. */
-  buyAt?: string; sellAt?: string; sellTradeId?: number; holdSeconds?: number;
-  walletReturnPercent: number | null; simulatedReturnPercent: number | null;
+  buyAt?: string;
+  sellAt?: string;
+  sellTradeId?: number;
+  holdSeconds?: number;
+  walletReturnPercent: number | null;
+  simulatedReturnPercent: number | null;
   copyStakeUsd?: number;
   /** Simulated return as a percentage of the wallet's positive return; null for losses or missing data. */
   edgeKeptPercent?: number | null;
   status: 'simulated' | 'missing_entry_match' | 'missing_exit_match' | 'not_yet_queried';
-  entryMatchedAt?: string | null; exitMatchedAt?: string | null;
-  entryGapSeconds: number | null; exitGapSeconds: number | null;
+  entryMatchedAt?: string | null;
+  exitMatchedAt?: string | null;
+  entryGapSeconds: number | null;
+  exitGapSeconds: number | null;
   /** Two GMGN transactions per round trip (buy + sell), each paying the fixed gas priority
    *  fee — null unless the round trip was actually simulated (a trade that was never or could
    *  not be copied never paid this). Kept in SOL, separate from simulatedReturnPercent, on
@@ -583,7 +920,12 @@ export type CopySimulationWalletReport = {
   totalGasFeeSol: number | null;
   totalGasFeeUsd?: number | null;
   gasCostComplete?: boolean;
-  coverageStatus?: 'fully_covered' | 'partially_covered' | 'missing_local_history' | 'no_dune_match' | 'small_sample';
+  coverageStatus?:
+    | 'fully_covered'
+    | 'partially_covered'
+    | 'missing_local_history'
+    | 'no_dune_match'
+    | 'small_sample';
   coverageStatusReason?: string;
   localHistoryTruncated?: boolean;
   localHistoryStopReason?: string | null;
@@ -610,9 +952,16 @@ export type CopySimulationReport = {
   /** Dune target legs with a usable matched price, counted at leg level. */
   duneMatchedTargets?: number;
   assumptions: {
-    copierDelaySeconds: number; feeBps: number; slippageBps: number; gasPriorityFeeSolPerTx: number;
-    maxMatchGapSeconds: number; maxRoundTripsPerWallet: number | null; periodDays?: number; startingCapitalUsd: number;
-    stakePerTradeUsd: number; maxOpenPositions: number;
+    copierDelaySeconds: number;
+    feeBps: number;
+    slippageBps: number;
+    gasPriorityFeeSolPerTx: number;
+    maxMatchGapSeconds: number;
+    maxRoundTripsPerWallet: number | null;
+    periodDays?: number;
+    startingCapitalUsd: number;
+    stakePerTradeUsd: number;
+    maxOpenPositions: number;
   };
   wallets: CopySimulationWalletReport[];
 };
@@ -700,7 +1049,10 @@ const computeBandStats = (
   trades: Array<CopySimulationTradeResult & { entryTradeAmountUsd: number }>,
   bandOf: (amount: number) => LiquidityBand,
 ): LiquidityBandStats[] => {
-  const byBand = new Map<LiquidityBand, Array<CopySimulationTradeResult & { entryTradeAmountUsd: number }>>();
+  const byBand = new Map<
+    LiquidityBand,
+    Array<CopySimulationTradeResult & { entryTradeAmountUsd: number }>
+  >();
   for (const trade of trades) {
     const band = bandOf(trade.entryTradeAmountUsd);
     const list = byBand.get(band) ?? [];
@@ -713,10 +1065,16 @@ const computeBandStats = (
     const amounts = bandTrades.map((trade) => trade.entryTradeAmountUsd);
     const simulated = bandTrades.filter((trade) => trade.status === 'simulated');
     const missedCount = bandTrades.length - simulated.length;
-    const simulatedReturns = simulated.map((trade) => trade.simulatedReturnPercent).filter((v): v is number => v !== null);
-    const walletReturns = simulated.map((trade) => trade.walletReturnPercent).filter((v): v is number => v !== null);
+    const simulatedReturns = simulated
+      .map((trade) => trade.simulatedReturnPercent)
+      .filter((v): v is number => v !== null);
+    const walletReturns = simulated
+      .map((trade) => trade.walletReturnPercent)
+      .filter((v): v is number => v !== null);
     const delayCosts = simulated
-      .filter((trade) => trade.simulatedReturnPercent !== null && trade.walletReturnPercent !== null)
+      .filter(
+        (trade) => trade.simulatedReturnPercent !== null && trade.walletReturnPercent !== null,
+      )
       .map((trade) => round(trade.simulatedReturnPercent! - trade.walletReturnPercent!, 2));
     const wins = simulatedReturns.filter((r) => r > 0).length;
 
@@ -727,11 +1085,15 @@ const computeBandStats = (
       tradeCount: bandTrades.length,
       simulatedCount: simulated.length,
       missedCount,
-      winRatePercent: simulatedReturns.length ? round((wins / simulatedReturns.length) * 100, 1) : null,
+      winRatePercent: simulatedReturns.length
+        ? round((wins / simulatedReturns.length) * 100, 1)
+        : null,
       medianSimulatedReturnPercent: median(simulatedReturns),
       medianWalletReturnPercent: median(walletReturns),
       medianDelayCostPercentagePoints: median(delayCosts),
-      missedTradeRatePercent: bandTrades.length ? round((missedCount / bandTrades.length) * 100, 1) : null,
+      missedTradeRatePercent: bandTrades.length
+        ? round((missedCount / bandTrades.length) * 100, 1)
+        : null,
       reliable: simulated.length >= MIN_LIQUIDITY_BAND_SAMPLE,
     };
   });
@@ -753,11 +1115,13 @@ const computeBandStats = (
  * on their own small trades" a meaningful, comparable statement across different winners.
  */
 export const computeLiquidityImpactReport = (
-  report: CopySimulationReport, now = new Date(),
+  report: CopySimulationReport,
+  now = new Date(),
 ): LiquidityImpactReport => {
   const allTrades = report.wallets.flatMap((wallet) => wallet.trades);
-  const bandable = allTrades.filter((trade) => trade.entryTradeAmountUsd !== null) as
-    Array<CopySimulationTradeResult & { entryTradeAmountUsd: number }>;
+  const bandable = allTrades.filter((trade) => trade.entryTradeAmountUsd !== null) as Array<
+    CopySimulationTradeResult & { entryTradeAmountUsd: number }
+  >;
   const unbandableCount = allTrades.length - bandable.length;
 
   const base = {
@@ -775,12 +1139,14 @@ export const computeLiquidityImpactReport = (
   const sortedAmounts = bandable.map((trade) => trade.entryTradeAmountUsd).sort((a, b) => a - b);
   const lowUpper = quantile(sortedAmounts, 1 / 3);
   const highLower = quantile(sortedAmounts, 2 / 3);
-  const bandOf = (amount: number): LiquidityBand => (amount <= lowUpper ? 'low' : amount <= highLower ? 'medium' : 'high');
+  const bandOf = (amount: number): LiquidityBand =>
+    amount <= lowUpper ? 'low' : amount <= highLower ? 'medium' : 'high';
 
   const bands = computeBandStats(bandable, bandOf);
   const byWallet: WalletLiquidityConcentration[] = report.wallets.map((wallet) => {
-    const walletBandable = wallet.trades.filter((trade) => trade.entryTradeAmountUsd !== null) as
-      Array<CopySimulationTradeResult & { entryTradeAmountUsd: number }>;
+    const walletBandable = wallet.trades.filter(
+      (trade) => trade.entryTradeAmountUsd !== null,
+    ) as Array<CopySimulationTradeResult & { entryTradeAmountUsd: number }>;
     return { walletAddress: wallet.walletAddress, bands: computeBandStats(walletBandable, bandOf) };
   });
 
@@ -789,7 +1155,16 @@ export const computeLiquidityImpactReport = (
 
 export const computeCopySimulationReport = (
   database: DatabaseSync,
-  options: { walletAddresses: string[]; chain?: string; periodDays?: number; copierDelaySeconds?: number; feeBps?: number; slippageBps?: number; gasPriorityFeeSolPerTx?: number; now?: Date },
+  options: {
+    walletAddresses: string[];
+    chain?: string;
+    periodDays?: number;
+    copierDelaySeconds?: number;
+    feeBps?: number;
+    slippageBps?: number;
+    gasPriorityFeeSolPerTx?: number;
+    now?: Date;
+  },
 ): CopySimulationReport => {
   const chain = options.chain ?? 'sol';
   const delaySeconds = options.copierDelaySeconds ?? DEFAULT_COPIER_DELAY_SECONDS;
@@ -798,8 +1173,20 @@ export const computeCopySimulationReport = (
   const gasPriorityFeeSolPerTx = options.gasPriorityFeeSolPerTx ?? DEFAULT_GAS_PRIORITY_FEE_SOL;
   const now = options.now ?? new Date();
 
-  const roundTrips = readRecentRoundTrips(database, options.walletAddresses, chain, options.periodDays, now);
-  const openPositions = readRecentOpenPositions(database, options.walletAddresses, chain, options.periodDays, now);
+  const roundTrips = readRecentRoundTrips(
+    database,
+    options.walletAddresses,
+    chain,
+    options.periodDays,
+    now,
+  );
+  const openPositions = readRecentOpenPositions(
+    database,
+    options.walletAddresses,
+    chain,
+    options.periodDays,
+    now,
+  );
   const matches = readAllCopySimulationMatches(database);
   // This is deliberately the same planner used by the fetch runner. A report trade is one
   // round trip, while the fetch queue contains its separate buy/sell legs and open marks.
@@ -807,12 +1194,19 @@ export const computeCopySimulationReport = (
   // planner doesn't re-read and re-pair them from scratch -- at high per-wallet trade volume
   // that second pass was measured costing seconds per call.
   const pendingTargetPlan = planCopySimulationTargets(database, {
-    walletAddresses: options.walletAddresses, chain, periodDays: options.periodDays,
-    copierDelaySeconds: delaySeconds, now, precomputed: { roundTrips, openPositions },
+    walletAddresses: options.walletAddresses,
+    chain,
+    periodDays: options.periodDays,
+    copierDelaySeconds: delaySeconds,
+    now,
+    precomputed: { roundTrips, openPositions },
   });
   const coverageByWallet = readWalletCoverageRows(database, chain, options.walletAddresses);
 
-  const gapFor = (match: CopySimulationMatch | undefined, eventTimestamp: number): number | null => {
+  const gapFor = (
+    match: CopySimulationMatch | undefined,
+    eventTimestamp: number,
+  ): number | null => {
     if (!match?.matchedTradeAt) return null;
     const matchedMs = Date.parse(match.matchedTradeAt);
     if (Number.isNaN(matchedMs)) return null;
@@ -868,40 +1262,83 @@ export const computeCopySimulationReport = (
       const exitMatch = matches.get(trip.sellTradeId);
       const entryGap = gapFor(entryMatch, trip.buyAt);
       const exitGap = gapFor(exitMatch, trip.sellAt);
-      const walletReturnPercent = trip.walletReturnRatio !== null ? round(trip.walletReturnRatio * 100, 2) : null;
+      const walletReturnPercent =
+        trip.walletReturnRatio !== null ? round(trip.walletReturnRatio * 100, 2) : null;
       const buyAt = new Date(trip.buyAt * 1000).toISOString();
       const sellAt = new Date(trip.sellAt * 1000).toISOString();
       const baseTrade = {
         buyTradeId: trip.buyTradeId,
         sellTradeId: trip.sellTradeId,
-        tokenAddress: trip.tokenAddress, tokenSymbol: trip.tokenSymbol, buyAt, sellAt,
-        holdSeconds: Math.max(0, trip.sellAt - trip.buyAt), walletReturnPercent,
+        tokenAddress: trip.tokenAddress,
+        tokenSymbol: trip.tokenSymbol,
+        buyAt,
+        sellAt,
+        holdSeconds: Math.max(0, trip.sellAt - trip.buyAt),
+        walletReturnPercent,
         copyStakeUsd: round(COPY_PORTFOLIO_STAKE_USD * trip.copyFraction, 4),
         edgeKeptPercent: null as number | null,
-        entryMatchedAt: entryMatch?.matchedTradeAt ?? null, exitMatchedAt: exitMatch?.matchedTradeAt ?? null,
+        entryMatchedAt: entryMatch?.matchedTradeAt ?? null,
+        exitMatchedAt: exitMatch?.matchedTradeAt ?? null,
       };
 
       const entryTradeAmountUsd = entryMatch?.matchedTradeAmountUsd ?? null;
       const exitTradeAmountUsd = exitMatch?.matchedTradeAmountUsd ?? null;
 
       if (!entryMatch && !exitMatch) {
-        tradeResults.push({ ...baseTrade, simulatedReturnPercent: null, status: 'not_yet_queried', entryGapSeconds: null, exitGapSeconds: null, gasFeeSol: null, entryTradeAmountUsd: null, exitTradeAmountUsd: null });
+        tradeResults.push({
+          ...baseTrade,
+          simulatedReturnPercent: null,
+          status: 'not_yet_queried',
+          entryGapSeconds: null,
+          exitGapSeconds: null,
+          gasFeeSol: null,
+          entryTradeAmountUsd: null,
+          exitTradeAmountUsd: null,
+        });
         continue;
       }
       const entryUsable = isUsableCopyMatch(entryMatch, trip.buyAt, delaySeconds);
       const exitUsable = isUsableCopyMatch(exitMatch, trip.sellAt, delaySeconds);
       // Count only queried legs that lack a usable Dune result. A round trip with one queried
       // no-match leg and one never-queried leg must not make the latter look like a Dune miss.
-      if (entryMatch && entryUsable) { duneMatchedTargets += 1; walletMatchedTargets += 1; }
-      else if (entryMatch) { duneNoMatchTargets += 1; walletNoMatchTargets += 1; }
-      if (exitMatch && exitUsable) { duneMatchedTargets += 1; walletMatchedTargets += 1; }
-      else if (exitMatch) { duneNoMatchTargets += 1; walletNoMatchTargets += 1; }
+      if (entryMatch && entryUsable) {
+        duneMatchedTargets += 1;
+        walletMatchedTargets += 1;
+      } else if (entryMatch) {
+        duneNoMatchTargets += 1;
+        walletNoMatchTargets += 1;
+      }
+      if (exitMatch && exitUsable) {
+        duneMatchedTargets += 1;
+        walletMatchedTargets += 1;
+      } else if (exitMatch) {
+        duneNoMatchTargets += 1;
+        walletNoMatchTargets += 1;
+      }
       if (!entryUsable) {
-        tradeResults.push({ ...baseTrade, simulatedReturnPercent: null, status: 'missing_entry_match', entryGapSeconds: entryGap, exitGapSeconds: exitGap, gasFeeSol: null, entryTradeAmountUsd, exitTradeAmountUsd });
+        tradeResults.push({
+          ...baseTrade,
+          simulatedReturnPercent: null,
+          status: 'missing_entry_match',
+          entryGapSeconds: entryGap,
+          exitGapSeconds: exitGap,
+          gasFeeSol: null,
+          entryTradeAmountUsd,
+          exitTradeAmountUsd,
+        });
         continue;
       }
       if (!exitUsable) {
-        tradeResults.push({ ...baseTrade, simulatedReturnPercent: null, status: 'missing_exit_match', entryGapSeconds: entryGap, exitGapSeconds: exitGap, gasFeeSol: null, entryTradeAmountUsd, exitTradeAmountUsd });
+        tradeResults.push({
+          ...baseTrade,
+          simulatedReturnPercent: null,
+          status: 'missing_exit_match',
+          entryGapSeconds: entryGap,
+          exitGapSeconds: exitGap,
+          gasFeeSol: null,
+          entryTradeAmountUsd,
+          exitTradeAmountUsd,
+        });
         continue;
       }
 
@@ -909,7 +1346,16 @@ export const computeCopySimulationReport = (
       const exitPrice = exitMatch!.matchedPriceUsd! * (1 - (feeBps + slippageBps) / 10_000);
       const simulatedRatio = entryPrice > 0 ? (exitPrice - entryPrice) / entryPrice : null;
       if (simulatedRatio === null) {
-        tradeResults.push({ ...baseTrade, simulatedReturnPercent: null, status: 'missing_entry_match', entryGapSeconds: entryGap, exitGapSeconds: exitGap, gasFeeSol: null, entryTradeAmountUsd, exitTradeAmountUsd });
+        tradeResults.push({
+          ...baseTrade,
+          simulatedReturnPercent: null,
+          status: 'missing_entry_match',
+          entryGapSeconds: entryGap,
+          exitGapSeconds: exitGap,
+          gasFeeSol: null,
+          entryTradeAmountUsd,
+          exitTradeAmountUsd,
+        });
         continue;
       }
       simulatedRatiosOrdered.push({ sellAt: trip.sellAt, ratio: simulatedRatio });
@@ -917,8 +1363,10 @@ export const computeCopySimulationReport = (
       // One GMGN transaction to copy the buy, one to copy the sell — two gas payments per
       // round trip, not one.
       const gasFeeSol = round(gasPriorityFeeSolPerTx * 2, 6);
-      const gasFeeUsd = trip.buyGasUsd !== null && trip.sellGasUsd !== null
-        ? round(trip.buyGasUsd + trip.sellGasUsd, 2) : null;
+      const gasFeeUsd =
+        trip.buyGasUsd !== null && trip.sellGasUsd !== null
+          ? round(trip.buyGasUsd + trip.sellGasUsd, 2)
+          : null;
       portfolioTrades.push({
         id: trip.sellTradeId,
         entryAt: trip.buyAt + delaySeconds,
@@ -935,10 +1383,18 @@ export const computeCopySimulationReport = (
       });
       tradeResults.push({
         ...baseTrade,
-        simulatedReturnPercent: round(simulatedRatio * 100, 2), status: 'simulated',
-        edgeKeptPercent: walletReturnPercent !== null && walletReturnPercent > 0 ? round((simulatedRatio * 100 / walletReturnPercent) * 100, 1) : null,
-        entryGapSeconds: entryGap, exitGapSeconds: exitGap, gasFeeSol, gasFeeUsd,
-        entryTradeAmountUsd, exitTradeAmountUsd,
+        simulatedReturnPercent: round(simulatedRatio * 100, 2),
+        status: 'simulated',
+        edgeKeptPercent:
+          walletReturnPercent !== null && walletReturnPercent > 0
+            ? round(((simulatedRatio * 100) / walletReturnPercent) * 100, 1)
+            : null,
+        entryGapSeconds: entryGap,
+        exitGapSeconds: exitGap,
+        gasFeeSol,
+        gasFeeUsd,
+        entryTradeAmountUsd,
+        exitTradeAmountUsd,
       });
     }
 
@@ -946,18 +1402,30 @@ export const computeCopySimulationReport = (
     for (const position of walletOpenPositions) {
       const entryMatch = matches.get(position.buyTradeId);
       const cutoffMatch = matches.get(-Math.abs(position.buyTradeId));
-      const entryPrice = entryMatch?.status === 'matched' && entryMatch.matchedPriceUsd !== null
-        ? entryMatch.matchedPriceUsd * (1 + haircut) : null;
-      const cutoffPrice = cutoffMatch?.status === 'matched' && cutoffMatch.matchedPriceUsd !== null
-        ? cutoffMatch.matchedPriceUsd * (1 - haircut) : null;
-      const cutoffReturnRatio = entryPrice !== null && cutoffPrice !== null && entryPrice > 0
-        ? (cutoffPrice - entryPrice) / entryPrice : null;
+      const entryPrice =
+        entryMatch?.status === 'matched' && entryMatch.matchedPriceUsd !== null
+          ? entryMatch.matchedPriceUsd * (1 + haircut)
+          : null;
+      const cutoffPrice =
+        cutoffMatch?.status === 'matched' && cutoffMatch.matchedPriceUsd !== null
+          ? cutoffMatch.matchedPriceUsd * (1 - haircut)
+          : null;
+      const cutoffReturnRatio =
+        entryPrice !== null && cutoffPrice !== null && entryPrice > 0
+          ? (cutoffPrice - entryPrice) / entryPrice
+          : null;
       portfolioTrades.push({
-        id: -Math.abs(position.buyTradeId), positionId: position.buyTradeId,
-        entryAt: position.buyAt + delaySeconds, exitAt: now.getTime() / 1000,
-        returnRatio: 0, stakeUsd: COPY_PORTFOLIO_STAKE_USD * position.remainingFraction,
-        entryGasFeeSol: gasPriorityFeeSolPerTx, entryGasFeeUsd: null,
-        cutoffReturnRatio, isOpenAtCutoff: true, gasFeeSol: gasPriorityFeeSolPerTx,
+        id: -Math.abs(position.buyTradeId),
+        positionId: position.buyTradeId,
+        entryAt: position.buyAt + delaySeconds,
+        exitAt: now.getTime() / 1000,
+        returnRatio: 0,
+        stakeUsd: COPY_PORTFOLIO_STAKE_USD * position.remainingFraction,
+        entryGasFeeSol: gasPriorityFeeSolPerTx,
+        entryGasFeeUsd: null,
+        cutoffReturnRatio,
+        isOpenAtCutoff: true,
+        gasFeeSol: gasPriorityFeeSolPerTx,
         gasFeeUsd: null,
       });
     }
@@ -966,43 +1434,81 @@ export const computeCopySimulationReport = (
     const simulatedPercents = simulatedRatiosOrdered.map((s) => s.ratio * 100);
     const simulatedMedianReturnPercent = median(simulatedPercents);
     const walletMeanReturnPercent = walletReturnPercentsOnCopiedTrips.length
-      ? round(walletReturnPercentsOnCopiedTrips.reduce((sum, value) => sum + value, 0) / walletReturnPercentsOnCopiedTrips.length, 2)
+      ? round(
+          walletReturnPercentsOnCopiedTrips.reduce((sum, value) => sum + value, 0) /
+            walletReturnPercentsOnCopiedTrips.length,
+          2,
+        )
       : null;
     const simulatedMeanReturnPercent = simulatedPercents.length
-      ? round(simulatedPercents.reduce((sum, value) => sum + value, 0) / simulatedPercents.length, 2)
+      ? round(
+          simulatedPercents.reduce((sum, value) => sum + value, 0) / simulatedPercents.length,
+          2,
+        )
       : null;
     const totalSimulatedReturn = simulatedPercents.reduce((sum, value) => sum + value, 0);
     const tailReturn = simulatedPercents
       .filter((value) => value > TAIL_THRESHOLD_PERCENT)
       .reduce((sum, value) => sum + value, 0);
-    const tailShareOfMeanPercent = totalSimulatedReturn > 0
-      ? round((tailReturn / totalSimulatedReturn) * 100, 1)
-      : null;
+    const tailShareOfMeanPercent =
+      totalSimulatedReturn > 0 ? round((tailReturn / totalSimulatedReturn) * 100, 1) : null;
     const simulatedTrips = trips.filter((trip) => {
-      const result = tradeResults.find((candidate) => candidate.buyTradeId === trip.buyTradeId && candidate.sellTradeId === trip.sellTradeId);
+      const result = tradeResults.find(
+        (candidate) =>
+          candidate.buyTradeId === trip.buyTradeId && candidate.sellTradeId === trip.sellTradeId,
+      );
       return result?.status === 'simulated';
     });
     const uniqueBuyIds = new Set(simulatedTrips.map((trip) => trip.buyTradeId));
-    const totalGasFeeSol = simulatedTrips.length > 0 ? round((uniqueBuyIds.size + simulatedTrips.length) * gasPriorityFeeSolPerTx, 6) : null;
+    const totalGasFeeSol =
+      simulatedTrips.length > 0
+        ? round((uniqueBuyIds.size + simulatedTrips.length) * gasPriorityFeeSolPerTx, 6)
+        : null;
     const simulatedTrades = tradeResults.filter((trade) => trade.status === 'simulated');
-    const totalGasFeeUsd = simulatedTrips.length > 0 && simulatedTrips.every((trip) => trip.buyGasUsd !== null && trip.sellGasUsd !== null)
-      ? round([...uniqueBuyIds].reduce((sum, buyId) => sum + (simulatedTrips.find((trip) => trip.buyTradeId === buyId)?.buyGasUsd ?? 0), 0)
-        + simulatedTrips.reduce((sum, trip) => sum + (trip.sellGasUsd ?? 0), 0), 2) : null;
-    const coverageRatePercent = trips.length > 0 ? round((simulatedRatiosOrdered.length / trips.length) * 100, 1) : null;
+    const totalGasFeeUsd =
+      simulatedTrips.length > 0 &&
+      simulatedTrips.every((trip) => trip.buyGasUsd !== null && trip.sellGasUsd !== null)
+        ? round(
+            [...uniqueBuyIds].reduce(
+              (sum, buyId) =>
+                sum + (simulatedTrips.find((trip) => trip.buyTradeId === buyId)?.buyGasUsd ?? 0),
+              0,
+            ) + simulatedTrips.reduce((sum, trip) => sum + (trip.sellGasUsd ?? 0), 0),
+            2,
+          )
+        : null;
+    const coverageRatePercent =
+      trips.length > 0 ? round((simulatedRatiosOrdered.length / trips.length) * 100, 1) : null;
     const coverage = coverageByWallet.get(walletAddress);
     const localHistoryTruncated = coverage?.truncated === 1;
-    const notQueriedCount = tradeResults.filter((trade) => trade.status === 'not_yet_queried').length;
-    const noMatchCount = tradeResults.filter((trade) => trade.status === 'missing_entry_match' || trade.status === 'missing_exit_match').length;
-    const coverageStatus: CopySimulationWalletReport['coverageStatus'] = trips.length < MIN_COPY_SIMULATION_SAMPLE
-      ? 'small_sample'
-      : localHistoryTruncated ? 'missing_local_history'
-      : notQueriedCount > 0 ? 'partially_covered'
-      : simulatedRatiosOrdered.length === 0 && noMatchCount > 0 ? 'no_dune_match'
-      : simulatedRatiosOrdered.length === trips.length ? 'fully_covered' : 'partially_covered';
-    const coverageStatusReason = coverageStatus === 'small_sample' ? `Only ${trips.length} paired trades are available.`
-      : coverageStatus === 'missing_local_history' ? `GMGN history was truncated${coverage?.stopReason ? ` (${coverage.stopReason})` : ''}; more local trades may be missing.`
-      : coverageStatus === 'no_dune_match' ? 'Dune was queried, but no usable trade matched the precise window.'
-      : coverageStatus === 'partially_covered' ? `${notQueriedCount} trades still need Dune data.` : 'Every paired trade has a usable Dune match.';
+    const notQueriedCount = tradeResults.filter(
+      (trade) => trade.status === 'not_yet_queried',
+    ).length;
+    const noMatchCount = tradeResults.filter(
+      (trade) => trade.status === 'missing_entry_match' || trade.status === 'missing_exit_match',
+    ).length;
+    const coverageStatus: CopySimulationWalletReport['coverageStatus'] =
+      trips.length < MIN_COPY_SIMULATION_SAMPLE
+        ? 'small_sample'
+        : localHistoryTruncated
+          ? 'missing_local_history'
+          : notQueriedCount > 0
+            ? 'partially_covered'
+            : simulatedRatiosOrdered.length === 0 && noMatchCount > 0
+              ? 'no_dune_match'
+              : simulatedRatiosOrdered.length === trips.length
+                ? 'fully_covered'
+                : 'partially_covered';
+    const coverageStatusReason =
+      coverageStatus === 'small_sample'
+        ? `Only ${trips.length} paired trades are available.`
+        : coverageStatus === 'missing_local_history'
+          ? `GMGN history was truncated${coverage?.stopReason ? ` (${coverage.stopReason})` : ''}; more local trades may be missing.`
+          : coverageStatus === 'no_dune_match'
+            ? 'Dune was queried, but no usable trade matched the precise window.'
+            : coverageStatus === 'partially_covered'
+              ? `${notQueriedCount} trades still need Dune data.`
+              : 'Every paired trade has a usable Dune match.';
 
     return {
       walletAddress,
@@ -1014,18 +1520,30 @@ export const computeCopySimulationReport = (
       simulatedMedianReturnPercent,
       walletMeanReturnPercent,
       simulatedMeanReturnPercent,
-      tradesAbove100Percent: simulatedPercents.filter((value) => value > TAIL_THRESHOLD_PERCENT).length,
-      tradesAbove300Percent: simulatedPercents.filter((value) => value > EXTREME_TAIL_THRESHOLD_PERCENT).length,
-      bestSimulatedReturnPercent: simulatedPercents.length ? round(Math.max(...simulatedPercents), 2) : null,
+      tradesAbove100Percent: simulatedPercents.filter((value) => value > TAIL_THRESHOLD_PERCENT)
+        .length,
+      tradesAbove300Percent: simulatedPercents.filter(
+        (value) => value > EXTREME_TAIL_THRESHOLD_PERCENT,
+      ).length,
+      bestSimulatedReturnPercent: simulatedPercents.length
+        ? round(Math.max(...simulatedPercents), 2)
+        : null,
       tailShareOfMeanPercent,
       totalGasFeeSol,
       totalGasFeeUsd,
       gasCostComplete: simulatedTrades.every((trade) => trade.gasFeeUsd !== null),
-      coverageStatus, coverageStatusReason, localHistoryTruncated, localHistoryStopReason: coverage?.stopReason ?? null,
+      coverageStatus,
+      coverageStatusReason,
+      localHistoryTruncated,
+      localHistoryStopReason: coverage?.stopReason ?? null,
       portfolio: simulateFixedStakePortfolio(portfolioTrades),
-      delayCostPercentagePoints: walletMedianReturnPercent !== null && simulatedMedianReturnPercent !== null
-        ? round(simulatedMedianReturnPercent - walletMedianReturnPercent, 2) : null,
-      worstSimulatedReturnPercent: simulatedPercents.length ? round(Math.min(...simulatedPercents), 2) : null,
+      delayCostPercentagePoints:
+        walletMedianReturnPercent !== null && simulatedMedianReturnPercent !== null
+          ? round(simulatedMedianReturnPercent - walletMedianReturnPercent, 2)
+          : null,
+      worstSimulatedReturnPercent: simulatedPercents.length
+        ? round(Math.min(...simulatedPercents), 2)
+        : null,
       trades: tradeResults,
       pendingDuneTargets: pendingByWallet.get(walletAddress) ?? 0,
       duneNoMatchTargets: walletNoMatchTargets,
@@ -1039,8 +1557,12 @@ export const computeCopySimulationReport = (
     duneNoMatchTargets,
     duneMatchedTargets,
     assumptions: {
-      copierDelaySeconds: delaySeconds, feeBps, slippageBps, gasPriorityFeeSolPerTx,
-      maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS, maxRoundTripsPerWallet: null,
+      copierDelaySeconds: delaySeconds,
+      feeBps,
+      slippageBps,
+      gasPriorityFeeSolPerTx,
+      maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS,
+      maxRoundTripsPerWallet: null,
       ...(options.periodDays ? { periodDays: options.periodDays } : {}),
       startingCapitalUsd: COPY_PORTFOLIO_STARTING_CAPITAL_USD,
       stakePerTradeUsd: COPY_PORTFOLIO_STAKE_USD,

@@ -13,7 +13,7 @@ This is the single most important thing to understand before touching anything, 
 
 ---
 
-## Fix 1 — delete the dead `byHorizon` block  (was audit finding B1)
+## Fix 1 — delete the dead `byHorizon` block (was audit finding B1)
 
 `computeMeasurementPlan` in `src/dune/planner.ts:201` builds a `byHorizon` array whose `usable` field counts every matured checkpoint where Dune returned a price, applying neither the trade-age policy nor the dedup that Patterns applies. It therefore reports roughly double what the analysis accepts (verified at +3h: `byHorizon.usable` 867 vs `patterns.overall.nFresh` 389).
 
@@ -23,7 +23,7 @@ Delete it: the computation in `planner.ts`, the field in both `MeasurementPlan` 
 
 Because the plan is cached as JSON in `measurement_plan_cache` and the cache key includes `MEASUREMENT_PLAN_VERSION`, **bump the version** (currently `measurement-plan-v9`) so previously cached plans carrying the old shape are discarded. `tests/dune-planner.test.ts` asserts the version string in one place; update it.
 
-## Fix 2 — "— up to date" appears while thousands of signals need fetching  (audit finding A1)
+## Fix 2 — "— up to date" appears while thousands of signals need fetching (audit finding A1)
 
 `ui/main.tsx:1164`'s `measurement-summary` paragraph appends `— up to date` when `unmeasured === 0 && inFlight === 0`. `unmeasured` maps to `unmeasuredCount`, which is only `byState.not_measured`.
 
@@ -32,15 +32,15 @@ Verified live: it currently renders **"11662 with stored outcome · 0 never meas
 Two things are wrong and both should be fixed:
 
 1. **The "up to date" condition.** It must not claim up-to-date while there is actionable work. At minimum it must also require the screened retry queue (`retryQueueSignalIds`) to be empty. Consider whether pending unverified data should also block the claim.
-2. **`measuredCount` / "with stored outcome" = 11,662.** That figure is `signals.length - not_measured - too_fresh - in_flight`, so it counts every `retry_eligible` and `elapsed_but_unavailable` signal as having a stored outcome — including the 3,346 whose stored data is *entirely* premature/unverified (verified: 100% of the queue has premature checkpoints and none has usable data). Saying 11,662 "have a stored outcome" next to a button offering to re-fetch 3,346 of them is contradictory.
+2. **`measuredCount` / "with stored outcome" = 11,662.** That figure is `signals.length - not_measured - too_fresh - in_flight`, so it counts every `retry_eligible` and `elapsed_but_unavailable` signal as having a stored outcome — including the 3,346 whose stored data is _entirely_ premature/unverified (verified: 100% of the queue has premature checkpoints and none has usable data). Saying 11,662 "have a stored outcome" next to a button offering to re-fetch 3,346 of them is contradictory.
 
 The honest figures already exist in the plan: `byState.complete` (893 genuinely done), `retryQueueSignalIds.length` (3,346 actionable), `byState.elapsed_but_unavailable` (6,744 waiting). Use judgement on exact copy, but the invariant is: **no number or phrase on this page may imply work is finished while the queue is non-empty.**
 
-## Fix 3 — retry tile subtext claims a subset larger than its set  (audit finding A2)
+## Fix 3 — retry tile subtext claims a subset larger than its set (audit finding A2)
 
 `ui/main.tsx:1144` renders the headline from `retryReady` (= `retryQueueSignalIds.length`, **3,346**) and then the subtext "(**4,023** of these get their first fair post-buffer check)" from `neverMaturelyAttemptedCount`.
 
-`neverMaturelyAttemptedCount` is tallied in `computeMeasurementPlan`'s per-signal loop over signals in `byState.retry_eligible` (**4,025**), which is a *different, larger* population than the screened queue — the queue additionally drops 679 repeat observations of a token+type already represented. A subset cannot exceed its set.
+`neverMaturelyAttemptedCount` is tallied in `computeMeasurementPlan`'s per-signal loop over signals in `byState.retry_eligible` (**4,025**), which is a _different, larger_ population than the screened queue — the queue additionally drops 679 repeat observations of a token+type already represented. A subset cannot exceed its set.
 
 Fix the denominator, not the wording: compute the premature-subset count over `retryQueueSignalIds` rather than over `retry_eligible` state. Note the ordering constraint — `retryQueueSignalIds` is produced later in `computeMeasurementPlan` than the per-signal loop that currently does the tally, so the count needs to be derived after the queue exists (or intersected with it).
 

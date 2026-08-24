@@ -31,7 +31,8 @@ type CompletedTrade = {
   tokenSymbol: string | null;
 };
 
-export type HistoricalConsistencyVerdict = 'consistent' | 'declining' | 'recent_only' | 'consistently_negative' | 'insufficient';
+export type HistoricalConsistencyVerdict =
+  'consistent' | 'declining' | 'recent_only' | 'consistently_negative' | 'insufficient';
 export type HistoricalConsistencySplit = 'fixed_60_30' | 'relative_half' | 'insufficient_depth';
 
 export type HistoricalPeriodReport = {
@@ -97,13 +98,16 @@ const emptyConcentration = (): ProfitConcentration => ({
   excludingBestToken: { trades: 0, medianReturnPercent: null, endingCapitalUsd: null },
 });
 
-const weeklyConsistency = (periods: PeriodPerformance[]): HistoricalPeriodReport['weeklyConsistency'] => {
+const weeklyConsistency = (
+  periods: PeriodPerformance[],
+): HistoricalPeriodReport['weeklyConsistency'] => {
   const withData = periods.filter((period) => period.medianReturnPercent !== null);
   const positivePeriods = withData.filter((period) => (period.medianReturnPercent ?? 0) > 0).length;
   return {
     positivePeriods,
     periodsWithData: withData.length,
-    positivePercent: withData.length === 0 ? null : round((positivePeriods / withData.length) * 100, 1),
+    positivePercent:
+      withData.length === 0 ? null : round((positivePeriods / withData.length) * 100, 1),
   };
 };
 
@@ -121,7 +125,8 @@ const periodReport = (
   weeklyPerformance: performanceByPeriod(trades, 'week'),
   monthlyPerformance: performanceByPeriod(trades, 'month'),
   weeklyConsistency: weeklyConsistency(performanceByPeriod(trades, 'week')),
-  profitConcentration: trades.length === 0 ? emptyConcentration() : computeProfitConcentration(trades),
+  profitConcentration:
+    trades.length === 0 ? emptyConcentration() : computeProfitConcentration(trades),
 });
 
 const isPositive = (period: HistoricalPeriodReport): boolean =>
@@ -132,7 +137,8 @@ const classify = (
   early: HistoricalPeriodReport,
   recent: HistoricalPeriodReport,
 ): HistoricalConsistencyVerdict => {
-  if (split === 'insufficient_depth' || early.trades === 0 || recent.trades === 0) return 'insufficient';
+  if (split === 'insufficient_depth' || early.trades === 0 || recent.trades === 0)
+    return 'insufficient';
   const earlyPositive = isPositive(early);
   const recentPositive = isPositive(recent);
   if (earlyPositive && recentPositive) return 'consistent';
@@ -145,28 +151,32 @@ const classify = (
   return 'consistently_negative';
 };
 
-const completeTrades = (trades: HistoricalConsistencyTrade[]): CompletedTrade[] => trades
-  .filter((trade) => trade.eventType === 'sell')
-  .map((trade, index) => {
-    const proceeds = parseAmount(trade.costUsd);
-    const costBasis = parseAmount(trade.buyCostUsd);
-    if (proceeds === null || costBasis === null || costBasis <= 0) return null;
-    return {
-      // A caller may provide no database ID (for example, an imported fixture). Use a
-      // per-wallet deterministic fallback so excluding the best trade cannot remove every
-      // no-ID trade that happens to share the old sentinel value.
-      sourceId: trade.id ?? index,
-      timestamp: trade.observedTimestamp,
-      returnRatio: (proceeds - costBasis) / costBasis,
-      profitUsd: proceeds - costBasis,
-      tokenAddress: trade.tokenAddress,
-      tokenSymbol: trade.tokenSymbol ?? null,
-    } satisfies CompletedTrade;
-  })
-  .filter((trade): trade is CompletedTrade => trade !== null)
-  .sort((left, right) => left.timestamp - right.timestamp || left.sourceId - right.sourceId);
+const completeTrades = (trades: HistoricalConsistencyTrade[]): CompletedTrade[] =>
+  trades
+    .filter((trade) => trade.eventType === 'sell')
+    .map((trade, index) => {
+      const proceeds = parseAmount(trade.costUsd);
+      const costBasis = parseAmount(trade.buyCostUsd);
+      if (proceeds === null || costBasis === null || costBasis <= 0) return null;
+      return {
+        // A caller may provide no database ID (for example, an imported fixture). Use a
+        // per-wallet deterministic fallback so excluding the best trade cannot remove every
+        // no-ID trade that happens to share the old sentinel value.
+        sourceId: trade.id ?? index,
+        timestamp: trade.observedTimestamp,
+        returnRatio: (proceeds - costBasis) / costBasis,
+        profitUsd: proceeds - costBasis,
+        tokenAddress: trade.tokenAddress,
+        tokenSymbol: trade.tokenSymbol ?? null,
+      } satisfies CompletedTrade;
+    })
+    .filter((trade): trade is CompletedTrade => trade !== null)
+    .sort((left, right) => left.timestamp - right.timestamp || left.sourceId - right.sourceId);
 
-const splitWallet = (trades: CompletedTrade[], nowSeconds: number): {
+const splitWallet = (
+  trades: CompletedTrade[],
+  nowSeconds: number,
+): {
   split: HistoricalConsistencySplit;
   availableDays: number | null;
   splitPoint: number | null;
@@ -179,8 +189,15 @@ const splitWallet = (trades: CompletedTrade[], nowSeconds: number): {
 } => {
   if (trades.length === 0) {
     return {
-      split: 'insufficient_depth', availableDays: null, splitPoint: null,
-      earlyTrades: [], recentTrades: [], earlyStart: null, earlyEnd: null, recentStart: null, recentEnd: null,
+      split: 'insufficient_depth',
+      availableDays: null,
+      splitPoint: null,
+      earlyTrades: [],
+      recentTrades: [],
+      earlyStart: null,
+      earlyEnd: null,
+      recentStart: null,
+      recentEnd: null,
     };
   }
 
@@ -189,18 +206,30 @@ const splitWallet = (trades: CompletedTrade[], nowSeconds: number): {
   const availableDays = Math.max(0, (last - first) / DAY_SECONDS);
   if (availableDays < MIN_HISTORY_DAYS) {
     return {
-      split: 'insufficient_depth', availableDays: round(availableDays, 2), splitPoint: null,
-      earlyTrades: [], recentTrades: [], earlyStart: first, earlyEnd: last, recentStart: null, recentEnd: null,
+      split: 'insufficient_depth',
+      availableDays: round(availableDays, 2),
+      splitPoint: null,
+      earlyTrades: [],
+      recentTrades: [],
+      earlyStart: first,
+      earlyEnd: last,
+      recentStart: null,
+      recentEnd: null,
     };
   }
 
   if (availableDays < FIXED_HISTORY_DAYS) {
     const splitPoint = first + Math.floor((last - first) / 2);
     return {
-      split: 'relative_half', availableDays: round(availableDays, 2), splitPoint,
+      split: 'relative_half',
+      availableDays: round(availableDays, 2),
+      splitPoint,
       earlyTrades: trades.filter((trade) => trade.timestamp <= splitPoint),
       recentTrades: trades.filter((trade) => trade.timestamp > splitPoint),
-      earlyStart: first, earlyEnd: splitPoint, recentStart: splitPoint + 1, recentEnd: last,
+      earlyStart: first,
+      earlyEnd: splitPoint,
+      recentStart: splitPoint + 1,
+      recentEnd: last,
     };
   }
 
@@ -208,10 +237,19 @@ const splitWallet = (trades: CompletedTrade[], nowSeconds: number): {
   const earlyStart = nowSeconds - FIXED_HISTORY_DAYS * DAY_SECONDS;
   const splitPoint = recentStart;
   return {
-    split: 'fixed_60_30', availableDays: round(availableDays, 2), splitPoint,
-    earlyTrades: trades.filter((trade) => trade.timestamp >= earlyStart && trade.timestamp < recentStart),
-    recentTrades: trades.filter((trade) => trade.timestamp >= recentStart && trade.timestamp <= nowSeconds),
-    earlyStart, earlyEnd: recentStart - 1, recentStart, recentEnd: nowSeconds,
+    split: 'fixed_60_30',
+    availableDays: round(availableDays, 2),
+    splitPoint,
+    earlyTrades: trades.filter(
+      (trade) => trade.timestamp >= earlyStart && trade.timestamp < recentStart,
+    ),
+    recentTrades: trades.filter(
+      (trade) => trade.timestamp >= recentStart && trade.timestamp <= nowSeconds,
+    ),
+    earlyStart,
+    earlyEnd: recentStart - 1,
+    recentStart,
+    recentEnd: nowSeconds,
   };
 };
 
@@ -222,30 +260,41 @@ export const computeHistoricalConsistency = (
   const nowSeconds = Math.floor(now.getTime() / 1000);
   const byWallet = new Map<string, HistoricalConsistencyTrade[]>();
   for (const trade of trades) {
-    if (!trade.walletAddress || !Number.isFinite(trade.observedTimestamp) || trade.observedTimestamp > nowSeconds) continue;
+    if (
+      !trade.walletAddress ||
+      !Number.isFinite(trade.observedTimestamp) ||
+      trade.observedTimestamp > nowSeconds
+    )
+      continue;
     const walletTrades = byWallet.get(trade.walletAddress) ?? [];
     walletTrades.push(trade);
     byWallet.set(trade.walletAddress, walletTrades);
   }
 
-  const rows = [...byWallet.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([walletAddress, walletTrades]) => {
-    const completed = completeTrades(walletTrades);
-    const split = splitWallet(completed, nowSeconds);
-    const early = periodReport('early', split.earlyTrades, split.earlyStart, split.earlyEnd);
-    const recent = periodReport('recent', split.recentTrades, split.recentStart, split.recentEnd);
-    return {
-      walletAddress,
-      availableDays: split.availableDays,
-      split: split.split,
-      splitPointAt: isoAt(split.splitPoint),
-      early,
-      recent,
-      verdict: classify(split.split, early, recent),
-    } satisfies HistoricalConsistencyRow;
-  });
+  const rows = [...byWallet.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([walletAddress, walletTrades]) => {
+      const completed = completeTrades(walletTrades);
+      const split = splitWallet(completed, nowSeconds);
+      const early = periodReport('early', split.earlyTrades, split.earlyStart, split.earlyEnd);
+      const recent = periodReport('recent', split.recentTrades, split.recentStart, split.recentEnd);
+      return {
+        walletAddress,
+        availableDays: split.availableDays,
+        split: split.split,
+        splitPointAt: isoAt(split.splitPoint),
+        early,
+        recent,
+        verdict: classify(split.split, early, recent),
+      } satisfies HistoricalConsistencyRow;
+    });
 
   const counts: Record<HistoricalConsistencyVerdict, number> = {
-    consistent: 0, declining: 0, recent_only: 0, consistently_negative: 0, insufficient: 0,
+    consistent: 0,
+    declining: 0,
+    recent_only: 0,
+    consistently_negative: 0,
+    insufficient: 0,
   };
   for (const row of rows) counts[row.verdict] += 1;
   return {
@@ -254,7 +303,8 @@ export const computeHistoricalConsistency = (
       minimumHistoryDays: MIN_HISTORY_DAYS,
       fixedHistoryDays: FIXED_HISTORY_DAYS,
       recentDays: RECENT_DAYS,
-      description: 'Under 30 days is insufficient; 30–90 days uses a relative half-split; 90+ days uses fixed early 60-day and recent 30-day windows.',
+      description:
+        'Under 30 days is insufficient; 30–90 days uses a relative half-split; 90+ days uses fixed early 60-day and recent 30-day windows.',
     },
     totalWallets: rows.length,
     counts,

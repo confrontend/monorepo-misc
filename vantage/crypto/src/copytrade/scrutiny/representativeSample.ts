@@ -62,12 +62,14 @@ const pickSells = <T extends RepresentativeTradeRow>(sells: T[], limit: number):
   }
   const ordered = [...buckets.entries()].sort(([left], [right]) => left.localeCompare(right));
   const allocations = ordered.map(([day, rows]) => {
-    const exact = rows.length * limit / sells.length;
+    const exact = (rows.length * limit) / sells.length;
     return { day, rows, base: Math.floor(exact), remainder: exact - Math.floor(exact) };
   });
   let assigned = allocations.reduce((sum, item) => sum + item.base, 0);
   // Give leftover slots to the largest fractional buckets, with the day as a stable tie-break.
-  allocations.sort((left, right) => right.remainder - left.remainder || left.day.localeCompare(right.day));
+  allocations.sort(
+    (left, right) => right.remainder - left.remainder || left.day.localeCompare(right.day),
+  );
   for (let index = 0; assigned < limit && index < allocations.length; index += 1) {
     allocations[index].base += 1;
     assigned += 1;
@@ -81,7 +83,8 @@ export const selectRepresentativeTrades = <T extends RepresentativeTradeRow>(
   rows: readonly T[],
   limit = REPRESENTATIVE_SELL_LIMIT,
 ): RepresentativeSampleResult<T> => {
-  if (!Number.isInteger(limit) || limit <= 0) throw new Error('Representative sample limit must be a positive integer.');
+  if (!Number.isInteger(limit) || limit <= 0)
+    throw new Error('Representative sample limit must be a positive integer.');
   const grouped = new Map<string, T[]>();
   for (const row of rows) {
     const walletRows = grouped.get(row.walletAddress) ?? [];
@@ -122,5 +125,11 @@ export const selectRepresentativeTrades = <T extends RepresentativeTradeRow>(
       sampled: selectedSells.length < sells.length,
     });
   }
-  return { rows: output.sort((left, right) => left.walletAddress.localeCompare(right.walletAddress) || stableRowOrder(left, right)), byWallet };
+  return {
+    rows: output.sort(
+      (left, right) =>
+        left.walletAddress.localeCompare(right.walletAddress) || stableRowOrder(left, right),
+    ),
+    byWallet,
+  };
 };

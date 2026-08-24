@@ -9,9 +9,8 @@ const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 // this identical for tsx development and compiled production code prevents
 // each mode from silently opening a different SQLite database.
 const sourceOrDistRoot = path.resolve(moduleDirectory, '..', '..', '..');
-const projectRoot = path.basename(sourceOrDistRoot) === 'dist'
-  ? path.dirname(sourceOrDistRoot)
-  : sourceOrDistRoot;
+const projectRoot =
+  path.basename(sourceOrDistRoot) === 'dist' ? path.dirname(sourceOrDistRoot) : sourceOrDistRoot;
 
 export const defaultDatabasePath = path.join(projectRoot, '.data', 'crypto-research.sqlite');
 export const defaultArchivePath = path.join(projectRoot, '.data', 'archive');

@@ -13,20 +13,28 @@ export interface GmgnTokenAddressSummary {
  * lookup should be run against, instead of re-requesting addresses already on file.
  */
 export const listGmgnTokenAddresses = (database: DatabaseSync): GmgnTokenAddressSummary => {
-  const rows = database.prepare(`
+  const rows = database
+    .prepare(
+      `
     SELECT DISTINCT s.token_address AS tokenAddress
     FROM gmgn_signals s
     WHERE s.token_address IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM tokens t WHERE t.token_address = s.token_address)
     ORDER BY s.token_address
-  `).all() as unknown as { tokenAddress: string }[];
+  `,
+    )
+    .all() as unknown as { tokenAddress: string }[];
 
-  const totals = database.prepare(`
+  const totals = database
+    .prepare(
+      `
     SELECT
       COUNT(DISTINCT token_address) AS total,
       COUNT(DISTINCT CASE WHEN EXISTS (SELECT 1 FROM tokens t WHERE t.token_address = s.token_address) THEN token_address END) AS matched
     FROM gmgn_signals s WHERE s.token_address IS NOT NULL
-  `).get() as { total: number; matched: number };
+  `,
+    )
+    .get() as { total: number; matched: number };
 
   return {
     addresses: rows.map((row) => row.tokenAddress),

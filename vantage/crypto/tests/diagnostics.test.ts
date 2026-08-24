@@ -70,7 +70,8 @@ test('diagnostics redact common API-key and authorization encodings before stora
   const database = openDatabase(':memory:');
   try {
     logDiagnostic(database, {
-      level: 'error', event: 'request-error',
+      level: 'error',
+      event: 'request-error',
       message: 'GMGN_API_KEY=not-for-storage Authorization: Bearer also-not-for-storage',
       detail: { api_key: 'not-for-storage', nested: 'Authorization: Bearer also-not-for-storage' },
     });

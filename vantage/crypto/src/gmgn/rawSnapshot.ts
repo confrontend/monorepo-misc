@@ -19,7 +19,12 @@ export const insertByHash = (
   sha256: string,
 ): RawSnapshotResult => {
   const result = database.prepare(sql).run(...values);
-  return { inserted: result.changes > 0 ? 1 : 0, skipped: result.changes > 0 ? 0 : 1, sourceSha256: sha256 };
+  return {
+    inserted: result.changes > 0 ? 1 : 0,
+    skipped: result.changes > 0 ? 0 : 1,
+    sourceSha256: sha256,
+  };
 };
 
-export const asOptionalString = (value: unknown): string | null => typeof value === 'string' && value.length > 0 ? value : null;
+export const asOptionalString = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;

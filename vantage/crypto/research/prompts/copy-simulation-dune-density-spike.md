@@ -29,8 +29,8 @@ gotten. This has **not been measured** — it's a plausible mechanism, not a con
 This project has also already found a related, distinct timing issue once before — see
 `research/prompts/premature-query-indexing-lag-bias-task.md` (Dune's own indexing lag behind
 the trades it has actually recorded). That investigation is about a different question
-(whether a `received` checkpoint reflects Dune's *complete* index at query time); this spike is
-about *density* — how far apart in time Dune's recorded trades for a given token actually sit,
+(whether a `received` checkpoint reflects Dune's _complete_ index at query time); this spike is
+about _density_ — how far apart in time Dune's recorded trades for a given token actually sit,
 independent of any indexing-lag question. Read that file for the established measurement
 conventions in this codebase, but do not touch its code paths.
 
@@ -44,7 +44,7 @@ conventions in this codebase, but do not touch its code paths.
    then query Dune for that token's trades in a narrow window after the delayed timestamp (reuse
    `src/dune/outcomes.ts`'s existing query-building conventions; do not hand-roll a new SQL
    pattern). Record the time gap between the delayed timestamp and the nearest trade Dune
-   actually returns — and separately, whether *any* trade is returned at all within a generous
+   actually returns — and separately, whether _any_ trade is returned at all within a generous
    outer bound (e.g. 30 minutes), so "no coverage" is distinguishable from "coverage, but far".
 3. **Report the distribution**, not just an average: median gap, p90, max, and the fraction of
    trades with zero Dune coverage at all in the outer bound. Break it out by token age at signal

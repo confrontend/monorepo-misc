@@ -26,8 +26,13 @@ const buildCaptureArchive = (options: {
     validationErrors: options.validationErrors ?? 0,
   };
   const entries = [];
-  if (!options.omitResponse) entries.push({ name: 'gmgn-signal-response.json', data: Buffer.from(JSON.stringify(events), 'utf8') });
-  if (!options.omitManifest) entries.push({ name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest), 'utf8') });
+  if (!options.omitResponse)
+    entries.push({
+      name: 'gmgn-signal-response.json',
+      data: Buffer.from(JSON.stringify(events), 'utf8'),
+    });
+  if (!options.omitManifest)
+    entries.push({ name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest), 'utf8') });
   return zipStored(entries);
 };
 
@@ -109,7 +114,10 @@ test('an archive missing manifest.json is flagged rather than silently treated a
 test('a manifest event count that disagrees with the archived response is flagged, not trusted', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'crypto-gmgn-archives-'));
   try {
-    const buffer = buildCaptureArchive({ events: [{ id: 'evt-1' }, { id: 'evt-2' }, { id: 'evt-3' }], eventCount: 2 });
+    const buffer = buildCaptureArchive({
+      events: [{ id: 'evt-1' }, { id: 'evt-2' }, { id: 'evt-3' }],
+      eventCount: 2,
+    });
     writeArchive(directory, buffer);
 
     const [summary] = listGmgnArchives(directory);
@@ -124,7 +132,10 @@ test('a manifest event count that disagrees with the archived response is flagge
 test('listGmgnArchives never returns the raw captured event payload, only manifest-derived fields', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'crypto-gmgn-archives-'));
   try {
-    const secretLookingEvent = { id: 'evt-1', triggering_wallet: 'SECRET_WALLET_ADDRESS_SHOULD_NOT_LEAK' };
+    const secretLookingEvent = {
+      id: 'evt-1',
+      triggering_wallet: 'SECRET_WALLET_ADDRESS_SHOULD_NOT_LEAK',
+    };
     const buffer = buildCaptureArchive({ events: [secretLookingEvent], eventCount: 1 });
     writeArchive(directory, buffer);
 

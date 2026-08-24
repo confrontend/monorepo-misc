@@ -25,26 +25,42 @@ export const readDatabaseStats = (database: DatabaseSync): DatabaseStats => {
   const gmgnSignalCount = (
     database.prepare('SELECT COUNT(*) AS count FROM gmgn_signals').get() as unknown as CountRow
   ).count;
-  const tokenFirstTradeRow = database.prepare(`
+  const tokenFirstTradeRow = database
+    .prepare(
+      `
     SELECT MIN(first_trade_time) AS earliest, MAX(first_trade_time) AS latest
     FROM tokens
     WHERE first_trade_time IS NOT NULL
-  `).get() as unknown as RangeRow;
-  const gmgnObservedRow = database.prepare(`
+  `,
+    )
+    .get() as unknown as RangeRow;
+  const gmgnObservedRow = database
+    .prepare(
+      `
     SELECT MIN(observed_at) AS earliest, MAX(observed_at) AS latest
     FROM gmgn_signals
     WHERE observed_at IS NOT NULL
-  `).get() as unknown as RangeRow;
-  const gmgnCapturedRow = database.prepare(`
+  `,
+    )
+    .get() as unknown as RangeRow;
+  const gmgnCapturedRow = database
+    .prepare(
+      `
     SELECT MIN(captured_at) AS earliest, MAX(captured_at) AS latest
     FROM gmgn_signals
-  `).get() as unknown as RangeRow;
-  const signalTypeRows = database.prepare(`
+  `,
+    )
+    .get() as unknown as RangeRow;
+  const signalTypeRows = database
+    .prepare(
+      `
     SELECT COALESCE(signal_type, '(missing)') AS signalType, COUNT(*) AS count
     FROM gmgn_signals
     GROUP BY signal_type
     ORDER BY count DESC, signalType ASC
-  `).all() as unknown as Array<{ signalType: string; count: number }>;
+  `,
+    )
+    .all() as unknown as Array<{ signalType: string; count: number }>;
 
   return {
     tokenCount,

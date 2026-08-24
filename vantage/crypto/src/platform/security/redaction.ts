@@ -26,7 +26,10 @@ export const redactSensitiveText = (value: string, secrets = configuredSecrets()
     .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, '$1[REDACTED]')
     .replace(/(GMGN_API_KEY\s*=\s*)\S+/gi, '$1[REDACTED]')
     .replace(/("(?:api_?key|token|secret)"\s*:\s*")[^"]+/gi, '$1[REDACTED]')
-    .replace(/-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\s\S]*?-----END (?:[A-Z ]*PRIVATE KEY)-----/g, '[REDACTED_PRIVATE_KEY]');
+    .replace(
+      /-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\s\S]*?-----END (?:[A-Z ]*PRIVATE KEY)-----/g,
+      '[REDACTED_PRIVATE_KEY]',
+    );
 };
 
 export const redactDiagnosticValue = (value: unknown): string =>
@@ -41,9 +44,19 @@ export const redactDiagnosticValue = (value: unknown): string =>
 // meaning elsewhere in this project): an over-redacted account ID costs nothing, an
 // under-redacted one is a real privacy leak.
 const ACCOUNT_IDENTIFIER_KEYS = [
-  'user_id', 'account_id', 'device_id', 'client_id', 'cid', 'referral_code', 'referral_id', 'telegram_id',
+  'user_id',
+  'account_id',
+  'device_id',
+  'client_id',
+  'cid',
+  'referral_code',
+  'referral_id',
+  'telegram_id',
 ];
-const accountIdentifierPattern = new RegExp(`("(?:${ACCOUNT_IDENTIFIER_KEYS.join('|')})"\\s*:\\s*")[^"]*(")`, 'gi');
+const accountIdentifierPattern = new RegExp(
+  `("(?:${ACCOUNT_IDENTIFIER_KEYS.join('|')})"\\s*:\\s*")[^"]*(")`,
+  'gi',
+);
 
 /** Strips account-identifying values from raw investigation JSON before it is persisted or
  *  archived. Does NOT redact wallet addresses — this app's entire research value depends on

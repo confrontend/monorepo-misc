@@ -49,15 +49,15 @@ the browser side-channel, not the sanctioned CLI.
 ```typescript
 interface GmgnBrowserExport {
   formatVersion: 1;
-  exportedAt: string;            // ISO 8601 UTC
+  exportedAt: string; // ISO 8601 UTC
   extensionVersion: string;
-  source: "gmgn-browser-extension";
+  source: 'gmgn-browser-extension';
   captures: GmgnBrowserCapture[];
 }
 
 interface GmgnBrowserCapture {
-  capturedAt: string;    // ISO 8601 UTC
-  requestPath: string;   // path only, no query string (query carries device_id/fp_did/client_id — browser fingerprint IDs, already stripped by the extension before export)
+  capturedAt: string; // ISO 8601 UTC
+  requestPath: string; // path only, no query string (query carries device_id/fp_did/client_id — browser fingerprint IDs, already stripped by the extension before export)
   status: number;
   responseBody: unknown; // raw parsed JSON: { code: number, reason: string, message: string, data: RawGmgnEvent[] }
 }
@@ -86,8 +86,8 @@ ingestion path).
      silently accept a different shape.
    - Insert a `processing` batch row, then for every `capture` in `captures`, for every event
      in `capture.responseBody?.data ?? []`, call `storeGmgnSignal(database, event, {
-     capturedAt: new Date(capture.capturedAt), source: 'gmgn-browser-extension', chain:
-     event.data?.chain ?? 'sol' })`. Track imported (newly stored) vs. skipped (duplicate)
+capturedAt: new Date(capture.capturedAt), source: 'gmgn-browser-extension', chain:
+event.data?.chain ?? 'sol' })`. Track imported (newly stored) vs. skipped (duplicate)
      counts from each call's `.duplicate` flag — same accounting style as `gmgn/capture.ts`.
    - Archive the raw uploaded file via `zipStored` with a `manifest.json` (batch id, source
      hash, counts, archived-at) — identical shape to `archiveDuneSource`'s manifest.

@@ -8,7 +8,7 @@ Another agent is editing **`src/copytrade/evaluate.ts`** and **`ui/main.tsx`** r
 
 **You own `src/db/schema.ts` and `src/copytrade/fetch.ts`.** Do not edit `evaluate.ts` or
 `ui/main.tsx` — not even a type import tweak. If you believe a change is needed there, stop and
-say so rather than making it. `tests/copytrade.test.ts` is shared: only *append* new tests at
+say so rather than making it. `tests/copytrade.test.ts` is shared: only _append_ new tests at
 the end, never reorder or modify existing ones.
 
 ## The problem
@@ -56,7 +56,7 @@ Add the table name to the expected list in `tests/schema.test.ts` (alphabetical)
 ### 2. Write one event per wallet per run (`src/copytrade/fetch.ts`)
 
 `recordCoverage` currently upserts the latest-state row. Keep that behaviour — it is a useful
-cache and `evaluate.ts` reads it, and **you must not change `evaluate.ts`** — but *also* insert
+cache and `evaluate.ts` reads it, and **you must not change `evaluate.ts`** — but _also_ insert
 one immutable event row alongside it.
 
 Capture the watermarks as they stand after that wallet's paging finishes. There is already a

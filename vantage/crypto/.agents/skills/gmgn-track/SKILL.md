@@ -1,9 +1,9 @@
 ---
 name: gmgn-track
 description: Get real-time crypto buy/sell activity from Smart Money wallets, KOL influencer wallets, and personally followed wallets via GMGN API — alpha signals, whale tracking, meme token copy-trading ideas on Solana, BSC, Base, or Ethereum. Also query which tokens a wallet has followed (bookmarked) on GMGN. Use when user asks what smart money or KOLs are buying, wants whale alerts, on-chain alpha, copy-trade signals, or wants to check a wallet's followed tokens. (For a specific wallet address's portfolio, use gmgn-portfolio.)
-argument-hint: "<follow-tokens|follow-wallet|kol|smartmoney> --chain <sol|bsc|base|eth|robinhood|arc|stable> [--wallet <wallet_address>]"
+argument-hint: '<follow-tokens|follow-wallet|kol|smartmoney> --chain <sol|bsc|base|eth|robinhood|arc|stable> [--wallet <wallet_address>]'
 metadata:
-  cliHelp: "gmgn-cli track --help"
+  cliHelp: 'gmgn-cli track --help'
 ---
 
 **BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, (1) run `gmgn-cli config` and show the output to the user; (2) once the user sends the API Key, run `gmgn-cli config --apply <KEY>` to complete configuration and verification, then show the output to the user. If `--check` returns an error (unknown option or command not found), tell the user to run `npm install -g gmgn-cli` to update, then retry.**
@@ -27,7 +27,7 @@ Use the `gmgn-cli` tool to query on-chain tracking data based on the user's requ
 - **`is_open_or_close`** — Indicates whether a trade is a full position event. Interpretation differs by sub-command:
   - `follow-wallet`: `1` = full position open or close; `0` = partial add or reduce.
   - `kol` / `smartmoney`: `0` = position opened / added; `1` = position closed / reduced.
-  Do not apply the same interpretation to both sub-commands.
+    Do not apply the same interpretation to both sub-commands.
 
 - **`price_change`** — Ratio of price change since the trade was made. `6.66` = the token is now 6.66× what it was when the wallet traded (i.e. +566%). `0.5` = price halved since the trade (-50%). Use this to assess "how well did this trade age."
 
@@ -38,24 +38,26 @@ Use the `gmgn-cli` tool to query on-chain tracking data based on the user's requ
 - **Cluster signal** — When multiple followed/tracked wallets trade the same token in the same direction within a short time window, this is a stronger conviction signal than a single wallet. Highlight this pattern when it appears in results.
 
 **When to use which sub-command:**
+
 - `track follow-wallet` — user asks "what did the wallets I follow trade?", "show me my follow list trades", "show my followed wallet activity" → requires wallets followed via GMGN platform
 - `track kol` — user asks "what are KOLs buying?", "show me influencer trades", "what are KOLs doing recently" → returns trades from known KOL wallets
 - `track smartmoney` — user asks "what is smart money doing?", "show me whale trades", "what is smart money buying recently" → returns trades from smart money / whale wallets
 
 **Do NOT confuse these three:**
+
 - `follow-wallet` = wallets the user has personally followed on GMGN
 - `kol` = platform-tagged KOL / influencer wallets (not user-specific)
 - `smartmoney` = platform-tagged smart money / whale wallets (not user-specific)
 
 ## Sub-commands
 
-| Sub-command | Description |
-|-------------|-------------|
-| `track follow-tokens` | Followed token list for a wallet — which tokens a wallet has bookmarked on GMGN, with full market data |
+| Sub-command                 | Description                                                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `track follow-tokens`       | Followed token list for a wallet — which tokens a wallet has bookmarked on GMGN, with full market data      |
 | `track follow-token-groups` | Follow token group names for a wallet — the group names and IDs the wallet uses to organise followed tokens |
-| `track follow-wallet` | Trade records from wallets the user personally follows on GMGN |
-| `track kol` | Real-time trades from KOL / influencer wallets tagged by GMGN |
-| `track smartmoney` | Real-time trades from smart money / whale wallets tagged by GMGN |
+| `track follow-wallet`       | Trade records from wallets the user personally follows on GMGN                                              |
+| `track kol`                 | Real-time trades from KOL / influencer wallets tagged by GMGN                                               |
+| `track smartmoney`          | Real-time trades from smart money / whale wallets tagged by GMGN                                            |
 
 ## Supported Chains
 
@@ -71,13 +73,13 @@ Use the `gmgn-cli` tool to query on-chain tracking data based on the user's requ
 
 All tracking routes used by this skill go through GMGN's leaky-bucket limiter with `rate=20` and `capacity=20`. Sustained throughput is roughly `20 ÷ weight` requests/second, and the max burst is roughly `floor(20 ÷ weight)` when the bucket is full.
 
-| Command | Route | Weight |
-|---------|-------|--------|
-| `track follow-tokens` | `GET /v1/user/follow_tokens` | 3 |
-| `track follow-token-groups` | `GET /v1/user/follow_token_groups` | 1 |
-| `track follow-wallet` | `GET /v1/trade/follow_wallet` | 3 |
-| `track kol` | `GET /v1/user/kol` | 1 |
-| `track smartmoney` | `GET /v1/user/smartmoney` | 1 |
+| Command                     | Route                              | Weight |
+| --------------------------- | ---------------------------------- | ------ |
+| `track follow-tokens`       | `GET /v1/user/follow_tokens`       | 3      |
+| `track follow-token-groups` | `GET /v1/user/follow_token_groups` | 1      |
+| `track follow-wallet`       | `GET /v1/trade/follow_wallet`      | 3      |
+| `track kol`                 | `GET /v1/user/kol`                 | 1      |
+| `track smartmoney`          | `GET /v1/user/smartmoney`          | 1      |
 
 When a request returns `429`:
 
@@ -128,152 +130,152 @@ gmgn-cli track smartmoney --chain sol --side sell --limit 10 --raw
 
 ## `track follow-tokens` Options
 
-| Option | Description |
-|--------|-------------|
-| `--chain` | Required. `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--wallet <address>` | Required. Wallet address to query |
-| `--group-id <id>` | Filter by group: `all_group` (all tokens across groups), `default` (default group), or a user-defined group ID |
-| `--interval <interval>` | Time interval for price change stats (e.g. `1m`, `5m`, `1h`, `6h`, `24h`) |
-| `--order-by <field>` | Sort field: `created_at` / `swaps` / `volume` / `market_cap` / `liquidity` / `price` / `open_timestamp` |
-| `--direction <dir>` | Required when `--order-by` is set. `asc` / `desc` |
-| `--limit <n>` | Page size |
-| `--cursor <cursor>` | Pagination cursor from previous response |
-| `--search <text>` | Search by token name or address |
+| Option                  | Description                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--chain`               | Required. `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable`                                      |
+| `--wallet <address>`    | Required. Wallet address to query                                                                              |
+| `--group-id <id>`       | Filter by group: `all_group` (all tokens across groups), `default` (default group), or a user-defined group ID |
+| `--interval <interval>` | Time interval for price change stats (e.g. `1m`, `5m`, `1h`, `6h`, `24h`)                                      |
+| `--order-by <field>`    | Sort field: `created_at` / `swaps` / `volume` / `market_cap` / `liquidity` / `price` / `open_timestamp`        |
+| `--direction <dir>`     | Required when `--order-by` is set. `asc` / `desc`                                                              |
+| `--limit <n>`           | Page size                                                                                                      |
+| `--cursor <cursor>`     | Pagination cursor from previous response                                                                       |
+| `--search <text>`       | Search by token name or address                                                                                |
 
 ## `track follow-tokens` Response Fields
 
 Top-level fields:
 
-| Field | Description |
-|-------|-------------|
-| `cursor` | Opaque cursor for fetching the next page |
-| `all_following` | Total number of followed tokens |
-| `is_recommend` | Whether results include recommended tokens |
-| `followings` | Array of followed token objects |
+| Field           | Description                                |
+| --------------- | ------------------------------------------ |
+| `cursor`        | Opaque cursor for fetching the next page   |
+| `all_following` | Total number of followed tokens            |
+| `is_recommend`  | Whether results include recommended tokens |
+| `followings`    | Array of followed token objects            |
 
 Each item in `followings` contains:
 
-| Field | Description |
-|-------|-------------|
-| `address` | Token contract address |
-| `symbol` | Token ticker symbol |
-| `name` | Token name |
-| `chain` | Chain the token is on |
-| `price` | Current token price |
-| `price_change_percent` | Price change percentage |
-| `volume` | Trading volume |
-| `liquidity` | Pool liquidity |
-| `market_cap` | Market cap |
-| `swaps` | Total swaps |
-| `group_ids` | Follow groups this token belongs to |
-| `open_timestamp` | Unix timestamp when trading opened |
+| Field                  | Description                         |
+| ---------------------- | ----------------------------------- |
+| `address`              | Token contract address              |
+| `symbol`               | Token ticker symbol                 |
+| `name`                 | Token name                          |
+| `chain`                | Chain the token is on               |
+| `price`                | Current token price                 |
+| `price_change_percent` | Price change percentage             |
+| `volume`               | Trading volume                      |
+| `liquidity`            | Pool liquidity                      |
+| `market_cap`           | Market cap                          |
+| `swaps`                | Total swaps                         |
+| `group_ids`            | Follow groups this token belongs to |
+| `open_timestamp`       | Unix timestamp when trading opened  |
 
 ## `track follow-token-groups` Options
 
-| Option | Description |
-|--------|-------------|
-| `--chain` | Required. `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--wallet <address>` | Required. Wallet address to query |
+| Option               | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| `--chain`            | Required. `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
+| `--wallet <address>` | Required. Wallet address to query                                         |
 
 ## `track follow-token-groups` Response Fields
 
 `data` is an array. Each item contains:
 
-| Field | Description |
-|-------|-------------|
-| `chain` | Chain the group is on |
-| `group_id` | Group identifier (e.g. `default`, or a user-defined ID) |
-| `group_name` | Human-readable group name |
-| `rank` | Display order / sort rank |
+| Field        | Description                                             |
+| ------------ | ------------------------------------------------------- |
+| `chain`      | Chain the group is on                                   |
+| `group_id`   | Group identifier (e.g. `default`, or a user-defined ID) |
+| `group_name` | Human-readable group name                               |
+| `rank`       | Display order / sort rank                               |
 
 ## `track follow-wallet` Options
 
-| Option | Description |
-|--------|-------------|
-| `--chain` | Required. `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
-| `--wallet <address>` | Filter by wallet address |
-| `--limit <n>` | Page size (1–100, default 10) |
-| `--side <side>` | Trade direction: `buy` / `sell` |
-| `--filter <tag...>` | Repeatable filter conditions |
-| `--min-amount-usd <n>` | Minimum trade amount (USD) |
-| `--max-amount-usd <n>` | Maximum trade amount (USD) |
+| Option                 | Description                                                               |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `--chain`              | Required. `sol` / `bsc` / `base` / `eth` / `robinhood` / `arc` / `stable` |
+| `--wallet <address>`   | Filter by wallet address                                                  |
+| `--limit <n>`          | Page size (1–100, default 10)                                             |
+| `--side <side>`        | Trade direction: `buy` / `sell`                                           |
+| `--filter <tag...>`    | Repeatable filter conditions                                              |
+| `--min-amount-usd <n>` | Minimum trade amount (USD)                                                |
+| `--max-amount-usd <n>` | Maximum trade amount (USD)                                                |
 
 ## `track kol` / `track smartmoney` Options
 
-| Option | Description |
-|--------|-------------|
-| `--chain <chain>` | Required. Chain: `sol` / `bsc` / `base` / `eth` |
-| `--limit <n>` | Page size (1–200, default 100) |
-| `--side <side>` | Filter by trade direction: `buy` / `sell` (client-side filter — applied locally after fetching results) |
+| Option            | Description                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `--chain <chain>` | Required. Chain: `sol` / `bsc` / `base` / `eth`                                                         |
+| `--limit <n>`     | Page size (1–200, default 100)                                                                          |
+| `--side <side>`   | Filter by trade direction: `buy` / `sell` (client-side filter — applied locally after fetching results) |
 
 ## `track follow-wallet` Response Fields
 
 Top-level fields:
 
-| Field | Description |
-|-------|-------------|
+| Field             | Description                                        |
+| ----------------- | -------------------------------------------------- |
 | `next_page_token` | Opaque token for fetching the next page of results |
-| `list` | Array of trade records |
+| `list`            | Array of trade records                             |
 
 Each item in `list` contains:
 
-| Field | Description |
-|-------|-------------|
-| `id` | Record ID (base64-encoded, use as cursor) |
-| `chain` | Chain name (e.g. `sol`) |
-| `transaction_hash` | On-chain transaction hash |
-| `maker` | Wallet address of the followed wallet |
-| `side` | Trade direction: `buy` or `sell` |
-| `base_address` | Token contract address |
-| `quote_address` | Quote token address (SOL native address for buys/sells on SOL) |
-| `base_amount` | Token quantity in smallest unit |
-| `quote_amount` | Quote token amount spent / received (e.g. SOL) |
-| `amount_usd` | Trade value in USD |
-| `cost_usd` | Same as `amount_usd` — USD value of this transaction leg |
-| `buy_cost_usd` | Original buy cost in USD (`0` if this record is the buy itself) |
-| `price` | Token price denominated in quote token at time of trade |
-| `price_usd` | Token price in USD at time of trade |
-| `price_now` | Token current price in USD |
-| `price_change` | Price change ratio since trade time (e.g. `6.66` = +666%) |
-| `timestamp` | Unix timestamp of the trade |
-| `is_open_or_close` | `1` = full position open or close; `0` = partial add or reduce |
-| `launchpad` | Launchpad display name (e.g. `Pump.fun`) |
-| `launchpad_platform` | Launchpad platform identifier (e.g. `Pump.fun`, `pump_agent`) |
-| `migrated_pool_exchange` | DEX the token migrated to, if any (e.g. `pump_amm`); empty if not migrated |
-| `base_token.symbol` | Token ticker symbol |
-| `base_token.logo` | Token logo image URL |
-| `base_token.hot_level` | Hotness level (`0` = normal, higher = trending) |
-| `base_token.total_supply` | Total token supply (string) |
-| `base_token.token_create_time` | Unix timestamp when token was created |
-| `base_token.token_open_time` | Unix timestamp when trading opened (`0` if not yet migrated/opened) |
-| `maker_info.address` | Followed wallet address |
-| `maker_info.name` | Wallet display name |
-| `maker_info.twitter_username` | Twitter / X username |
-| `maker_info.twitter_name` | Twitter / X display name |
-| `maker_info.tags` | Array of wallet tags (e.g. `["kol","gmgn"]`) |
-| `maker_info.tag_rank` | Map of tag → rank within that category (e.g. `{"kol": 854}`) |
-| `balance_info` | Wallet token balance info; `null` if not available |
+| Field                          | Description                                                                |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `id`                           | Record ID (base64-encoded, use as cursor)                                  |
+| `chain`                        | Chain name (e.g. `sol`)                                                    |
+| `transaction_hash`             | On-chain transaction hash                                                  |
+| `maker`                        | Wallet address of the followed wallet                                      |
+| `side`                         | Trade direction: `buy` or `sell`                                           |
+| `base_address`                 | Token contract address                                                     |
+| `quote_address`                | Quote token address (SOL native address for buys/sells on SOL)             |
+| `base_amount`                  | Token quantity in smallest unit                                            |
+| `quote_amount`                 | Quote token amount spent / received (e.g. SOL)                             |
+| `amount_usd`                   | Trade value in USD                                                         |
+| `cost_usd`                     | Same as `amount_usd` — USD value of this transaction leg                   |
+| `buy_cost_usd`                 | Original buy cost in USD (`0` if this record is the buy itself)            |
+| `price`                        | Token price denominated in quote token at time of trade                    |
+| `price_usd`                    | Token price in USD at time of trade                                        |
+| `price_now`                    | Token current price in USD                                                 |
+| `price_change`                 | Price change ratio since trade time (e.g. `6.66` = +666%)                  |
+| `timestamp`                    | Unix timestamp of the trade                                                |
+| `is_open_or_close`             | `1` = full position open or close; `0` = partial add or reduce             |
+| `launchpad`                    | Launchpad display name (e.g. `Pump.fun`)                                   |
+| `launchpad_platform`           | Launchpad platform identifier (e.g. `Pump.fun`, `pump_agent`)              |
+| `migrated_pool_exchange`       | DEX the token migrated to, if any (e.g. `pump_amm`); empty if not migrated |
+| `base_token.symbol`            | Token ticker symbol                                                        |
+| `base_token.logo`              | Token logo image URL                                                       |
+| `base_token.hot_level`         | Hotness level (`0` = normal, higher = trending)                            |
+| `base_token.total_supply`      | Total token supply (string)                                                |
+| `base_token.token_create_time` | Unix timestamp when token was created                                      |
+| `base_token.token_open_time`   | Unix timestamp when trading opened (`0` if not yet migrated/opened)        |
+| `maker_info.address`           | Followed wallet address                                                    |
+| `maker_info.name`              | Wallet display name                                                        |
+| `maker_info.twitter_username`  | Twitter / X username                                                       |
+| `maker_info.twitter_name`      | Twitter / X display name                                                   |
+| `maker_info.tags`              | Array of wallet tags (e.g. `["kol","gmgn"]`)                               |
+| `maker_info.tag_rank`          | Map of tag → rank within that category (e.g. `{"kol": 854}`)               |
+| `balance_info`                 | Wallet token balance info; `null` if not available                         |
 
 ## `track kol` / `track smartmoney` Response Fields
 
 The response is an object with a `list` array. Each item in `list` contains:
 
-| Field | Description |
-|-------|-------------|
-| `transaction_hash` | On-chain transaction hash |
-| `maker` | Wallet address of the trader (KOL / Smart Money) |
-| `side` | Trade direction: `buy` or `sell` |
-| `base_address` | Token contract address |
-| `base_token.symbol` | Token ticker symbol |
-| `base_token.launchpad` | Launchpad platform (e.g. `pump`) |
-| `amount_usd` | Trade value in USD |
-| `token_amount` | Token quantity traded |
-| `price_usd` | Token price in USD at time of trade |
-| `buy_cost_usd` | Original buy cost in USD (0 if this record is the buy) |
-| `is_open_or_close` | `0` = position opened / added, `1` = position closed / reduced |
-| `timestamp` | Unix timestamp of the trade |
-| `maker_info.twitter_username` | KOL's Twitter username |
-| `maker_info.tags` | Wallet tags (e.g. `kol`, `smart_degen`, `photon`) |
+| Field                         | Description                                                    |
+| ----------------------------- | -------------------------------------------------------------- |
+| `transaction_hash`            | On-chain transaction hash                                      |
+| `maker`                       | Wallet address of the trader (KOL / Smart Money)               |
+| `side`                        | Trade direction: `buy` or `sell`                               |
+| `base_address`                | Token contract address                                         |
+| `base_token.symbol`           | Token ticker symbol                                            |
+| `base_token.launchpad`        | Launchpad platform (e.g. `pump`)                               |
+| `amount_usd`                  | Trade value in USD                                             |
+| `token_amount`                | Token quantity traded                                          |
+| `price_usd`                   | Token price in USD at time of trade                            |
+| `buy_cost_usd`                | Original buy cost in USD (0 if this record is the buy)         |
+| `is_open_or_close`            | `0` = position opened / added, `1` = position closed / reduced |
+| `timestamp`                   | Unix timestamp of the trade                                    |
+| `maker_info.twitter_username` | KOL's Twitter username                                         |
+| `maker_info.tags`             | Wallet tags (e.g. `kol`, `smart_degen`, `photon`)              |
 
 ## Smart Money Behavior Interpretation
 
@@ -281,12 +283,12 @@ After receiving trade data, interpret the signals using these frameworks before 
 
 ### 1. Signal Strength Levels
 
-| Level | Criteria |
-|-------|----------|
-| Weak | 1 KOL buys |
-| Medium | 2–3 smart money buys in the same direction, OR 1 smart money full position open |
-| Strong | ≥ 3 smart money wallets same direction within 30 min (cluster signal) |
-| Very Strong | Cluster signal + full position opens + KOL joining the same trade |
+| Level       | Criteria                                                                        |
+| ----------- | ------------------------------------------------------------------------------- |
+| Weak        | 1 KOL buys                                                                      |
+| Medium      | 2–3 smart money buys in the same direction, OR 1 smart money full position open |
+| Strong      | ≥ 3 smart money wallets same direction within 30 min (cluster signal)           |
+| Very Strong | Cluster signal + full position opens + KOL joining the same trade               |
 
 ### 2. Reading `is_open_or_close` — Conviction Signals
 
@@ -300,6 +302,7 @@ Full position events (full open or full close) carry much stronger conviction th
 ### 3. Using `price_change` to Evaluate Track Record
 
 `price_change` is a ratio of current price vs price at trade time:
+
 - `price_change > 2` → this wallet's trade aged well (token is now 2x+ since they bought) — strong conviction signal
 - `price_change 1–2` → modest gain, trade is in profit
 - `price_change < 1` → trade is underwater (current price below entry)
@@ -309,6 +312,7 @@ Use this to build a mental model of a wallet's past performance before acting on
 ### 4. Cluster Signal Detection
 
 When multiple trades hit the same `base_address` in a short time window, this is a convergence signal — stronger than any single trade. To identify:
+
 - Group results by `base_address`
 - Count distinct `maker` addresses trading the same direction
 - If ≥ 3 distinct wallets buy the same token within ~30 min → highlight as **cluster signal**

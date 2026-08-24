@@ -84,7 +84,8 @@ export const normalizeGmgnSignal = (
   if (event.market_cap === undefined) validationErrors.push('missing optional field: market_cap');
   else if (marketCap === null) validationErrors.push('invalid optional field: market_cap');
   if (!triggeringWallet) validationErrors.push('missing optional field: triggering_wallet');
-  if (event.raw_wallet_labels === undefined) validationErrors.push('missing optional field: raw_wallet_labels');
+  if (event.raw_wallet_labels === undefined)
+    validationErrors.push('missing optional field: raw_wallet_labels');
   if (!sourceUrl) validationErrors.push('missing optional field: source_url');
 
   const ingestionLatencyMs = observedAt
@@ -135,13 +136,19 @@ export const storeGmgnSignal = (
   }
 
   const event = rawObject(rawEvent);
-  const enrichedEvent = { ...event, source: options.source ?? event.source, chain: options.chain ?? event.chain };
+  const enrichedEvent = {
+    ...event,
+    source: options.source ?? event.source,
+    chain: options.chain ?? event.chain,
+  };
   const { signal, validationErrors } = normalizeGmgnSignal(enrichedEvent, capturedAtDate);
   if (validationErrors.length > 0) {
     logger.warn(`[gmgn] captured event with validation issues: ${validationErrors.join('; ')}`);
   }
 
-  const result = database.prepare(`
+  const result = database
+    .prepare(
+      `
     INSERT OR IGNORE INTO gmgn_signals
       (observed_at, token_address, signal_type, market_cap, triggering_wallet,
        raw_wallet_labels, source_url, ingestion_latency_ms, raw_payload, captured_at,
@@ -149,36 +156,46 @@ export const storeGmgnSignal = (
        first_trigger_mc, signal_times, signal_times_by_type, query_market_cap,
        query_ath, query_cur_data)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    signal.observedAt,
-    signal.tokenAddress,
-    signal.signalType,
-    signal.marketCap,
-    signal.triggeringWallet,
-    signal.rawWalletLabels === null ? null : JSON.stringify(signal.rawWalletLabels),
-    signal.sourceUrl,
-    signal.ingestionLatencyMs,
-    rawPayload,
-    capturedAt,
-    JSON.stringify(validationErrors),
-    signal.source,
-    signal.chain,
-    signal.sourceEventId,
-    signal.triggerAt,
-    signal.triggerMc,
-    signal.firstTriggerMc,
-    signal.signalTimes,
-    signal.signalTimesByType === null ? null : JSON.stringify(signal.signalTimesByType),
-    signal.queryMarketCap,
-    signal.queryAth,
-    signal.queryCurData === null ? null : JSON.stringify(signal.queryCurData),
-  );
+  `,
+    )
+    .run(
+      signal.observedAt,
+      signal.tokenAddress,
+      signal.signalType,
+      signal.marketCap,
+      signal.triggeringWallet,
+      signal.rawWalletLabels === null ? null : JSON.stringify(signal.rawWalletLabels),
+      signal.sourceUrl,
+      signal.ingestionLatencyMs,
+      rawPayload,
+      capturedAt,
+      JSON.stringify(validationErrors),
+      signal.source,
+      signal.chain,
+      signal.sourceEventId,
+      signal.triggerAt,
+      signal.triggerMc,
+      signal.firstTriggerMc,
+      signal.signalTimes,
+      signal.signalTimesByType === null ? null : JSON.stringify(signal.signalTimesByType),
+      signal.queryMarketCap,
+      signal.queryAth,
+      signal.queryCurData === null ? null : JSON.stringify(signal.queryCurData),
+    );
 
   const duplicate = result.changes === 0;
   const id = duplicate
-    ? Number((database.prepare(`
+    ? Number(
+        (
+          database
+            .prepare(
+              `
         SELECT id FROM gmgn_signals WHERE source = ? AND chain = ? AND source_event_id = ?
-      `).get(signal.source, signal.chain, signal.sourceEventId) as { id: number }).id)
+      `,
+            )
+            .get(signal.source, signal.chain, signal.sourceEventId) as { id: number }
+        ).id,
+      )
     : Number(result.lastInsertRowid);
 
   return {

@@ -23,7 +23,12 @@ export const findProjectRoot = (): string => {
  *  (dune/outcomes.ts, copytrade/simulation/copySimulationDune.ts,
  *  copytrade/leaderboard/topCallerCheckpoints.ts), differing only in subdir/prefix and the
  *  caller-assembled payload shape — those differences stay with the caller. */
-export const archiveJsonWithHash = (subdir: string, filenamePrefix: string, runId: number, payload: unknown): { archivePath: string; sha256: string } => {
+export const archiveJsonWithHash = (
+  subdir: string,
+  filenamePrefix: string,
+  runId: number,
+  payload: unknown,
+): { archivePath: string; sha256: string } => {
   const buffer = Buffer.from(JSON.stringify(payload, null, 2));
   const sha256 = createHash('sha256').update(buffer).digest('hex');
   const dir = path.join(findProjectRoot(), '.data', 'archive', subdir);

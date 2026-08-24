@@ -9,10 +9,21 @@ type ModalProps = {
   dialogAs?: 'div' | 'article';
 };
 
-export const Modal = ({ onClose, ariaLabel, children, backdropClassName, dialogClassName, dialogAs = 'div' }: ModalProps) => {
+export const Modal = ({
+  onClose,
+  ariaLabel,
+  children,
+  backdropClassName,
+  dialogClassName,
+  dialogAs = 'div',
+}: ModalProps) => {
   const Dialog = dialogAs;
   return (
-    <div className={`copytrade-modal-backdrop${backdropClassName ? ` ${backdropClassName}` : ''}`} role="presentation" onClick={onClose}>
+    <div
+      className={`copytrade-modal-backdrop${backdropClassName ? ` ${backdropClassName}` : ''}`}
+      role="presentation"
+      onClick={onClose}
+    >
       <Dialog
         className={`copytrade-modal${dialogClassName ? ` ${dialogClassName}` : ''}`}
         role="dialog"

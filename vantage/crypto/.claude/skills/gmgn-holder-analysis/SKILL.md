@@ -1,9 +1,9 @@
 ---
 name: gmgn-holder-analysis
 description: Token holder chip analysis — deep analysis of holder structure including chip distribution, entry cost, whale/dev/KOL behavior, risk wallets (rat traders, bundlers, snipers), related wallets, smart money signals, and an AI rating based purely on token structure. Use when user asks about holder analysis, 筹码分析, 持仓分析, chip structure, who is holding, or whether a token is safe to buy based on its holder composition.
-argument-hint: "--chain <sol|bsc|base|eth|robinhood|arc|stable> --address <token_address>"
+argument-hint: '--chain <sol|bsc|base|eth|robinhood|arc|stable> --address <token_address>'
 metadata:
-  cliHelp: "gmgn-cli token holders --help && gmgn-cli portfolio created-tokens --help"
+  cliHelp: 'gmgn-cli token holders --help && gmgn-cli portfolio created-tokens --help'
 ---
 
 **BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, run `gmgn-cli config` and show output, then apply the key with `gmgn-cli config --apply <KEY>`. If unknown option, tell user to run `npm install -g gmgn-cli`.**
@@ -750,50 +750,50 @@ PYEOF
 
 ### Holder object key fields
 
-| Field | Type | Meaning |
-|-------|------|---------|
-| `address` | string | Wallet address |
-| `balance` | float | Current token balance |
-| `amount_percentage` | float | Fraction of total supply (0–1). Multiply by 100 for %. |
-| `usd_value` | float | Current USD value of holdings |
-| `avg_cost` | float | Average buy price per token |
-| `unrealized_pnl` | float | Unrealized PnL ratio (0.5 = +50%) |
-| `unrealized_profit` | float | Unrealized PnL in USD |
-| `realized_profit` | float | Realized PnL in USD |
-| `buy_tx_count_cur` | int | Buy transactions since token creation |
-| `sell_tx_count_cur` | int | Sell transactions since token creation |
-| `sell_amount_percentage` | float | Fraction of total buys that have been sold |
-| `start_holding_at` | int | Unix timestamp of first buy |
-| `addr_type` | int | 0=normal wallet, 1=burn/dead, 2=DEX/pool |
-| `maker_token_tags` | list | `bundler`, `rat_trader`, `sniper`, `whale`, `top_holder`, `transfer_in`, `dev_team`, `creator` |
-| `tags` | list | `smart_degen`, `pump_smart`, `renowned`, `fresh_wallet`, `wash_trader`, `fomo`, `kol` |
-| `native_balance` | string | Raw native token balance (SOL: lamports /1e9; EVM: wei /1e18) |
-| `native_transfer` | object | `{from_address, amount, timestamp}` — how wallet was funded |
-| `twitter_name` | string | Twitter handle if known |
-| `exchange` | string | DEX name for pool wallets |
+| Field                    | Type   | Meaning                                                                                        |
+| ------------------------ | ------ | ---------------------------------------------------------------------------------------------- |
+| `address`                | string | Wallet address                                                                                 |
+| `balance`                | float  | Current token balance                                                                          |
+| `amount_percentage`      | float  | Fraction of total supply (0–1). Multiply by 100 for %.                                         |
+| `usd_value`              | float  | Current USD value of holdings                                                                  |
+| `avg_cost`               | float  | Average buy price per token                                                                    |
+| `unrealized_pnl`         | float  | Unrealized PnL ratio (0.5 = +50%)                                                              |
+| `unrealized_profit`      | float  | Unrealized PnL in USD                                                                          |
+| `realized_profit`        | float  | Realized PnL in USD                                                                            |
+| `buy_tx_count_cur`       | int    | Buy transactions since token creation                                                          |
+| `sell_tx_count_cur`      | int    | Sell transactions since token creation                                                         |
+| `sell_amount_percentage` | float  | Fraction of total buys that have been sold                                                     |
+| `start_holding_at`       | int    | Unix timestamp of first buy                                                                    |
+| `addr_type`              | int    | 0=normal wallet, 1=burn/dead, 2=DEX/pool                                                       |
+| `maker_token_tags`       | list   | `bundler`, `rat_trader`, `sniper`, `whale`, `top_holder`, `transfer_in`, `dev_team`, `creator` |
+| `tags`                   | list   | `smart_degen`, `pump_smart`, `renowned`, `fresh_wallet`, `wash_trader`, `fomo`, `kol`          |
+| `native_balance`         | string | Raw native token balance (SOL: lamports /1e9; EVM: wei /1e18)                                  |
+| `native_transfer`        | object | `{from_address, amount, timestamp}` — how wallet was funded                                    |
+| `twitter_name`           | string | Twitter handle if known                                                                        |
+| `exchange`               | string | DEX name for pool wallets                                                                      |
 
 ### Created-tokens response fields
 
-| Field | Meaning |
-|-------|---------|
-| `inner_count` | Unmigrated token count |
-| `open_count` | Migrated token count |
-| `tokens[].market_cap` | Current market cap in USD |
-| `tokens[].is_open` | true = migrated |
-| `creator_ath_info.ath_mc` | All-time high MC across all created tokens |
-| `creator_ath_info.ath_token` | Token address of the ATH token |
-| `creator_ath_info.token_symbol` | Symbol of the ATH token |
+| Field                           | Meaning                                    |
+| ------------------------------- | ------------------------------------------ |
+| `inner_count`                   | Unmigrated token count                     |
+| `open_count`                    | Migrated token count                       |
+| `tokens[].market_cap`           | Current market cap in USD                  |
+| `tokens[].is_open`              | true = migrated                            |
+| `creator_ath_info.ath_mc`       | All-time high MC across all created tokens |
+| `creator_ath_info.ath_token`    | Token address of the ATH token             |
+| `creator_ath_info.token_symbol` | Symbol of the ATH token                    |
 
 ## Rating Standard
 
 Entry timing pressure (批次浮盈/出货) does **NOT** affect the overall rating — it only affects section display.
 
-| Rating (ZH) | Rating (EN) | Emoji | Condition |
-|-------------|-------------|-------|-----------|
-| 不建议买 | Not Recommended | 🔴 | Any: rat traders >10% / largest wallet >15% / dev sock puppet |
-| 谨慎参与 | Caution | ⚠️ | ≥2 of: Dev still holding / airdrop >15% / risk wallets >30% / linked >10% |
-| 可轻仓   | Light Position | 🟡 | Exactly 1 of above warns |
-| 正常参与 | Normal | ✅ | None of the above |
+| Rating (ZH) | Rating (EN)     | Emoji | Condition                                                                 |
+| ----------- | --------------- | ----- | ------------------------------------------------------------------------- |
+| 不建议买    | Not Recommended | 🔴    | Any: rat traders >10% / largest wallet >15% / dev sock puppet             |
+| 谨慎参与    | Caution         | ⚠️    | ≥2 of: Dev still holding / airdrop >15% / risk wallets >30% / linked >10% |
+| 可轻仓      | Light Position  | 🟡    | Exactly 1 of above warns                                                  |
+| 正常参与    | Normal          | ✅    | None of the above                                                         |
 
 ## Supported Chains
 

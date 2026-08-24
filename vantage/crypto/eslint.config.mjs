@@ -6,7 +6,14 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'dist-ui/**', 'node_modules/**', '.data/**', '.secrets/**', 'graphify-out/**'],
+    ignores: [
+      'dist/**',
+      'dist-ui/**',
+      'node_modules/**',
+      '.data/**',
+      '.secrets/**',
+      'graphify-out/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -26,7 +33,10 @@ export default tseslint.config(
       // asyncFn()` at the call site (see ui/main.tsx's `void loadScrutiny()` etc.) rather than
       // silently dropped. This rule enforces exactly that convention instead of just hoping for it.
       '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/consistent-type-imports': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'off', // used deliberately at known-present DOM/lookup sites throughout ui/main.tsx

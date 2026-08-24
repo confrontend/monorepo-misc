@@ -19,20 +19,22 @@ Earlier this session (2026-08-14) we found and fixed a related but distinct prob
 
 ## The open question
 
-A checkpoint's `result.status` is `'received'` once Dune returns *any* matched trade — there is no check for whether Dune's indexing was actually complete at query time. Once `received`, a checkpoint is **never re-verified or retried** — only `'not available'` checkpoints go through the retry queue (`src/dune/planner.ts`'s `stateFor`). The existing safeguards in `src/db/patterns.ts`'s `classifyComparison` (`TRADE_AGE_POLICY`, the "stale" same-trade-reused check) only look at the *distance between the matched trade and the checkpoint target time* — neither one can detect "this trade was the latest Dune had indexed at query time, but a truer/later trade existed and got indexed afterward."
+A checkpoint's `result.status` is `'received'` once Dune returns _any_ matched trade — there is no check for whether Dune's indexing was actually complete at query time. Once `received`, a checkpoint is **never re-verified or retried** — only `'not available'` checkpoints go through the retry queue (`src/dune/planner.ts`'s `stateFor`). The existing safeguards in `src/db/patterns.ts`'s `classifyComparison` (`TRADE_AGE_POLICY`, the "stale" same-trade-reused check) only look at the _distance between the matched trade and the checkpoint target time_ — neither one can detect "this trade was the latest Dune had indexed at query time, but a truer/later trade existed and got indexed afterward."
 
 So it's plausible that a meaningful number of `received` checkpoints currently feeding `computeSignalPatternReport` (the Patterns tab) are based on an incomplete view of trades, silently skewing the median/average returns the Patterns tab reports — but this has **not been empirically confirmed**, only established as a real mechanism.
 
 ## What to do
 
 **Step 1 — measure it, don't assume it.** Before writing any fix:
+
 - Pick a real, meaningful sample of signals whose first Dune query happened while they were young (e.g. `requested_at - observed_at < 6h` — use the same query pattern as `signalIdsWithRuns` in `src/dune/planner.ts`, or query `dune_outcome_runs` directly) and whose checkpoints came back `received`.
-- Re-run the *exact same* `sqlFor` query for a sample of those signals now (they're all well past 24h old at this point) and diff the results against what's stored: same `matched_trade_at`/`matched_tx_id`/`price_usd`, or different?
+- Re-run the _exact same_ `sqlFor` query for a sample of those signals now (they're all well past 24h old at this point) and diff the results against what's stored: same `matched_trade_at`/`matched_tx_id`/`price_usd`, or different?
 - If the values are consistently identical, the risk is theoretical and not real in practice for this dataset (Dune's indexing may complete fast enough that it doesn't matter within the timeframe these checkpoints were queried) — report that finding and stop; do not build a fix for a problem that doesn't reproduce.
-- If values *do* differ for a non-trivial fraction, quantify: how many signals affected, how large the price/return deltas are, and whether they're large enough to matter (e.g. would they flip a group's `reliable`/`verdict` classification in `computeSignalPatternReport`).
+- If values _do_ differ for a non-trivial fraction, quantify: how many signals affected, how large the price/return deltas are, and whether they're large enough to matter (e.g. would they flip a group's `reliable`/`verdict` classification in `computeSignalPatternReport`).
 
 **Step 2 — only if Step 1 finds a real effect**, design a fix. Some directions to consider (pick based on what Step 1 actually shows, don't default to the most complex option):
-- Add a lightweight re-verification pass: for `received` checkpoints whose *matching* query happened before the signal was 24h old, re-query once and update in place if the result changed, similar in spirit to `reconcileStuckRuns` but for `received`-not-`not available` data.
+
+- Add a lightweight re-verification pass: for `received` checkpoints whose _matching_ query happened before the signal was 24h old, re-query once and update in place if the result changed, similar in spirit to `reconcileStuckRuns` but for `received`-not-`not available` data.
 - Or: track per-checkpoint whether it was queried while premature, and let `computeSignalPatternReport` exclude/flag those from `fresh` until re-verified — conservative, no new Dune cost, but shrinks sample sizes.
 - Whatever you choose, follow this project's established evidence-first, no-silent-defaults conventions (see `src/db/patterns.ts`'s existing comments on `classifyComparison`/`TRADE_AGE_POLICY` for the house style) and this repo's `CLAUDE.md` progress-logging rule.
 

@@ -39,4 +39,3 @@ try {
 } finally {
   database.close();
 }
-

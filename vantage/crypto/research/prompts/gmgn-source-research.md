@@ -25,4 +25,3 @@ Return a short evidence-backed report containing:
 - Do not guess field names from a screenshot or an undocumented response.
 - Do not expose API keys, private keys, cookies, or session tokens in the report or raw payload fixture.
 - If no authorized source is available, say so and recommend continuing with manual raw-event capture; do not bypass login, rate limits, or access controls.
-

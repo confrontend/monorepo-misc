@@ -16,7 +16,7 @@ your progress entry as a recommendation — do not change it here.
 ## Why this exists
 
 The pipeline currently ends at a ranked table: a handful of wallets clear every gate and are
-labelled candidates. There is no view that asks *why* a specific candidate looks good, and the
+labelled candidates. There is no view that asks _why_ a specific candidate looks good, and the
 project has repeatedly produced candidates that passed every gate and were still artefacts:
 
 - a "+819%" winner resting on **four** round trips;
@@ -30,7 +30,7 @@ Every check below exists because it caught one of those. None are speculative.
 
 The stated end goal is to eventually trust this enough to commit small amounts of real money. That
 raises the bar on this view specifically: it is the last thing a human reads before deciding. It
-must make a fragile candidate *look* fragile.
+must make a fragile candidate _look_ fragile.
 
 ## The one design rule that must not be broken
 
@@ -52,15 +52,15 @@ Most of what these checks need is already implemented. Duplicating it is how the
 implementations drift and start disagreeing in the UI. Before writing feature code, confirm by
 reading and list what you will reuse versus what genuinely needs to be new:
 
-| Need | Existing thing to check first |
-|---|---|
-| median / mean / summarize | `summarizeTrades`, `median`, `mean` in `src/copytrade/evaluate.ts` |
-| token concentration | `computeProfitConcentration` in `src/copytrade/evaluate.ts` (around line 446) |
-| hold time per sell | `holdSecondsPerSell` in `src/copytrade/evaluate.ts` (around line 528) |
-| dormancy | `daysSinceLastTrade` / `dormant` / `DORMANT_AFTER_DAYS` in `src/copytrade/copyCandidates.ts` |
-| tail metrics | `simulatedMeanReturnPercent`, `tailShareOfMeanPercent`, `TAIL_THRESHOLD_PERCENT` in `src/copytrade/copySimulation.ts` |
-| out-of-sample split | `splitByDate`, `suggestSplitDate` in `src/stats/holdout.ts` |
-| confidence interval / sign test / correction | `bootstrapMedianCI`, `signTest`, `holmCorrection` in `src/stats/inference.ts` (holmCorrection around line 104) |
+| Need                                         | Existing thing to check first                                                                                         |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| median / mean / summarize                    | `summarizeTrades`, `median`, `mean` in `src/copytrade/evaluate.ts`                                                    |
+| token concentration                          | `computeProfitConcentration` in `src/copytrade/evaluate.ts` (around line 446)                                         |
+| hold time per sell                           | `holdSecondsPerSell` in `src/copytrade/evaluate.ts` (around line 528)                                                 |
+| dormancy                                     | `daysSinceLastTrade` / `dormant` / `DORMANT_AFTER_DAYS` in `src/copytrade/copyCandidates.ts`                          |
+| tail metrics                                 | `simulatedMeanReturnPercent`, `tailShareOfMeanPercent`, `TAIL_THRESHOLD_PERCENT` in `src/copytrade/copySimulation.ts` |
+| out-of-sample split                          | `splitByDate`, `suggestSplitDate` in `src/stats/holdout.ts`                                                           |
+| confidence interval / sign test / correction | `bootstrapMedianCI`, `signTest`, `holmCorrection` in `src/stats/inference.ts` (holmCorrection around line 104)        |
 
 Note that `holmCorrection` lives in `src/stats/inference.ts`, **not** `src/db/patterns.ts` — an
 earlier task document in this monorepo states the wrong path. Verify before citing it anywhere.
@@ -77,7 +77,7 @@ enough matured data to judge, and **must be visually distinct from `fail`** — 
 already been got wrong elsewhere in the monorepo and is not optional.
 
 1. **Dormancy** — days since last completed trade. Reuse the existing field; do not recompute.
-2. **Coverage, both denominators** — Dune-matched share within the scoring window *and* across the
+2. **Coverage, both denominators** — Dune-matched share within the scoring window _and_ across the
    wallet's full history. Show both. A candidate reading 161/161 in-window can sit at ~36% of its
    full history, and only the second number tells you how much is unmeasured.
 3. **Coverage bias direction** — of the trades that are not Dune-matched, how do they differ? This
@@ -146,7 +146,7 @@ already confused a reader once; say whether zero meant up to date or nothing cam
 - Do not change existing tables, gates, or the candidate list itself.
 - Keep the existing sub-tabs untouched — this is a fifth entry in `CopyTradeSubTab`
   (`ui/main.tsx`, around line 649), added alongside `research | wallet-stats | forward-validation |
-  top-callers`. Remember the route parsing near line 655 and the nav buttons near line 3202.
+top-callers`. Remember the route parsing near line 655 and the nav buttons near line 3202.
 
 ## Tests
 

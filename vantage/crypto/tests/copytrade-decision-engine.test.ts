@@ -22,5 +22,8 @@ test('30-day decision engine uses one ordered, fail-closed formula', () => {
   assert.equal(decideThirtyDayVerdict({ ...passing, gmgnStatsFresh: false }), 'Historical / stale');
   assert.equal(decideThirtyDayVerdict({ ...passing, impossibleToCopy: true }), 'Not copyable');
   assert.equal(decideThirtyDayVerdict({ ...passing, consistentlyProfitable: false }), 'Watch');
-  assert.equal(decideThirtyDayVerdict({ ...passing, gmgn30dPositive: false }), 'Historical screen failed');
+  assert.equal(
+    decideThirtyDayVerdict({ ...passing, gmgn30dPositive: false }),
+    'Historical screen failed',
+  );
 });

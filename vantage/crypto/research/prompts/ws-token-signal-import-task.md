@@ -6,7 +6,7 @@ You are implementing a backend change to this local SQLite research app (`vantag
 
 The GMGN browser-capture extension (`extension/`) already captures GMGN's REST API responses (see `extension/content-main.js`'s `TARGET_PATHS`) and imports them into the `gmgn_signals` table via `src/gmgn/browserImport.ts` -> `src/gmgn/ingest.ts`'s `storeGmgnSignal`/`normalizeGmgnSignal`.
 
-We just confirmed, via a real 5-minute "test mode" capture (unfiltered WebSocket sniffing, also in `content-main.js`), that GMGN's *live* signal feed is not delivered over REST at all — it's pushed over a WebSocket at `wss://ws.gmgn.ai/v2/ws?...`. Messages on that socket are JSON objects shaped like `{ "channel": "<name>", "data": [...] }`. The channel we care about is `"token_signal"`.
+We just confirmed, via a real 5-minute "test mode" capture (unfiltered WebSocket sniffing, also in `content-main.js`), that GMGN's _live_ signal feed is not delivered over REST at all — it's pushed over a WebSocket at `wss://ws.gmgn.ai/v2/ws?...`. Messages on that socket are JSON objects shaped like `{ "channel": "<name>", "data": [...] }`. The channel we care about is `"token_signal"`.
 
 A separate task is making the extension capture this channel permanently (not just in test mode). **Do not depend on that task's implementation details or exact `requestPath` tagging** — detect eligibility purely from the payload shape (`capture.responseBody?.channel === 'token_signal'`), so this work is decoupled and can land independently.
 
@@ -15,7 +15,16 @@ A separate task is making the extension capture this channel permanently (not ju
 `responseBody.data` is an array. **Most items are just live price/stat ticks for tokens already visible on screen — not new signals.** Only import items that have a `sig_t` field. A real tick item (skip these):
 
 ```json
-{ "c": "sol", "d": { "a": "3JLTNKH78VMd3j7kQkHDC7RqdasCAGwsLQdm3BBLpump", "mc": 2181.0772, "nm": "Cat Wif Helmet", "...": "many more abbreviated fields" }, "sig_op_t": "create" }
+{
+  "c": "sol",
+  "d": {
+    "a": "3JLTNKH78VMd3j7kQkHDC7RqdasCAGwsLQdm3BBLpump",
+    "mc": 2181.0772,
+    "nm": "Cat Wif Helmet",
+    "...": "many more abbreviated fields"
+  },
+  "sig_op_t": "create"
+}
 ```
 
 A real new-signal item (import these):
@@ -50,20 +59,20 @@ A real new-signal item (import these):
 
 `src/gmgn/ingest.ts`'s `normalizeGmgnSignal` already expects a raw event object shaped like the REST endpoint's payload (`token_address`, `signal_type`, `trigger_at`, `market_cap`, `id`, `trigger_mc`, `first_trigger_mc`, `signal_times`, `signal_times_by_type`, `ath`, `cur_data`, plus optional `triggering_wallet`/`raw_wallet_labels`/`source_url`/`observed_at`). **Do not duplicate that normalization logic** — write a small mapper that converts one WS item into that same raw-event shape, then call the existing `storeGmgnSignal` unchanged:
 
-| Raw-event field `storeGmgnSignal` expects | Source in a WS `token_signal` item |
-|---|---|
-| `token_address` | `item.d.a` |
-| `signal_type` | `item.sig_t` |
-| `trigger_at` | `item.sig_t_at` (already Unix seconds) |
-| `market_cap` | `item.d.mc` |
-| `id` | `item.sig_id` |
-| `first_trigger_mc` | `item.sig_ftm` |
-| `signal_times` | `item.sig_tms` |
-| `signal_times_by_type` | `item.sig_tms_t` |
-| `ath` | `item.sig_ath` |
-| `chain` | `item.c` (top-level, sibling of `d`, not inside `d`) |
-| `trigger_mc` | **Unconfirmed** — in one real REST sample, `trigger_mc` equaled `first_trigger_mc` exactly. There is no obvious separate WS field for it. Verify against a larger real capture before deciding; it's acceptable to leave it unset (`null`) if no clean source field exists — `normalizeGmgnSignal` does not treat a missing `trigger_mc` as an error. |
-| `observed_at`, `triggering_wallet`, `raw_wallet_labels`, `source_url` | Not present in the WS shape. Leave unset — `normalizeGmgnSignal` already falls back `observed_at` to `trigger_at` and treats the others as optional (logs a warning, not a hard failure), exactly as it already does for some REST-captured events. |
+| Raw-event field `storeGmgnSignal` expects                             | Source in a WS `token_signal` item                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token_address`                                                       | `item.d.a`                                                                                                                                                                                                                                                                                                                                            |
+| `signal_type`                                                         | `item.sig_t`                                                                                                                                                                                                                                                                                                                                          |
+| `trigger_at`                                                          | `item.sig_t_at` (already Unix seconds)                                                                                                                                                                                                                                                                                                                |
+| `market_cap`                                                          | `item.d.mc`                                                                                                                                                                                                                                                                                                                                           |
+| `id`                                                                  | `item.sig_id`                                                                                                                                                                                                                                                                                                                                         |
+| `first_trigger_mc`                                                    | `item.sig_ftm`                                                                                                                                                                                                                                                                                                                                        |
+| `signal_times`                                                        | `item.sig_tms`                                                                                                                                                                                                                                                                                                                                        |
+| `signal_times_by_type`                                                | `item.sig_tms_t`                                                                                                                                                                                                                                                                                                                                      |
+| `ath`                                                                 | `item.sig_ath`                                                                                                                                                                                                                                                                                                                                        |
+| `chain`                                                               | `item.c` (top-level, sibling of `d`, not inside `d`)                                                                                                                                                                                                                                                                                                  |
+| `trigger_mc`                                                          | **Unconfirmed** — in one real REST sample, `trigger_mc` equaled `first_trigger_mc` exactly. There is no obvious separate WS field for it. Verify against a larger real capture before deciding; it's acceptable to leave it unset (`null`) if no clean source field exists — `normalizeGmgnSignal` does not treat a missing `trigger_mc` as an error. |
+| `observed_at`, `triggering_wallet`, `raw_wallet_labels`, `source_url` | Not present in the WS shape. Leave unset — `normalizeGmgnSignal` already falls back `observed_at` to `trigger_at` and treats the others as optional (logs a warning, not a hard failure), exactly as it already does for some REST-captured events.                                                                                                   |
 
 `observedAt`/timestamp handling: `sig_t_at` is Unix **seconds** (same convention `utcTimestampOrNull` already expects for numeric input — see its `< 100_000_000_000` branch). Do not re-convert or reformat it yourself; pass the raw number through and let the existing normalizer handle it, matching how the REST path already does this.
 
@@ -72,10 +81,13 @@ A real new-signal item (import these):
 `src/gmgn/browserImport.ts`'s `importGmgnBrowserCapture` currently has one gate:
 
 ```ts
-if (typeof capture.requestPath !== 'string' || !capture.requestPath.includes(SIGNAL_REQUEST_PATH)) { otherCaptures += 1; continue; }
+if (typeof capture.requestPath !== 'string' || !capture.requestPath.includes(SIGNAL_REQUEST_PATH)) {
+  otherCaptures += 1;
+  continue;
+}
 ```
 
-Everything that isn't the REST `token-signal` endpoint currently falls into `otherCaptures` and is never parsed — that gate was added deliberately (see the `progress.md` entry from 2026-08-11 titled "Widened the GMGN browser-capture extension...") after a real bug where ungated captures got blindly pushed through `storeGmgnSignal`, producing garbage null-heavy rows. **Preserve that discipline.** Add a new branch *before* that gate: if `capture.responseBody?.channel === 'token_signal'`, iterate `capture.responseBody.data`, skip any item without a defined `sig_t` (do not count these as errors — they're expected, not malformed), map the rest via the table above, and call the existing `storeGmgnSignal(database, mappedEvent, { capturedAt: new Date(capture.capturedAt), source: 'gmgn-browser-extension', chain: mappedEvent.chain })`. Reuse the existing `imported`/`skipped`/`errors` counters exactly as the REST path already does, so the import summary stays meaningful. Only fall through to the existing `otherCaptures` counting for captures that match neither this nor the REST gate.
+Everything that isn't the REST `token-signal` endpoint currently falls into `otherCaptures` and is never parsed — that gate was added deliberately (see the `progress.md` entry from 2026-08-11 titled "Widened the GMGN browser-capture extension...") after a real bug where ungated captures got blindly pushed through `storeGmgnSignal`, producing garbage null-heavy rows. **Preserve that discipline.** Add a new branch _before_ that gate: if `capture.responseBody?.channel === 'token_signal'`, iterate `capture.responseBody.data`, skip any item without a defined `sig_t` (do not count these as errors — they're expected, not malformed), map the rest via the table above, and call the existing `storeGmgnSignal(database, mappedEvent, { capturedAt: new Date(capture.capturedAt), source: 'gmgn-browser-extension', chain: mappedEvent.chain })`. Reuse the existing `imported`/`skipped`/`errors` counters exactly as the REST path already does, so the import summary stays meaningful. Only fall through to the existing `otherCaptures` counting for captures that match neither this nor the REST gate.
 
 ## Required correctness checks before you consider this done
 

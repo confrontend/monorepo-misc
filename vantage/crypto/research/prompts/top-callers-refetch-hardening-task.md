@@ -16,40 +16,38 @@ This merges two audits of Top Callers' collection system, both verified against 
 being approved — no guessed gaps:
 
 **Refetch/coverage gaps (audit 1):**
+
 1. Leaderboard capture has no cooldown against accidental rapid re-clicks.
 2. Per-wallet backfill silently caps at 1 day even when a wallet's real last-known callout is
    much older — quietly dropping history instead of catching up.
-3. Checkpoint dedup only checks *completed* outcomes, not in-flight claims — no atomic guard
+3. Checkpoint dedup only checks _completed_ outcomes, not in-flight claims — no atomic guard
    against two overlapping submissions of the same Dune target.
 
-**Rate-limit resilience gaps (audit 2, confirmed against real code):**
-4. **`runGmgnTrackKol` (the leaderboard capture) completely bypasses the shared GMGN request
-   queue.** `fetchActivityPageRaw` in `fetch.ts` calls `waitForGmgnRequest()` before every
-   request, and both CopyTrade's roster fetch and Top Callers' wallet-activity fetch go through
-   it — but `runGmgnTrackKol` calls `execFileAsync` directly with zero pacing or serialization.
-   This means a leaderboard capture can fire at the exact same moment as an in-flight CopyTrade
-   or callout fetch against the same account-level rate-limit bucket, with no coordination
-   between them. Confirmed by reading the code, not assumed.
-5. **Diagnostics under-report what actually happens.** The background collection run
-   (`void startCollectionRun(...).catch(...)` in `server.ts`) only logs to `logDiagnostic` on an
-   *uncaught* error at the outer async-void boundary. `startCollectionRun`'s per-wallet loop
-   catches its own errors internally and just writes the run's own `status`/`error` column — a
-   rate limit or failure mid-loop never reaches that `.catch()`, so it never appears in the
-   diagnostics log at all, only in the run's own row (invisible unless you know to poll it).
-6. **A retry today means "start an entirely new run from wallet 1."** Individual wallets already
-   resume cheaply from their own stored watermark (a fully-synced wallet resolves in one fast
-   request — this is NOT being reopened, see the "already correct" list below), but a fresh
-   manual click still walks the full tracked list from the top, re-spending real rate-limit
-   budget re-confirming "nothing new" for every already-synced wallet before it even reaches the
-   ones that were never fetched. That makes hitting a second 429 more likely, not less.
-7. **No bounded automatic retry, no pause/resume state, no permanent-stop guarantee.** Today a
-   rate limit just fails the run; the user has to notice and manually re-click, which (per #6)
-   restarts from the top. There is currently **no auto-retry or auto-resume mechanism anywhere in
-   this codebase** — confirmed by checking every call site of `runTopCallerWorkflow` and
-   `collectTopCaller`; both are exclusively `onClick`-triggered. This task adds a bounded,
-   explicit version of automatic retry — not blind retry-until-it-works.
+**Rate-limit resilience gaps (audit 2, confirmed against real code):** 4. **`runGmgnTrackKol` (the leaderboard capture) completely bypasses the shared GMGN request
+queue.** `fetchActivityPageRaw` in `fetch.ts` calls `waitForGmgnRequest()` before every
+request, and both CopyTrade's roster fetch and Top Callers' wallet-activity fetch go through
+it — but `runGmgnTrackKol` calls `execFileAsync` directly with zero pacing or serialization.
+This means a leaderboard capture can fire at the exact same moment as an in-flight CopyTrade
+or callout fetch against the same account-level rate-limit bucket, with no coordination
+between them. Confirmed by reading the code, not assumed. 5. **Diagnostics under-report what actually happens.** The background collection run
+(`void startCollectionRun(...).catch(...)` in `server.ts`) only logs to `logDiagnostic` on an
+_uncaught_ error at the outer async-void boundary. `startCollectionRun`'s per-wallet loop
+catches its own errors internally and just writes the run's own `status`/`error` column — a
+rate limit or failure mid-loop never reaches that `.catch()`, so it never appears in the
+diagnostics log at all, only in the run's own row (invisible unless you know to poll it). 6. **A retry today means "start an entirely new run from wallet 1."** Individual wallets already
+resume cheaply from their own stored watermark (a fully-synced wallet resolves in one fast
+request — this is NOT being reopened, see the "already correct" list below), but a fresh
+manual click still walks the full tracked list from the top, re-spending real rate-limit
+budget re-confirming "nothing new" for every already-synced wallet before it even reaches the
+ones that were never fetched. That makes hitting a second 429 more likely, not less. 7. **No bounded automatic retry, no pause/resume state, no permanent-stop guarantee.** Today a
+rate limit just fails the run; the user has to notice and manually re-click, which (per #6)
+restarts from the top. There is currently **no auto-retry or auto-resume mechanism anywhere in
+this codebase** — confirmed by checking every call site of `runTopCallerWorkflow` and
+`collectTopCaller`; both are exclusively `onClick`-triggered. This task adds a bounded,
+explicit version of automatic retry — not blind retry-until-it-works.
 
 **Already correct — do not "fix" these, they were verified working:**
+
 - Per-wallet resume-by-watermark (`MAX(call_timestamp)` → `knownLatestTimestamp` →
   `fetchWalletActivity`'s cutoff) already avoids re-walking pages already known.
 - Checkpoint measurement already skips any `(callout_id, checkpoint)` pair already in
@@ -88,7 +86,7 @@ being approved — no guessed gaps:
 ## Fix 3: checkpoint dedup — atomic claim, correct finalization, ownership-aware cleanup
 
 `collectPendingCheckpointTargets` only excludes pairs already in `top_caller_outcomes` as a
-*final* result. Needs three coordinated pieces:
+_final_ result. Needs three coordinated pieces:
 
 1. **Atomic claim.** Before submitting to Dune, insert a `'pending'` row per target into
    `top_caller_outcomes` via `INSERT OR IGNORE` on the existing `UNIQUE(callout_id, checkpoint)`
@@ -104,6 +102,7 @@ being approved — no guessed gaps:
    when its owning run (via `dune_run_id`) is no longer active — `failed`/`cancelled`, or
    `running` past a timeout. Mirror `reconcileStaleFetchRuns`/`reconcileStuckDuneRuns`'s existing
    shape rather than inventing a new one.
+
 - Comment why this matters even though `hasActiveCollectionRun` already serializes at the run
   level today — this is defense-in-depth for if that lock is ever loosened.
 
@@ -129,13 +128,13 @@ being approved — no guessed gaps:
 ## Fix 6: bounded pause → retry-once → permanent-pause state machine
 
 This is the core new behavior. Scope it precisely — this is "one clean retry after the cooldown
-genuinely clears," not a retry loop. GMGN's own docs warn that repeated requests *during* an
-active cooldown extend the ban; retrying once *after* it clears is not that.
+genuinely clears," not a retry loop. GMGN's own docs warn that repeated requests _during_ an
+active cooldown extend the ban; retrying once _after_ it clears is not that.
 
 - **Schema** (`src/db/schema.ts`, new migration): add to `top_caller_collection_runs`:
   `retry_count INTEGER NOT NULL DEFAULT 0`, `next_retry_at TEXT`,
   `wallet_snapshot_json TEXT` (the tracked-caller-key list frozen at the run's original start, so
-  a resume walks the *same* list even if tracking changes mid-pause — resuming by `wallet_done`
+  a resume walks the _same_ list even if tracking changes mid-pause — resuming by `wallet_done`
   as an index into a list that can shift under you is a correctness bug, avoid it).
 - **New status value**: add `'paused'` to `CollectionStatus`. A `'callouts'` run that hits a rate
   limit mid-loop transitions to `'paused'` (not `'rate_limited'` as a dead end) with

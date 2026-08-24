@@ -1,6 +1,12 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { CHECKPOINT_LABELS, readAllDuneOutcomes } from './outcomes.js';
-import { MIN_SIGNAL_AGE_MS, readPrescreenCandidates, runPrescreen, selectRetryQueueIds, type PrescreenSummary } from './prescreen.js';
+import {
+  MIN_SIGNAL_AGE_MS,
+  readPrescreenCandidates,
+  runPrescreen,
+  selectRetryQueueIds,
+  type PrescreenSummary,
+} from './prescreen.js';
 
 export const MEASUREMENT_PLAN_VERSION = 'measurement-plan-v11';
 export const RETRY_DELAYS_MS = [15 * 60_000, 60 * 60_000, 4 * 60 * 60_000, 12 * 60 * 60_000];
@@ -41,7 +47,20 @@ export type MeasurementPlan = {
   eligibleRetrySignalIds: number[];
   retryQueueSignalIds: number[];
   byState: Record<MeasurementState, number>;
-  bySignalType: Array<{ signalType: string; captured: number; measured: number; unmeasured: number; eligible: number; pending: number; complete: number; retryEligible: number; inFlight: number; tooFresh: number; neverMaturelyAttempted: number; waitingOnRetryBuffer: number }>;
+  bySignalType: Array<{
+    signalType: string;
+    captured: number;
+    measured: number;
+    unmeasured: number;
+    eligible: number;
+    pending: number;
+    complete: number;
+    retryEligible: number;
+    inFlight: number;
+    tooFresh: number;
+    neverMaturelyAttempted: number;
+    waitingOnRetryBuffer: number;
+  }>;
   prescreen: Omit<PrescreenSummary, 'decisions'>;
 };
 
@@ -67,10 +86,18 @@ const emptyStates = (): Record<MeasurementState, number> => ({
  * in-flight: retrying it would create a second Dune execution for the same IDs. */
 const signalIdsInFlight = (database: DatabaseSync): Set<number> => {
   const result = new Set<number>();
-  const runs = database.prepare(`SELECT signal_ids AS signalIds FROM dune_outcome_runs WHERE status IN ('submitted', 'running', 'timed_out')`).all() as unknown as Array<{ signalIds: string }>;
+  const runs = database
+    .prepare(
+      `SELECT signal_ids AS signalIds FROM dune_outcome_runs WHERE status IN ('submitted', 'running', 'timed_out')`,
+    )
+    .all() as unknown as Array<{ signalIds: string }>;
   for (const run of runs) {
     let ids: unknown;
-    try { ids = JSON.parse(run.signalIds); } catch { continue; }
+    try {
+      ids = JSON.parse(run.signalIds);
+    } catch {
+      continue;
+    }
     if (!Array.isArray(ids)) continue;
     for (const rawId of ids) {
       const id = Number(rawId);
@@ -88,12 +115,30 @@ const signalIdsInFlight = (database: DatabaseSync): Set<number> => {
  * signal is past the buffer, every subsequent attempt (including all future ones,
  * since too_fresh gates the very first attempt for new signals) counts normally, so
  * this only forgives stale, pre-rule history and cannot be used to retry forever. */
-const signalIdsWithRuns = (database: DatabaseSync, observedAtById: Map<number, string>): Map<number, { attempts: number; lastCompletedAt: number | null; rawAttempts: number }> => {
-  const result = new Map<number, { attempts: number; lastCompletedAt: number | null; rawAttempts: number }>();
-  const runs = database.prepare(`SELECT signal_ids AS signalIds, requested_at AS requestedAt, completed_at AS completedAt FROM dune_outcome_runs WHERE status = 'completed' ORDER BY id ASC`).all() as unknown as Array<{ signalIds: string; requestedAt: string | null; completedAt: string | null }>;
+const signalIdsWithRuns = (
+  database: DatabaseSync,
+  observedAtById: Map<number, string>,
+): Map<number, { attempts: number; lastCompletedAt: number | null; rawAttempts: number }> => {
+  const result = new Map<
+    number,
+    { attempts: number; lastCompletedAt: number | null; rawAttempts: number }
+  >();
+  const runs = database
+    .prepare(
+      `SELECT signal_ids AS signalIds, requested_at AS requestedAt, completed_at AS completedAt FROM dune_outcome_runs WHERE status = 'completed' ORDER BY id ASC`,
+    )
+    .all() as unknown as Array<{
+    signalIds: string;
+    requestedAt: string | null;
+    completedAt: string | null;
+  }>;
   for (const run of runs) {
     let ids: unknown;
-    try { ids = JSON.parse(run.signalIds); } catch { continue; }
+    try {
+      ids = JSON.parse(run.signalIds);
+    } catch {
+      continue;
+    }
     if (!Array.isArray(ids)) continue;
     const requestedMs = parseTime(run.requestedAt);
     for (const rawId of ids) {
@@ -102,7 +147,14 @@ const signalIdsWithRuns = (database: DatabaseSync, observedAtById: Map<number, s
       const previous = result.get(id) ?? { attempts: 0, lastCompletedAt: null, rawAttempts: 0 };
       previous.rawAttempts += 1;
       const observedMs = parseTime(observedAtById.get(id) ?? null);
-      if (observedMs !== null && requestedMs !== null && requestedMs - observedMs < MIN_SIGNAL_AGE_MS) { result.set(id, previous); continue; }
+      if (
+        observedMs !== null &&
+        requestedMs !== null &&
+        requestedMs - observedMs < MIN_SIGNAL_AGE_MS
+      ) {
+        result.set(id, previous);
+        continue;
+      }
       previous.attempts += 1;
       previous.lastCompletedAt = parseTime(run.completedAt);
       result.set(id, previous);
@@ -130,7 +182,11 @@ const stateFor = (
   const hasFuturePending = CHECKPOINT_LABELS.some((label) => {
     const checkpoint = byLabel.get(label);
     const targetMs = checkpoint ? parseTime(checkpoint.targetTimestamp) : null;
-    return checkpoint?.result.status === 'checkpoint not yet reached' && targetMs !== null && targetMs > nowMs;
+    return (
+      checkpoint?.result.status === 'checkpoint not yet reached' &&
+      targetMs !== null &&
+      targetMs > nowMs
+    );
   });
   const unresolved = CHECKPOINT_LABELS.filter((label) => {
     const checkpoint = byLabel.get(label);
@@ -154,37 +210,84 @@ const stateFor = (
   // retried under 6h old succeeded only 59.7% of the time vs. 95.9% at 6-24h. Until a
   // signal turns 24h old it simply waits here, same as a normal mid-delay signal.
   const observedMs = Date.parse(observedAt);
-  if (!Number.isNaN(observedMs) && nowMs - observedMs < MIN_SIGNAL_AGE_MS) return 'elapsed_but_unavailable';
+  if (!Number.isNaN(observedMs) && nowMs - observedMs < MIN_SIGNAL_AGE_MS)
+    return 'elapsed_but_unavailable';
   const attempts = runInfo?.attempts ?? 0;
   const lastAttemptMs = runInfo?.lastCompletedAt ?? null;
   const retryIndex = Math.max(0, Math.min(attempts - 1, RETRY_DELAYS_MS.length - 1));
   const delay = RETRY_DELAYS_MS[retryIndex] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
-  if (attempts >= RETRY_DELAYS_MS.length && lastAttemptMs !== null && nowMs - lastAttemptMs >= delay) return 'retry_exhausted';
+  if (
+    attempts >= RETRY_DELAYS_MS.length &&
+    lastAttemptMs !== null &&
+    nowMs - lastAttemptMs >= delay
+  )
+    return 'retry_exhausted';
   if (lastAttemptMs === null || nowMs - lastAttemptMs >= delay) return 'retry_eligible';
   return 'elapsed_but_unavailable';
 };
 
 const computeMeasurementPlan = (database: DatabaseSync, now = new Date()): MeasurementPlan => {
-  const signals = database.prepare(`SELECT id, observed_at AS observedAt, captured_at AS capturedAt, signal_type AS signalType FROM gmgn_signals WHERE token_address IS NOT NULL AND observed_at IS NOT NULL ORDER BY id ASC`).all() as unknown as Array<{ id: number; observedAt: string; capturedAt: string; signalType: string | null }>;
-  const outcomes = new Map(readAllDuneOutcomes(database).map((outcome) => [outcome.signal.id, outcome]));
+  const signals = database
+    .prepare(
+      `SELECT id, observed_at AS observedAt, captured_at AS capturedAt, signal_type AS signalType FROM gmgn_signals WHERE token_address IS NOT NULL AND observed_at IS NOT NULL ORDER BY id ASC`,
+    )
+    .all() as unknown as Array<{
+    id: number;
+    observedAt: string;
+    capturedAt: string;
+    signalType: string | null;
+  }>;
+  const outcomes = new Map(
+    readAllDuneOutcomes(database).map((outcome) => [outcome.signal.id, outcome]),
+  );
   const observedAtById = new Map(signals.map((signal) => [signal.id, signal.observedAt]));
   const runInfo = signalIdsWithRuns(database, observedAtById);
   const inFlightIds = signalIdsInFlight(database);
   const byState = emptyStates();
   const plannerStates = new Map<number, MeasurementState>();
-  const typeStates = new Map<string, { captured: number; measured: number; unmeasured: number; eligible: number; pending: number; complete: number; retryEligible: number; inFlight: number; tooFresh: number; neverMaturelyAttempted: number; waitingOnRetryBuffer: number }>();
+  const typeStates = new Map<
+    string,
+    {
+      captured: number;
+      measured: number;
+      unmeasured: number;
+      eligible: number;
+      pending: number;
+      complete: number;
+      retryEligible: number;
+      inFlight: number;
+      tooFresh: number;
+      neverMaturelyAttempted: number;
+      waitingOnRetryBuffer: number;
+    }
+  >();
   const signalTypeById = new Map<number, string>();
   const prematureAttemptIds = new Set<number>();
   for (const signal of signals) {
     const info = runInfo.get(signal.id);
-    const state = inFlightIds.has(signal.id) ? 'in_flight' : stateFor(signal.id, signal.observedAt, outcomes.get(signal.id), info, now.getTime());
+    const state = inFlightIds.has(signal.id)
+      ? 'in_flight'
+      : stateFor(signal.id, signal.observedAt, outcomes.get(signal.id), info, now.getTime());
     byState[state] += 1;
     plannerStates.set(signal.id, state);
     const signalType = signal.signalType ?? 'unknown';
     signalTypeById.set(signal.id, signalType);
-    const current = typeStates.get(signalType) ?? { captured: 0, measured: 0, unmeasured: 0, eligible: 0, pending: 0, complete: 0, retryEligible: 0, inFlight: 0, tooFresh: 0, neverMaturelyAttempted: 0, waitingOnRetryBuffer: 0 };
+    const current = typeStates.get(signalType) ?? {
+      captured: 0,
+      measured: 0,
+      unmeasured: 0,
+      eligible: 0,
+      pending: 0,
+      complete: 0,
+      retryEligible: 0,
+      inFlight: 0,
+      tooFresh: 0,
+      neverMaturelyAttempted: 0,
+      waitingOnRetryBuffer: 0,
+    };
     current.captured += 1;
-    if (state === 'complete') current.measured += 1; else current.unmeasured += 1;
+    if (state === 'complete') current.measured += 1;
+    else current.unmeasured += 1;
     if (state === 'not_measured' || state === 'retry_eligible') current.eligible += 1;
     if (state === 'pending_target_time') current.pending += 1;
     if (state === 'complete') current.complete += 1;
@@ -195,21 +298,35 @@ const computeMeasurementPlan = (database: DatabaseSync, now = new Date()): Measu
     // Already queried at least once, but every attempt fired before the 24h buffer, so
     // none of them counted — distinct from a signal that legitimately failed a mature
     // attempt and is now waiting out its normal retry delay.
-    if (state === 'retry_eligible' && info && info.rawAttempts > 0 && info.attempts === 0) prematureAttemptIds.add(signal.id);
+    if (state === 'retry_eligible' && info && info.rawAttempts > 0 && info.attempts === 0)
+      prematureAttemptIds.add(signal.id);
     typeStates.set(signalType, current);
   }
   const prescreenCandidates = readPrescreenCandidates(database, plannerStates);
   const prescreen = runPrescreen(database, prescreenCandidates, now);
-  const selectedDecisions = prescreen.decisions.filter((decision) => decision.disposition === 'eligible_core' || decision.disposition === 'eligible_audit');
-  const eligibleNewSignalIds = selectedDecisions.filter((decision) => decision.plannerState === 'not_measured').map((decision) => decision.signalId);
-  const eligibleRetrySignalIds = selectedDecisions.filter((decision) => decision.plannerState === 'retry_eligible').map((decision) => decision.signalId);
+  const selectedDecisions = prescreen.decisions.filter(
+    (decision) =>
+      decision.disposition === 'eligible_core' || decision.disposition === 'eligible_audit',
+  );
+  const eligibleNewSignalIds = selectedDecisions
+    .filter((decision) => decision.plannerState === 'not_measured')
+    .map((decision) => decision.signalId);
+  const eligibleRetrySignalIds = selectedDecisions
+    .filter((decision) => decision.plannerState === 'retry_eligible')
+    .map((decision) => decision.signalId);
   // Keep a separate retry queue so a large influx of never-measured rows cannot
   // starve matured re-fetches. It is fully screened and deterministic; the UI
   // still submits it in small batches to avoid one giant Dune request.
   // Defense in depth: planner state applies the same age rule, but the queue itself
   // re-checks the timestamp so stale cached state can never submit a too-fresh signal.
-  const retryQueueSignalIds = selectRetryQueueIds(prescreenCandidates, Number.MAX_SAFE_INTEGER, now);
-  const prematureAttemptIdsInQueue = new Set(retryQueueSignalIds.filter((id) => prematureAttemptIds.has(id)));
+  const retryQueueSignalIds = selectRetryQueueIds(
+    prescreenCandidates,
+    Number.MAX_SAFE_INTEGER,
+    now,
+  );
+  const prematureAttemptIdsInQueue = new Set(
+    retryQueueSignalIds.filter((id) => prematureAttemptIds.has(id)),
+  );
   for (const id of prematureAttemptIdsInQueue) {
     const signalType = signalTypeById.get(id) ?? 'unknown';
     const current = typeStates.get(signalType);
@@ -217,8 +334,19 @@ const computeMeasurementPlan = (database: DatabaseSync, now = new Date()): Measu
   }
   const neverMaturelyAttemptedCount = prematureAttemptIdsInQueue.size;
   const selectedByType = new Map<string, number>();
-  for (const decision of prescreen.decisions) if (decision.disposition === 'eligible_core' || decision.disposition === 'eligible_audit') selectedByType.set(decision.signalType ?? 'unknown', (selectedByType.get(decision.signalType ?? 'unknown') ?? 0) + 1);
-  const bySignalType = [...typeStates.entries()].sort(([a], [b]) => Number(a) - Number(b)).map(([signalType, counts]) => ({ signalType, ...counts, eligible: selectedByType.get(signalType) ?? 0 }));
+  for (const decision of prescreen.decisions)
+    if (decision.disposition === 'eligible_core' || decision.disposition === 'eligible_audit')
+      selectedByType.set(
+        decision.signalType ?? 'unknown',
+        (selectedByType.get(decision.signalType ?? 'unknown') ?? 0) + 1,
+      );
+  const bySignalType = [...typeStates.entries()]
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([signalType, counts]) => ({
+      signalType,
+      ...counts,
+      eligible: selectedByType.get(signalType) ?? 0,
+    }));
   return {
     version: MEASUREMENT_PLAN_VERSION,
     generatedAt: now.toISOString(),
@@ -226,9 +354,21 @@ const computeMeasurementPlan = (database: DatabaseSync, now = new Date()): Measu
     maxAttempts: RETRY_DELAYS_MS.length,
     capturedCount: signals.length,
     parsedCount: signals.length,
-    latestCapturedAt: signals.reduce<string | null>((latest, signal) => !latest || signal.capturedAt > latest ? signal.capturedAt : latest, null),
-    latestObservedAt: signals.reduce<string | null>((latest, signal) => !latest || signal.observedAt > latest ? signal.observedAt : latest, null),
-    latestDuneCompletedAt: (database.prepare(`SELECT max(completed_at) AS completedAt FROM dune_outcome_runs WHERE status = 'completed'`).get() as { completedAt: string | null }).completedAt,
+    latestCapturedAt: signals.reduce<string | null>(
+      (latest, signal) => (!latest || signal.capturedAt > latest ? signal.capturedAt : latest),
+      null,
+    ),
+    latestObservedAt: signals.reduce<string | null>(
+      (latest, signal) => (!latest || signal.observedAt > latest ? signal.observedAt : latest),
+      null,
+    ),
+    latestDuneCompletedAt: (
+      database
+        .prepare(
+          `SELECT max(completed_at) AS completedAt FROM dune_outcome_runs WHERE status = 'completed'`,
+        )
+        .get() as { completedAt: string | null }
+    ).completedAt,
     measuredCount: byState.complete,
     // This is deliberately the complement of genuinely complete outcomes (excluding
     // in-flight rows, which are reported separately), not merely `not_measured`.
@@ -250,8 +390,16 @@ const computeMeasurementPlan = (database: DatabaseSync, now = new Date()): Measu
 const MEASUREMENT_PLAN_CACHE_KEY = 'default';
 
 const readMeasurementPlanFingerprint = (database: DatabaseSync): string => {
-  const signals = database.prepare(`SELECT count(*) AS count, max(id) AS maxId, max(captured_at) AS latestCapturedAt, max(observed_at) AS latestObservedAt FROM gmgn_signals`).get();
-  const runs = database.prepare(`SELECT count(*) AS count, max(id) AS maxId, max(requested_at) AS latestRequestedAt, max(completed_at) AS latestCompletedAt, group_concat(status, ',') AS statuses FROM dune_outcome_runs`).get();
+  const signals = database
+    .prepare(
+      `SELECT count(*) AS count, max(id) AS maxId, max(captured_at) AS latestCapturedAt, max(observed_at) AS latestObservedAt FROM gmgn_signals`,
+    )
+    .get();
+  const runs = database
+    .prepare(
+      `SELECT count(*) AS count, max(id) AS maxId, max(requested_at) AS latestRequestedAt, max(completed_at) AS latestCompletedAt, group_concat(status, ',') AS statuses FROM dune_outcome_runs`,
+    )
+    .get();
   return JSON.stringify({ version: MEASUREMENT_PLAN_VERSION, signals, runs });
 };
 
@@ -271,12 +419,31 @@ const compactMeasurementPlan = (plan: MeasurementPlan): MeasurementPlan => {
 // the cache immediately via the fingerprint, so this only affects idle viewing.
 export const buildMeasurementPlan = (database: DatabaseSync, now = new Date()): MeasurementPlan => {
   const fingerprint = readMeasurementPlanFingerprint(database);
-  const cached = database.prepare(`SELECT source_fingerprint AS sourceFingerprint, plan_json AS planJson FROM measurement_plan_cache WHERE cache_key = ?`).get(MEASUREMENT_PLAN_CACHE_KEY) as { sourceFingerprint: string; planJson: string } | undefined;
+  const cached = database
+    .prepare(
+      `SELECT source_fingerprint AS sourceFingerprint, plan_json AS planJson FROM measurement_plan_cache WHERE cache_key = ?`,
+    )
+    .get(MEASUREMENT_PLAN_CACHE_KEY) as { sourceFingerprint: string; planJson: string } | undefined;
   if (cached && cached.sourceFingerprint === fingerprint) {
-    try { return JSON.parse(cached.planJson) as MeasurementPlan; } catch { /* discard malformed cache and rebuild */ }
+    try {
+      return JSON.parse(cached.planJson) as MeasurementPlan;
+    } catch {
+      /* discard malformed cache and rebuild */
+    }
   }
   const plan = compactMeasurementPlan(computeMeasurementPlan(database, now));
   const generatedAt = plan.generatedAt;
-  database.prepare(`INSERT INTO measurement_plan_cache (cache_key, rule_version, source_fingerprint, generated_at, expires_at, plan_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(cache_key) DO UPDATE SET rule_version = excluded.rule_version, source_fingerprint = excluded.source_fingerprint, generated_at = excluded.generated_at, expires_at = excluded.expires_at, plan_json = excluded.plan_json`).run(MEASUREMENT_PLAN_CACHE_KEY, MEASUREMENT_PLAN_VERSION, fingerprint, generatedAt, generatedAt, JSON.stringify(plan));
+  database
+    .prepare(
+      `INSERT INTO measurement_plan_cache (cache_key, rule_version, source_fingerprint, generated_at, expires_at, plan_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(cache_key) DO UPDATE SET rule_version = excluded.rule_version, source_fingerprint = excluded.source_fingerprint, generated_at = excluded.generated_at, expires_at = excluded.expires_at, plan_json = excluded.plan_json`,
+    )
+    .run(
+      MEASUREMENT_PLAN_CACHE_KEY,
+      MEASUREMENT_PLAN_VERSION,
+      fingerprint,
+      generatedAt,
+      generatedAt,
+      JSON.stringify(plan),
+    );
   return plan;
 };

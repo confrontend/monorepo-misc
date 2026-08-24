@@ -20,16 +20,30 @@ window.addEventListener('message', (event) => {
 });
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === 'SET_INVESTIGATION') window.postMessage({ source: '__gmgn_investigation_state__', active: message.active === true }, '*');
-  if (message?.type === 'SET_RISK_AUTO') window.postMessage({ source: '__gmgn_risk_auto_state__', active: message.active === true }, '*');
+  if (message?.type === 'SET_INVESTIGATION')
+    window.postMessage(
+      { source: '__gmgn_investigation_state__', active: message.active === true },
+      '*',
+    );
+  if (message?.type === 'SET_RISK_AUTO')
+    window.postMessage(
+      { source: '__gmgn_risk_auto_state__', active: message.active === true },
+      '*',
+    );
 });
 
 chrome.runtime.sendMessage({ type: 'GET_INVESTIGATION_STATE' }, (state) => {
   if (chrome.runtime.lastError) return;
-  window.postMessage({ source: '__gmgn_investigation_state__', active: state?.investigationActive === true }, '*');
+  window.postMessage(
+    { source: '__gmgn_investigation_state__', active: state?.investigationActive === true },
+    '*',
+  );
 });
 
 chrome.runtime.sendMessage({ type: 'GET_RISK_STATE' }, (state) => {
   if (chrome.runtime.lastError) return;
-  window.postMessage({ source: '__gmgn_risk_auto_state__', active: state?.riskAutoActive === true }, '*');
+  window.postMessage(
+    { source: '__gmgn_risk_auto_state__', active: state?.riskAutoActive === true },
+    '*',
+  );
 });

@@ -28,7 +28,9 @@ interface QualityRow {
 }
 
 export const readDataQuality = (database: DatabaseSync): DataQuality => {
-  const row = database.prepare(`
+  const row = database
+    .prepare(
+      `
     SELECT
       (SELECT COUNT(*) FROM tokens) AS cohortTokenCount,
       (SELECT COUNT(*) FROM gmgn_signals) AS signalCount,
@@ -50,13 +52,15 @@ export const readDataQuality = (database: DatabaseSync): DataQuality => {
       (SELECT COUNT(*) FROM gmgn_signals WHERE signal_type IS NULL) AS missingSignalTypeSignals,
       (SELECT COUNT(*) FROM gmgn_signals WHERE observed_at IS NULL) AS missingObservedAtSignals,
       (SELECT COUNT(*) FROM gmgn_signals WHERE validation_errors <> '[]') AS signalsWithValidationIssues
-  `).get() as unknown as QualityRow;
+  `,
+    )
+    .get() as unknown as QualityRow;
 
   return {
     ...row,
-    coveragePercent: row.signalCount === 0
-      ? 0
-      : Math.round((row.matchedSignalCount / row.signalCount) * 1000) / 10,
+    coveragePercent:
+      row.signalCount === 0
+        ? 0
+        : Math.round((row.matchedSignalCount / row.signalCount) * 1000) / 10,
   };
 };
-

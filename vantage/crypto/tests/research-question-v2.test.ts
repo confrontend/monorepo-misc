@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isApprovedResearchQuestionV2, RESEARCH_QUESTION_V2, RESEARCH_QUESTION_V2_ID } from '../src/research/questionV2.js';
+import {
+  isApprovedResearchQuestionV2,
+  RESEARCH_QUESTION_V2,
+  RESEARCH_QUESTION_V2_ID,
+} from '../src/research/questionV2.js';
 
 test('v2 contract is proposed, versioned, and requires an explicit collector boundary', () => {
   assert.equal(RESEARCH_QUESTION_V2_ID, 'solana-gmgn-early-winner-v2');

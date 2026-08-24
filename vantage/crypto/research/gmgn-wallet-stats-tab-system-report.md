@@ -5,7 +5,7 @@ tab currently works, written for an external reviewer to audit for logical gaps 
 double-counted or mismatched assumptions, and reasoning errors. It is not a design spec and it
 does not argue that the current design is correct. Where the author already knows of an issue,
 it is listed in [Section 8](#8-known-open-issues-already-tracked-do-not-re-report) so the review
-effort goes toward finding *new* problems.
+effort goes toward finding _new_ problems.
 
 Everything below is verified against the code at time of writing (2026-08-22), not written from
 memory. File and approximate line references are given so a claim can be checked directly rather
@@ -21,12 +21,12 @@ research over historical data.
 
 Three independent data sources feed this tab, fetched by three independent actions:
 
-| Source | What it provides | Fetched by |
-|---|---|---|
-| GMGN roster/leaderboard | Which 100 wallets are being tracked, their rank | "Fetch top 100" (roster half) |
-| GMGN trade history | Every individual buy/sell GMGN reports for a wallet | "Fetch top 100" (history half) |
-| GMGN wallet stats (7d/30d) | Wallet-level aggregate: realized PnL, win rate, buy/sell counts, avg hold time | "Fetch top 100" (stats half) |
-| Dune `dex_solana.trades` | An independent, delayed price for a *specific* trade, used to simulate what a copier ~15s later would have paid | "Fetch Dune (N)" |
+| Source                     | What it provides                                                                                                | Fetched by                     |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| GMGN roster/leaderboard    | Which 100 wallets are being tracked, their rank                                                                 | "Fetch top 100" (roster half)  |
+| GMGN trade history         | Every individual buy/sell GMGN reports for a wallet                                                             | "Fetch top 100" (history half) |
+| GMGN wallet stats (7d/30d) | Wallet-level aggregate: realized PnL, win rate, buy/sell counts, avg hold time                                  | "Fetch top 100" (stats half)   |
+| Dune `dex_solana.trades`   | An independent, delayed price for a _specific_ trade, used to simulate what a copier ~15s later would have paid | "Fetch Dune (N)"               |
 
 All GMGN data is stored append-only where it matters (`copytrade_wallet_stats_events`) alongside
 a fast-read "latest" cache (`copytrade_wallet_stats`) — a later fetch cannot destroy an earlier
@@ -47,7 +47,7 @@ minus two independent exclusion sets:
 2. An opt-in "Skip wallets triage rejected" checkbox (not persisted — resets every session), which
    folds in whatever `eliminationReport.eliminated` currently holds. See Section 5.
 
-Both exclusion sources feed the *same* set, and a manual re-check on a row overrides either
+Both exclusion sources feed the _same_ set, and a manual re-check on a row overrides either
 source identically — there is only one override path, not two.
 
 ---
@@ -69,12 +69,12 @@ sim = copySimulation30d[wallet] ?? copySimulation[wallet]
 ```
 
 `copySimulation30d` is populated only after "Fetch Dune" runs with `periodDays: 30`.
-`copySimulation` (no period bound — i.e. the wallet's *entire* stored history) is populated by a
+`copySimulation` (no period bound — i.e. the wallet's _entire_ stored history) is populated by a
 `useEffect` that is explicitly gated to **not** run while the active sub-tab is `wallet-stats`
 (`ui/main.tsx` ~line 2282: `if (!WALLET_STATS_ONLY && copyTradeSubTab !== 'wallet-stats')`). So on
 this tab, the fallback value of `sim` — used whenever `copySimulation30d` has no entry for a
-wallet — is whatever `copySimulation` happened to hold from a *previous visit to a different
-tab*, or `undefined` if none. This fallback is silent: nothing in the UI indicates whether a given
+wallet — is whatever `copySimulation` happened to hold from a _previous visit to a different
+tab_, or `undefined` if none. This fallback is silent: nothing in the UI indicates whether a given
 row's `sim` came from the 30-day fetch or from stale full-history data left over from elsewhere.
 
 From `sim`, several derived values:
@@ -116,8 +116,8 @@ above; a third is the Winners feature, `copyCandidates.ts:258`,
 `sim.coverageRatePercent === 100`). All three are separate literal comparisons, not references
 to one shared constant.
 
-`sample >= 30` uses `sim.roundTripsConsidered` — this is the *count of round trips the local
-database has stored for the wallet in the requested period*, not the count of round trips Dune
+`sample >= 30` uses `sim.roundTripsConsidered` — this is the _count of round trips the local
+database has stored for the wallet in the requested period_, not the count of round trips Dune
 successfully priced. A wallet can satisfy `sample >= 30` with `roundTripsConsidered = 30` and
 `copiedTrades = 0` (0% coverage) simultaneously; `enoughEvidence` only passes because of the
 separate `coverage === 100` clause, but the two thresholds are checking different populations
@@ -181,7 +181,7 @@ Two unrelated freshness concepts exist:
    otherwise the wallet is forced to `"Historical / stale"` regardless of any other computed
    result.
 2. **The new "Data freshness" column** (`freshnessLabel`, `ui/main.tsx`): a human string ("2h
-   ago", "3d ago") shown per row, independently computed from the *same* underlying `fetchedAt`
+   ago", "3d ago") shown per row, independently computed from the _same_ underlying `fetchedAt`
    value, using the same 24-hour boundary to decide whether to render it in a warning color.
 
 These two use the identical timestamp and the identical 24h cutoff, so they should never visibly
@@ -204,8 +204,8 @@ should treat as ground truth when judging whether a given threshold is defensibl
   that unmatched trades are ~2x more likely to be >100% winners (20.5% vs 12.1%).
 - That same pooled statistic does **not** hold per-wallet: measured live, the median per-wallet
   gap in big-win rate between matched and unmatched trades is 0.0pp, and the loss-rate gap runs
-  the *opposite* direction from the pooled figure in most wallets (68 of 93 wallets have unmatched
-  trades that lose *more* often, not less). The pooled number is likely dominated by a handful of
+  the _opposite_ direction from the pooled figure in most wallets (68 of 93 wallets have unmatched
+  trades that lose _more_ often, not less). The pooled number is likely dominated by a handful of
   very-high-volume wallets (a Simpson's-paradox shape). **The elimination triage's own
   user-facing intro text (Section 5) still references the pooled 2x figure as a reason it exists**
   — it is directionally true as motivation but should not be read as a per-wallet estimate.
@@ -286,7 +286,7 @@ hiddenLossRisk =
   else                                  -> 'negligible'
 ```
 
-Deliberately asymmetric: a wallet whose unmatched trades look *better* than its matched ones
+Deliberately asymmetric: a wallet whose unmatched trades look _better_ than its matched ones
 (negative `understated`) is always `'negligible'`, never flagged — the reasoning given in-code is
 that this direction can only cost a missed opportunity, not a loss. **A reviewer should check
 whether that asymmetry is actually consistent with the stated goal** ("not guaranteed profit" —
@@ -294,7 +294,7 @@ Section 6) if the goal is ever read more broadly than pure downside protection.
 
 A wallet with **zero unmatched trades** (100% coverage) is treated as `'negligible'` risk with
 `understated = 0` by construction — this was a real bug found and fixed during development (an
-earlier version required *both* a matched and unmatched population to exist, which made a fully
+earlier version required _both_ a matched and unmatched population to exist, which made a fully
 covered wallet return `'unknown'` and therefore never `trustworthy`).
 
 ### 5.5 What "needs Dune" counts (`survivorsNeedingDune`)
@@ -351,16 +351,16 @@ Built on top of the Section 2 verdict, not the Section 5 triage:
 
 ## 7. The core structural fact: two independent judgment systems, not fully reconciled
 
-| | Main decision table (Section 2) | Elimination triage (Section 5) |
-|---|---|---|
-| Where computed | Client, from whatever `copySimulation`/`copySimulation30d` is in React state | Server, on-demand from a fresh DB query |
-| Trade-count minimum | 100 (`RULES.minTrades`, shared with candidacy) | 50 (deliberately forked) |
-| Dune coverage bar | Exactly 100% (three separate literal checks: `enoughEvidence`, `survivedDelay`, and Winners' own gate) | 90% + a hidden-loss risk check |
-| Round-trip sample floor | 30 (`sample >= 30`) | 10 (`ELIMINATION_MIN_DUNE_ROUND_TRIPS`) |
-| Period | Whatever `copySimulation30d` holds, falling back silently to unbounded `copySimulation` | Explicitly 30 days everywhere |
-| Freshness check | Yes (`freshStats`, 24h, feeds the verdict) | Yes (`ELIMINATION_STATS_MAX_AGE_HOURS = 24`, gates only the PnL-based elimination reason, not the other two reasons) |
-| Persistence | Not cached; recomputed on every render from current React state | Cached in `localStorage`, explicit "Run" action, explicit staleness banner |
-| Output | Six-value verdict, collapsed to four states for display | Trustworthy/eliminated + a separate hidden-loss reading per surviving wallet |
+|                         | Main decision table (Section 2)                                                                        | Elimination triage (Section 5)                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Where computed          | Client, from whatever `copySimulation`/`copySimulation30d` is in React state                           | Server, on-demand from a fresh DB query                                                                              |
+| Trade-count minimum     | 100 (`RULES.minTrades`, shared with candidacy)                                                         | 50 (deliberately forked)                                                                                             |
+| Dune coverage bar       | Exactly 100% (three separate literal checks: `enoughEvidence`, `survivedDelay`, and Winners' own gate) | 90% + a hidden-loss risk check                                                                                       |
+| Round-trip sample floor | 30 (`sample >= 30`)                                                                                    | 10 (`ELIMINATION_MIN_DUNE_ROUND_TRIPS`)                                                                              |
+| Period                  | Whatever `copySimulation30d` holds, falling back silently to unbounded `copySimulation`                | Explicitly 30 days everywhere                                                                                        |
+| Freshness check         | Yes (`freshStats`, 24h, feeds the verdict)                                                             | Yes (`ELIMINATION_STATS_MAX_AGE_HOURS = 24`, gates only the PnL-based elimination reason, not the other two reasons) |
+| Persistence             | Not cached; recomputed on every render from current React state                                        | Cached in `localStorage`, explicit "Run" action, explicit staleness banner                                           |
+| Output                  | Six-value verdict, collapsed to four states for display                                                | Trustworthy/eliminated + a separate hidden-loss reading per surviving wallet                                         |
 
 **A wallet can therefore simultaneously be `"Tested candidate"` in the main table (100% coverage,
 30+ round trips, fresh stats, positive historical and copy result) and appear as `"Rejected"` or

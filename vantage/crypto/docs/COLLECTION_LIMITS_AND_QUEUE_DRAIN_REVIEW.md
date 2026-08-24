@@ -66,9 +66,9 @@ src/copytrade/copySimulation.ts limits the simulation to the most recent 150 rou
 
 src/copytrade/topCallers.ts currently loops only while:
 
-~~~text
+```text
 batches < MAX_CHECKPOINT_BATCHES_PER_RUN
-~~~
+```
 
 with MAX_CHECKPOINT_BATCHES_PER_RUN = 15 and up to 300 targets per batch. Therefore one click can process at most 4,500 targets. When the queue is larger, the run completes with work still pending and the user must click again.
 
@@ -130,7 +130,7 @@ This changes the number of manual clicks, not the size of an individual request.
 
 Show one operation panel with:
 
-~~~text
+```text
 Dune checkpoint collection
 Processed 4,500 / 51,730
 Remaining 47,230
@@ -138,7 +138,7 @@ Batch 15 · up to 300 targets
 Status: running / paused / stopped / complete
 Estimated next retry: ...
 [Stop]
-~~~
+```
 
 The button should start or resume the queue. It should not require the user to know how many internal batches exist.
 

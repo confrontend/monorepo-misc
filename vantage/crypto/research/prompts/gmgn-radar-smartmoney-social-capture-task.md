@@ -14,14 +14,14 @@ Two "investigation sampling" exports (extension's discovery-only mode, see
 `docs/GMGN_BROWSER_CAPTURE_HANDOFF.md`'s "Investigation sampling" section) were reviewed by hand
 against a real logged-in GMGN session. Of ~70-85 endpoints seen, most are private
 account/wallet/config plumbing (skip — see "Explicitly out of scope" below). A handful carry
-genuinely new *public-ish* market/social signal data this app does not capture yet:
+genuinely new _public-ish_ market/social signal data this app does not capture yet:
 
-| Endpoint | What it is | Captured by the extension? |
-|---|---|---|
-| `GET /vas/api/v1/radar/detail?chain=sol&period=1d&type=<category>` | GMGN's own curated trending-token lists, keyed by category (`gold_dog` observed; others likely exist — probably surfaced as tabs/filters in the site's own "Radar" UI, confirm by watching the Radar page) | **Yes, as of extension v0.8.2** — added to `TARGET_PATHS`, but not yet actually seen in a *normal-mode* export (only in investigation-mode samples). Confirm with a real normal-mode capture while visiting the Radar tab before writing the parser, or write it against the investigation-mode sample below and re-verify once a normal-mode sample exists. |
-| `GET /api/v1/rank/sol/wallets/7d?orderby=pnl_30d&direction=desc` | Public top-wallet leaderboard with per-wallet PnL/balance/activity stats | **Yes, as of extension v0.8.2** — same caveat as `radar/detail`: added to `TARGET_PATHS`, not yet confirmed in a normal-mode export. Visit the wallet-leaderboard page while capturing to get a real sample before finalizing the parser. |
-| `GET /defi/quotation/v1/smartmoney/sol/walletNew/<wallet_address>` | Per-wallet smart-money reputation stats (PnL, win rate, buy/sell counts, tags) | **Yes — resolved.** A real normal-mode capture on 2026-08-14 confirmed the live site calls `walletNew` (not the older `wallet/` path already in `TARGET_PATHS`); both entries are now present in `TARGET_PATHS` so nothing is missed, but **only build the parser against `walletNew`'s shape** — `wallet/` (no `New`) has never actually been observed firing and may be dead. |
-| `GET /vas/api/v1/twitter/messages?has_token=...&user_tags=...&tw_types=...` | KOL/influencer Twitter activity feed (tweets/reposts/follows/etc.), tagged by user category (`kol`, `trader`, `celebrity`, ...) | **Yes, as of extension v0.8.2** — added to `TARGET_PATHS`, not yet confirmed in a normal-mode export, and the `has_token=true` question below is still fully open. |
+| Endpoint                                                                    | What it is                                                                                                                                                                                                 | Captured by the extension?                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /vas/api/v1/radar/detail?chain=sol&period=1d&type=<category>`          | GMGN's own curated trending-token lists, keyed by category (`gold_dog` observed; others likely exist — probably surfaced as tabs/filters in the site's own "Radar" UI, confirm by watching the Radar page) | **Yes, as of extension v0.8.2** — added to `TARGET_PATHS`, but not yet actually seen in a _normal-mode_ export (only in investigation-mode samples). Confirm with a real normal-mode capture while visiting the Radar tab before writing the parser, or write it against the investigation-mode sample below and re-verify once a normal-mode sample exists.                    |
+| `GET /api/v1/rank/sol/wallets/7d?orderby=pnl_30d&direction=desc`            | Public top-wallet leaderboard with per-wallet PnL/balance/activity stats                                                                                                                                   | **Yes, as of extension v0.8.2** — same caveat as `radar/detail`: added to `TARGET_PATHS`, not yet confirmed in a normal-mode export. Visit the wallet-leaderboard page while capturing to get a real sample before finalizing the parser.                                                                                                                                       |
+| `GET /defi/quotation/v1/smartmoney/sol/walletNew/<wallet_address>`          | Per-wallet smart-money reputation stats (PnL, win rate, buy/sell counts, tags)                                                                                                                             | **Yes — resolved.** A real normal-mode capture on 2026-08-14 confirmed the live site calls `walletNew` (not the older `wallet/` path already in `TARGET_PATHS`); both entries are now present in `TARGET_PATHS` so nothing is missed, but **only build the parser against `walletNew`'s shape** — `wallet/` (no `New`) has never actually been observed firing and may be dead. |
+| `GET /vas/api/v1/twitter/messages?has_token=...&user_tags=...&tw_types=...` | KOL/influencer Twitter activity feed (tweets/reposts/follows/etc.), tagged by user category (`kol`, `trader`, `celebrity`, ...)                                                                            | **Yes, as of extension v0.8.2** — added to `TARGET_PATHS`, not yet confirmed in a normal-mode export, and the `has_token=true` question below is still fully open.                                                                                                                                                                                                              |
 
 Also already in `TARGET_PATHS` (captured today, just never parsed — see `otherCaptures` in
 `src/gmgn/browserImport.ts`): `token_mcap_candles`, `token_trades`, `token_holder_stat`. Those
@@ -32,62 +32,161 @@ this task is scoped to the four endpoints in the table above.
 ## Real captured samples (verified against a live session, not invented)
 
 **`radar/detail`** (`type=gold_dog`, `period=1d`):
+
 ```json
-{"code":0,"reason":"","message":"success","data":{"status":"success","token":[
-  {"address":"EUB1eZBt4m3X4FbperWnKGJdvLsuLMu2YmJix5yjpump","symbol":"K-HOME","logo":"https://gmgn.ai/external-res/....webp","name":"bus house","market_cap":"535592.01308691852"},
-  {"address":"vFsy4Kz5dBQwHgrQfLBw7hfJizrG2KC1HrQ698Hpump","symbol":"Fartcoin","logo":"...","name":"Fartcoin","market_cap":"435763.21539848361"}
-]}}
+{
+  "code": 0,
+  "reason": "",
+  "message": "success",
+  "data": {
+    "status": "success",
+    "token": [
+      {
+        "address": "EUB1eZBt4m3X4FbperWnKGJdvLsuLMu2YmJix5yjpump",
+        "symbol": "K-HOME",
+        "logo": "https://gmgn.ai/external-res/....webp",
+        "name": "bus house",
+        "market_cap": "535592.01308691852"
+      },
+      {
+        "address": "vFsy4Kz5dBQwHgrQfLBw7hfJizrG2KC1HrQ698Hpump",
+        "symbol": "Fartcoin",
+        "logo": "...",
+        "name": "Fartcoin",
+        "market_cap": "435763.21539848361"
+      }
+    ]
+  }
+}
 ```
+
 Note: `radar/list` (the parent endpoint, presumably listing available `type` categories) returned
 `{"data":{"list":[]}}` in both real captures — empty, so its real shape is still unconfirmed.
 **Do not guess its schema.** Capture a non-empty sample before writing a parser for it; it's fine
 to leave `radar/list` unimplemented for now and only implement `radar/detail`.
 
 **`rank/wallets/7d`**:
+
 ```json
-{"code":0,"reason":"","message":"success","data":{"rank":[
-  {"address":"4uCT4g7YHH4xxfmfNfKUDenwGrRNGoZ9Ay1XFxfUGhQG","balance":"48.897126755",
-   "buy":4019,"buy_1d":864,"buy_30d":16986,"buy_7d":4019,
-   "avg_cost_1d":"37.78...","avg_cost_7d":"32.45...","avg_cost_30d":"28.69...",
-   "avg_holding_period_1d":6368.87,"avg_holding_period_7d":22407.48,"avg_holding_period_30d":28682.45,
-   "daily_profit_7d":[{"timestamp":1786060800,"profit":"-1259.02..."}, "...6 more days"],
-   "follow_count":9720,"last_active":1786681211,"name":"chingchong",
-   "net_inflow_1d":"-79.59...","net_inflow_30d":"45..."}
-  , "... more ranked wallets, get the full field list from a fresh capture"
-]}}
+{
+  "code": 0,
+  "reason": "",
+  "message": "success",
+  "data": {
+    "rank": [
+      {
+        "address": "4uCT4g7YHH4xxfmfNfKUDenwGrRNGoZ9Ay1XFxfUGhQG",
+        "balance": "48.897126755",
+        "buy": 4019,
+        "buy_1d": 864,
+        "buy_30d": 16986,
+        "buy_7d": 4019,
+        "avg_cost_1d": "37.78...",
+        "avg_cost_7d": "32.45...",
+        "avg_cost_30d": "28.69...",
+        "avg_holding_period_1d": 6368.87,
+        "avg_holding_period_7d": 22407.48,
+        "avg_holding_period_30d": 28682.45,
+        "daily_profit_7d": [{ "timestamp": 1786060800, "profit": "-1259.02..." }, "...6 more days"],
+        "follow_count": 9720,
+        "last_active": 1786681211,
+        "name": "chingchong",
+        "net_inflow_1d": "-79.59...",
+        "net_inflow_30d": "45..."
+      },
+      "... more ranked wallets, get the full field list from a fresh capture"
+    ]
+  }
+}
 ```
 
 **`smartmoney/walletNew/<address>`**:
+
 ```json
-{"code":0,"msg":"success","data":{
-  "twitter_bind":false,"twitter_fans_num":0,"twitter_name":null,"avatar":null,"name":null,
-  "eth_balance":"0","sol_balance":"0","balance":"0","total_value":0,
-  "unrealized_profit":0,"realized_profit":0,"pnl":0,"pnl_1d":0,"pnl_7d":0,"pnl_30d":0,
-  "winrate":null,"buy":0,"sell":0,"buy_1d":0,"sell_1d":0,"buy_7d":0,"sell_7d":0,"buy_30d":0,"sell_30d":0,
-  "tags":[],"tag_rank":{},"followers_count":0,"last_active_timestamp":0,
-  "updated_at":null,"refresh_requested_at":null,"avg_holding_peroid":null
-}}
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "twitter_bind": false,
+    "twitter_fans_num": 0,
+    "twitter_name": null,
+    "avatar": null,
+    "name": null,
+    "eth_balance": "0",
+    "sol_balance": "0",
+    "balance": "0",
+    "total_value": 0,
+    "unrealized_profit": 0,
+    "realized_profit": 0,
+    "pnl": 0,
+    "pnl_1d": 0,
+    "pnl_7d": 0,
+    "pnl_30d": 0,
+    "winrate": null,
+    "buy": 0,
+    "sell": 0,
+    "buy_1d": 0,
+    "sell_1d": 0,
+    "buy_7d": 0,
+    "sell_7d": 0,
+    "buy_30d": 0,
+    "sell_30d": 0,
+    "tags": [],
+    "tag_rank": {},
+    "followers_count": 0,
+    "last_active_timestamp": 0,
+    "updated_at": null,
+    "refresh_requested_at": null,
+    "avg_holding_peroid": null
+  }
+}
 ```
+
 (This sample is for a wallet with zero activity — fields are self-describing but you should
-capture one sample for an *active* wallet too, e.g. by looking up a `triggering_wallet` value
+capture one sample for an _active_ wallet too, e.g. by looking up a `triggering_wallet` value
 already present in `gmgn_signals`, before finalizing the normalized-field subset.)
 
 **`twitter/messages`** (captured with `has_token=false`):
+
 ```json
-{"code":0,"reason":"","message":"success","data":[
-  {"id":"88722828-846a-491a-9909-588dc8846abf","platform":0,"tw_type":"quote",
-   "tweet_id":"2088128729675698408","complete":1,"tw_timestamp":"1786683659367",
-   "user":{"twitter_user_id":"1577705091737432070","screen_name":"yunta_tsai","name":"Yun-Ta Tsai","followers":137181},
-   "user_tags":["kol"],
-   "content":{"text":"Highest intelligence density 🧠"},
-   "source_id":"2088121949738434659",
-   "source_user":{"twitter_user_id":"...","screen_name":"teslaeurope","name":"Tesla Europe, Middle East & Africa","followers":175735},
-   "source_content":{"text":"But wait, there's more","media":[{"type":"video","url":"..."}]}
-  }
-]}
+{
+  "code": 0,
+  "reason": "",
+  "message": "success",
+  "data": [
+    {
+      "id": "88722828-846a-491a-9909-588dc8846abf",
+      "platform": 0,
+      "tw_type": "quote",
+      "tweet_id": "2088128729675698408",
+      "complete": 1,
+      "tw_timestamp": "1786683659367",
+      "user": {
+        "twitter_user_id": "1577705091737432070",
+        "screen_name": "yunta_tsai",
+        "name": "Yun-Ta Tsai",
+        "followers": 137181
+      },
+      "user_tags": ["kol"],
+      "content": { "text": "Highest intelligence density 🧠" },
+      "source_id": "2088121949738434659",
+      "source_user": {
+        "twitter_user_id": "...",
+        "screen_name": "teslaeurope",
+        "name": "Tesla Europe, Middle East & Africa",
+        "followers": 175735
+      },
+      "source_content": {
+        "text": "But wait, there's more",
+        "media": [{ "type": "video", "url": "..." }]
+      }
+    }
+  ]
+}
 ```
+
 **Important caveat, do not skip this:** the only real sample was captured with `has_token=false`
-in the query string, meaning it was explicitly filtered to messages *not* linked to a specific
+in the query string, meaning it was explicitly filtered to messages _not_ linked to a specific
 token — i.e. general market chatter, not token-tagged signals. The endpoint's query params imply
 a `has_token=true` mode almost certainly exists and would be far more useful (tweets tied to a
 specific contract address), but it was never observed. **Capture a `has_token=true` sample from
@@ -177,7 +276,7 @@ every prior capture-path task in this project (see `docs/GMGN_BROWSER_CAPTURE_HA
 ## Explicitly out of scope
 
 - `vas/api/v1/twitter/user/remark` and `vas/api/v1/follow/multi_chain_follow_wallet_trade_list` —
-  both are the *logged-in user's own* private data (accounts they've personally annotated,
+  both are the _logged-in user's own_ private data (accounts they've personally annotated,
   wallets they've personally chosen to follow), not general market/signal data. Do not capture
   or store these; capturing them would violate this project's existing "no personal data beyond
   raw signal payloads" principle.

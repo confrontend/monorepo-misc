@@ -1,6 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { listRosterWallets, readLatestRankSnapshot, readLeaderboardProvenance, readWalletRankHistory, type LeaderboardProvenance, type WalletRankHistory } from '../screening/roster.js';
-import { REPRESENTATIVE_SAMPLE_METHOD, selectRepresentativeTrades } from './representativeSample.js';
+import {
+  listRosterWallets,
+  readLatestRankSnapshot,
+  readLeaderboardProvenance,
+  readWalletRankHistory,
+  type LeaderboardProvenance,
+  type WalletRankHistory,
+} from '../screening/roster.js';
+import {
+  REPRESENTATIVE_SAMPLE_METHOD,
+  selectRepresentativeTrades,
+} from './representativeSample.js';
 
 /**
  * Turns stored trade history into the one answer this feature exists to give:
@@ -58,8 +68,16 @@ export type ProfitConcentration = {
   bestTokenSharePositiveProfitPercent: number | null;
   bestThreeSharePositiveProfitPercent: number | null;
   bestTradeProfitUsd: number | null;
-  excludingBestTrade: { trades: number; medianReturnPercent: number | null; endingCapitalUsd: number | null };
-  excludingBestToken: { trades: number; medianReturnPercent: number | null; endingCapitalUsd: number | null };
+  excludingBestTrade: {
+    trades: number;
+    medianReturnPercent: number | null;
+    endingCapitalUsd: number | null;
+  };
+  excludingBestToken: {
+    trades: number;
+    medianReturnPercent: number | null;
+    endingCapitalUsd: number | null;
+  };
 };
 
 export type CopyTradeRow = {
@@ -178,7 +196,8 @@ export type CopyTradeOverall = {
  * driven by rare extreme returns, and whether the slice caught one is arbitrary. So the
  * mean-based figures are withheld rather than shown looking equally solid.
  */
-const TRUNCATION_REASON = 'Only the newest trades were fetched for this wallet, so average-based figures would be biased. Median and win rate remain valid for the period covered.';
+const TRUNCATION_REASON =
+  'Only the newest trades were fetched for this wallet, so average-based figures would be biased. Median and win rate remain valid for the period covered.';
 
 /** A sell within this long of the matching buy is a round trip no human reaction time explains. */
 const FAST_ROUND_TRIP_SECONDS = 60;
@@ -268,7 +287,9 @@ const parseAmount = (value: string | null): number | null => {
 const parseJsonObject = (value: string): Record<string, unknown> | null => {
   try {
     const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -283,10 +304,17 @@ const numberField = (value: unknown): number | null => {
   return null;
 };
 
-const readGmgnAggregate = (row: { period: string; fetchedAt: string; rawPayload: string }): GmgnAggregateStats | null => {
+const readGmgnAggregate = (row: {
+  period: string;
+  fetchedAt: string;
+  rawPayload: string;
+}): GmgnAggregateStats | null => {
   const payload = parseJsonObject(row.rawPayload);
   if (!payload) return null;
-  const pnlStat = payload.pnl_stat && typeof payload.pnl_stat === 'object' ? payload.pnl_stat as Record<string, unknown> : {};
+  const pnlStat =
+    payload.pnl_stat && typeof payload.pnl_stat === 'object'
+      ? (payload.pnl_stat as Record<string, unknown>)
+      : {};
   const winRate = numberField(pnlStat.winrate);
   const realizedProfitPnl = numberField(payload.realized_profit_pnl);
   return {
@@ -340,7 +368,10 @@ export const mean = (values: number[]): number | null =>
  * below -100% cannot produce negative capital, and a non-finite result becomes null rather
  * than Infinity.
  */
-export const compoundCapital = (trades: ReturnObservation[], startingCapital: number): number | null => {
+export const compoundCapital = (
+  trades: ReturnObservation[],
+  startingCapital: number,
+): number | null => {
   if (trades.length === 0) return null;
   const ordered = [...trades].sort((a, b) => a.timestamp - b.timestamp);
   let capital = startingCapital;
@@ -361,7 +392,10 @@ export const compoundCapital = (trades: ReturnObservation[], startingCapital: nu
  * a different question from "what did a typical trade do", and that one is answered by the
  * median. Both are reported because both are true and they routinely disagree.
  */
-export const equalWeightCapital = (trades: ReturnObservation[], startingCapital: number): number | null => {
+export const equalWeightCapital = (
+  trades: ReturnObservation[],
+  startingCapital: number,
+): number | null => {
   const meanRatio = mean(trades.map((trade) => trade.returnRatio));
   if (meanRatio === null) return null;
   const capital = Math.max(0, startingCapital * (1 + meanRatio));
@@ -373,7 +407,9 @@ export const equalWeightCapital = (trades: ReturnObservation[], startingCapital:
  * overall row. Two separate implementations drifted apart in this repo before; there is
  * deliberately only one here.
  */
-export const summarizeTrades = (trades: ReturnObservation[]): {
+export const summarizeTrades = (
+  trades: ReturnObservation[],
+): {
   trades: number;
   winRatePercent: number | null;
   medianReturnPercent: number | null;
@@ -386,7 +422,10 @@ export const summarizeTrades = (trades: ReturnObservation[]): {
   const meanRatio = mean(ratios);
   return {
     trades: trades.length,
-    winRatePercent: ratios.length === 0 ? null : round((ratios.filter((r) => r > 0).length / ratios.length) * 100, 1),
+    winRatePercent:
+      ratios.length === 0
+        ? null
+        : round((ratios.filter((r) => r > 0).length / ratios.length) * 100, 1),
     medianReturnPercent: medianRatio === null ? null : round(medianRatio * 100, 2),
     averageReturnPercent: meanRatio === null ? null : round(meanRatio * 100, 2),
     endingCapitalUsd: equalWeightCapital(trades, STARTING_CAPITAL_USD),
@@ -410,23 +449,36 @@ const periodPerformance = (period: string, trades: CompletedTrade[]): PeriodPerf
  * by the row. The original chart fully compounded the bankroll through every trade, even when
  * positions overlapped, and produced astronomical fiction. Here every trade receives exactly
  * $100 / N of notional weight; cumulative P&L therefore ends at equalWeightCapital(). */
-const capitalPathByDay = (trades: CompletedTrade[], startingCapital = STARTING_CAPITAL_USD): { day: string; capitalUsd: number }[] => {
+const capitalPathByDay = (
+  trades: CompletedTrade[],
+  startingCapital = STARTING_CAPITAL_USD,
+): { day: string; capitalUsd: number }[] => {
   if (trades.length === 0) return [];
-  const ordered = [...trades].sort((left, right) => left.timestamp - right.timestamp || left.sourceId - right.sourceId);
+  const ordered = [...trades].sort(
+    (left, right) => left.timestamp - right.timestamp || left.sourceId - right.sourceId,
+  );
   const stakePerTrade = startingCapital / ordered.length;
   let cumulativePnl = 0;
   const firstDay = new Date(ordered[0].timestamp * 1000).toISOString().slice(0, 10);
-  const points: { day: string; capitalUsd: number }[] = [{ day: `${firstDay} start`, capitalUsd: startingCapital }];
+  const points: { day: string; capitalUsd: number }[] = [
+    { day: `${firstDay} start`, capitalUsd: startingCapital },
+  ];
   let currentDay = firstDay;
   for (const trade of ordered) {
     const day = new Date(trade.timestamp * 1000).toISOString().slice(0, 10);
     if (day !== currentDay) {
-      points.push({ day: currentDay, capitalUsd: round(Math.max(0, startingCapital + cumulativePnl), 2) });
+      points.push({
+        day: currentDay,
+        capitalUsd: round(Math.max(0, startingCapital + cumulativePnl), 2),
+      });
       currentDay = day;
     }
     cumulativePnl += stakePerTrade * trade.returnRatio;
   }
-  points.push({ day: currentDay, capitalUsd: round(Math.max(0, startingCapital + cumulativePnl), 2) });
+  points.push({
+    day: currentDay,
+    capitalUsd: round(Math.max(0, startingCapital + cumulativePnl), 2),
+  });
   return points;
 };
 
@@ -443,13 +495,16 @@ export const performanceByPeriod = (
 ): PeriodPerformance[] => {
   const groups = new Map<string, CompletedTrade[]>();
   for (const trade of trades) {
-    const key = period === 'week' ? utcWeekStart(trade.timestamp)
-      : new Date(trade.timestamp * 1000).toISOString().slice(0, 7);
+    const key =
+      period === 'week'
+        ? utcWeekStart(trade.timestamp)
+        : new Date(trade.timestamp * 1000).toISOString().slice(0, 7);
     const group = groups.get(key) ?? [];
     group.push(trade);
     groups.set(key, group);
   }
-  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, values]) => periodPerformance(key, values));
 };
 
@@ -457,22 +512,36 @@ export const computeProfitConcentration = (trades: CompletedTrade[]): ProfitConc
   const byToken = new Map<string, TokenProfit>();
   for (const trade of trades) {
     const current = byToken.get(trade.tokenAddress) ?? {
-      tokenAddress: trade.tokenAddress, tokenSymbol: trade.tokenSymbol, trades: 0, profitUsd: 0,
+      tokenAddress: trade.tokenAddress,
+      tokenSymbol: trade.tokenSymbol,
+      trades: 0,
+      profitUsd: 0,
     };
     current.trades += 1;
     current.profitUsd += trade.profitUsd;
     if (!current.tokenSymbol && trade.tokenSymbol) current.tokenSymbol = trade.tokenSymbol;
     byToken.set(trade.tokenAddress, current);
   }
-  const tokens = [...byToken.values()].map((token) => ({ ...token, profitUsd: round(token.profitUsd, 2) }))
-    .sort((left, right) => right.profitUsd - left.profitUsd || left.tokenAddress.localeCompare(right.tokenAddress));
+  const tokens = [...byToken.values()]
+    .map((token) => ({ ...token, profitUsd: round(token.profitUsd, 2) }))
+    .sort(
+      (left, right) =>
+        right.profitUsd - left.profitUsd || left.tokenAddress.localeCompare(right.tokenAddress),
+    );
   const positiveProfit = tokens.reduce((total, token) => total + Math.max(0, token.profitUsd), 0);
-  const share = (profit: number): number | null => positiveProfit <= 0 ? null
-    : round((Math.max(0, profit) / positiveProfit) * 100, 1);
-  const bestTrade = trades.reduce<CompletedTrade | null>((best, trade) => !best || trade.profitUsd > best.profitUsd ? trade : best, null);
+  const share = (profit: number): number | null =>
+    positiveProfit <= 0 ? null : round((Math.max(0, profit) / positiveProfit) * 100, 1);
+  const bestTrade = trades.reduce<CompletedTrade | null>(
+    (best, trade) => (!best || trade.profitUsd > best.profitUsd ? trade : best),
+    null,
+  );
   const bestToken = tokens[0] ?? null;
-  const withoutBestTrade = bestTrade ? trades.filter((trade) => trade.sourceId !== bestTrade.sourceId) : [...trades];
-  const withoutBestToken = bestToken ? trades.filter((trade) => trade.tokenAddress !== bestToken.tokenAddress) : [...trades];
+  const withoutBestTrade = bestTrade
+    ? trades.filter((trade) => trade.sourceId !== bestTrade.sourceId)
+    : [...trades];
+  const withoutBestToken = bestToken
+    ? trades.filter((trade) => trade.tokenAddress !== bestToken.tokenAddress)
+    : [...trades];
   const withoutTradeSummary = summarizeTrades(withoutBestTrade);
   const withoutTokenSummary = summarizeTrades(withoutBestToken);
   const bestThreeTokens = tokens.slice(0, 3);
@@ -480,7 +549,9 @@ export const computeProfitConcentration = (trades: CompletedTrade[]): ProfitConc
     bestToken,
     bestThreeTokens,
     bestTokenSharePositiveProfitPercent: bestToken ? share(bestToken.profitUsd) : null,
-    bestThreeSharePositiveProfitPercent: share(bestThreeTokens.reduce((total, token) => total + Math.max(0, token.profitUsd), 0)),
+    bestThreeSharePositiveProfitPercent: share(
+      bestThreeTokens.reduce((total, token) => total + Math.max(0, token.profitUsd), 0),
+    ),
     bestTradeProfitUsd: bestTrade ? round(bestTrade.profitUsd, 2) : null,
     excludingBestTrade: {
       trades: withoutTradeSummary.trades,
@@ -506,10 +577,13 @@ export const decideVerdict = (input: {
   truncated?: boolean;
 }): { verdict: Verdict; failedRules: string[] } => {
   const failedRules: string[] = [];
-  if (input.riskFlags.length > 0) failedRules.push(`carries risk flag: ${input.riskFlags.join(', ')}`);
+  if (input.riskFlags.length > 0)
+    failedRules.push(`carries risk flag: ${input.riskFlags.join(', ')}`);
   if (input.truncated) failedRules.push('requested history window incomplete');
-  if (input.trades < RULES.minTrades) failedRules.push(`fewer than ${RULES.minTrades} completed trades`);
-  if (input.spanDays < RULES.minDays) failedRules.push(`less than ${RULES.minDays} days of history`);
+  if (input.trades < RULES.minTrades)
+    failedRules.push(`fewer than ${RULES.minTrades} completed trades`);
+  if (input.spanDays < RULES.minDays)
+    failedRules.push(`less than ${RULES.minDays} days of history`);
   if (input.medianReturnPercent === null) failedRules.push('no median return could be computed');
   else if (input.medianReturnPercent <= 0) failedRules.push('median return is not positive');
 
@@ -520,13 +594,20 @@ export const decideVerdict = (input: {
   // small, and it must never be reported as "thin data" that more of the same would fix.
   if (input.riskFlags.length > 0) return { verdict: 'flagged', failedRules };
   if (input.truncated) return { verdict: 'descriptive_only', failedRules };
-  if (input.trades < RULES.minTrades || input.spanDays < RULES.minDays) return { verdict: 'thin', failedRules };
+  if (input.trades < RULES.minTrades || input.spanDays < RULES.minDays)
+    return { verdict: 'thin', failedRules };
   return { verdict: 'no', failedRules };
 };
 
 type TradeRow = {
-  id?: number; walletAddress: string; observedTimestamp: number; eventType: string;
-  tokenAddress: string; tokenSymbol?: string | null; costUsd: string | null; buyCostUsd: string | null;
+  id?: number;
+  walletAddress: string;
+  observedTimestamp: number;
+  eventType: string;
+  tokenAddress: string;
+  tokenSymbol?: string | null;
+  costUsd: string | null;
+  buyCostUsd: string | null;
 };
 
 /**
@@ -541,7 +622,10 @@ export const holdSecondsPerSell = (rows: TradeRow[]): number[] => {
   // Rows arrive oldest-first per wallet, so a buy is always seen before the sell it precedes.
   for (const row of rows) {
     const key = row.tokenAddress;
-    if (row.eventType === 'buy') { lastBuyByToken.set(key, row.observedTimestamp); continue; }
+    if (row.eventType === 'buy') {
+      lastBuyByToken.set(key, row.observedTimestamp);
+      continue;
+    }
     if (row.eventType !== 'sell') continue;
     const boughtAt = lastBuyByToken.get(key);
     if (boughtAt === undefined) continue;
@@ -552,20 +636,31 @@ export const holdSecondsPerSell = (rows: TradeRow[]): number[] => {
 
 export const buildRiskNotes = (evidence: RiskEvidence, riskFlags: string[]): string[] => {
   const notes: string[] = [];
-  if (riskFlags.includes('wash_trader')) notes.push('GMGN tags this wallet wash_trader. GMGN does not publish how it decides that, so the measurements below are ours.');
+  if (riskFlags.includes('wash_trader'))
+    notes.push(
+      'GMGN tags this wallet wash_trader. GMGN does not publish how it decides that, so the measurements below are ours.',
+    );
   if (evidence.fastRoundTripPercent !== null && evidence.fastRoundTripPercent >= 10) {
-    notes.push(`${evidence.fastRoundTripPercent}% of sells closed within ${FAST_ROUND_TRIP_SECONDS} seconds of the buy.`);
+    notes.push(
+      `${evidence.fastRoundTripPercent}% of sells closed within ${FAST_ROUND_TRIP_SECONDS} seconds of the buy.`,
+    );
   }
   if (evidence.noCostBasisPercent !== null && evidence.noCostBasisPercent >= 10) {
-    notes.push(`${evidence.noCostBasisPercent}% of sells were tokens with no recorded purchase — received, not bought.`);
+    notes.push(
+      `${evidence.noCostBasisPercent}% of sells were tokens with no recorded purchase — received, not bought.`,
+    );
   }
   if (evidence.medianHoldSeconds !== null) {
     const seconds = evidence.medianHoldSeconds;
     // Seconds matter here: these wallets routinely hold for under a minute, and rounding that
     // to "0 minutes" reads as missing data rather than as the finding it actually is.
-    notes.push(seconds < 60 ? `Typical hold is ${seconds} seconds.`
-      : seconds < 3600 ? `Typical hold is ${Math.round(seconds / 60)} minutes.`
-      : `Typical hold is ${(seconds / 3600).toFixed(1)} hours.`);
+    notes.push(
+      seconds < 60
+        ? `Typical hold is ${seconds} seconds.`
+        : seconds < 3600
+          ? `Typical hold is ${Math.round(seconds / 60)} minutes.`
+          : `Typical hold is ${(seconds / 3600).toFixed(1)} hours.`,
+    );
   }
   if (evidence.fundedByAddress) notes.push(`First funded from ${evidence.fundedByAddress}.`);
   if (evidence.walletAgeDays !== null && evidence.walletAgeDays < 30) {
@@ -576,7 +671,13 @@ export const buildRiskNotes = (evidence: RiskEvidence, riskFlags: string[]): str
 
 export const computeCopyTradeReport = (
   database: DatabaseSync,
-  options: { periodDays?: number; chain?: string; now?: Date; traderLimit?: number; rosterSnapshotId?: number } = {},
+  options: {
+    periodDays?: number;
+    chain?: string;
+    now?: Date;
+    traderLimit?: number;
+    rosterSnapshotId?: number;
+  } = {},
 ): CopyTradeReport => {
   const periodDays = options.periodDays ?? DEFAULT_PERIOD_DAYS;
   const chain = options.chain ?? 'sol';
@@ -584,61 +685,107 @@ export const computeCopyTradeReport = (
   const nowSeconds = Math.floor(now.getTime() / 1000);
   const cutoffSeconds = nowSeconds - periodDays * 86_400;
 
-  const roster = listRosterWallets(database, { chain, limit: options.traderLimit, snapshotId: options.rosterSnapshotId });
+  const roster = listRosterWallets(database, {
+    chain,
+    limit: options.traderLimit,
+    snapshotId: options.rosterSnapshotId,
+  });
   const rosterByAddress = new Map(roster.map((wallet) => [wallet.walletAddress, wallet]));
   const rosterSnapshotId = options.rosterSnapshotId ?? readLatestRankSnapshot(database).snapshotId;
-  const rankHistoryByAddress = new Map(readWalletRankHistory(
-    database, roster.map((wallet) => wallet.walletAddress), rosterSnapshotId,
-  ).map((history) => [history.walletAddress, history]));
+  const rankHistoryByAddress = new Map(
+    readWalletRankHistory(
+      database,
+      roster.map((wallet) => wallet.walletAddress),
+      rosterSnapshotId,
+    ).map((history) => [history.walletAddress, history]),
+  );
 
   const truncatedWallets = new Set(
-    (database.prepare(
-      `SELECT wallet_address AS walletAddress FROM copytrade_wallet_coverage WHERE chain = ? AND truncated = 1`,
-    ).all(chain) as unknown as Array<{ walletAddress: string }>).map((row) => row.walletAddress),
+    (
+      database
+        .prepare(
+          `SELECT wallet_address AS walletAddress FROM copytrade_wallet_coverage WHERE chain = ? AND truncated = 1`,
+        )
+        .all(chain) as unknown as Array<{ walletAddress: string }>
+    ).map((row) => row.walletAddress),
   );
   const failedHistoryWallets = new Set(
-    (database.prepare(
-      `SELECT wallet_address AS walletAddress FROM copytrade_wallet_coverage WHERE chain = ? AND stop_reason = 'failed'`,
-    ).all('sol') as Array<{ walletAddress: string }>).map((row) => row.walletAddress),
+    (
+      database
+        .prepare(
+          `SELECT wallet_address AS walletAddress FROM copytrade_wallet_coverage WHERE chain = ? AND stop_reason = 'failed'`,
+        )
+        .all('sol') as Array<{ walletAddress: string }>
+    ).map((row) => row.walletAddress),
   );
 
   // Buys are pulled alongside sells so hold time can be measured; only sells become trades.
-  const storedRows = database.prepare(
-    `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
+  const storedRows = database
+    .prepare(
+      `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
             event_type AS eventType, token_address AS tokenAddress,
             token_symbol AS tokenSymbol,
             cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
      FROM copytrade_trades
      WHERE chain = ? AND event_type IN ('buy', 'sell') AND observed_timestamp >= ?
      ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
-  ).all(chain, cutoffSeconds) as unknown as TradeRow[];
+    )
+    .all(chain, cutoffSeconds) as unknown as TradeRow[];
   // This is an analysis-only boundary. All rows remain in SQLite; the sample is computed
   // locally and therefore does not trigger any additional GMGN or Dune requests.
   const representative = selectRepresentativeTrades(storedRows);
   const rows = representative.rows;
 
-  const walletStats = new Map<string, {
-    walletAddress: string; period: string; fetchedAt: string; fundFromAddress: string | null;
-    createdAtTs: number | null; rawPayload: string; aggregate?: GmgnAggregateStats;
-  }>();
-  const walletStatRows = database.prepare(
-    `SELECT wallet_address AS walletAddress, period, fetched_at AS fetchedAt,
+  const walletStats = new Map<
+    string,
+    {
+      walletAddress: string;
+      period: string;
+      fetchedAt: string;
+      fundFromAddress: string | null;
+      createdAtTs: number | null;
+      rawPayload: string;
+      aggregate?: GmgnAggregateStats;
+    }
+  >();
+  const walletStatRows = database
+    .prepare(
+      `SELECT wallet_address AS walletAddress, period, fetched_at AS fetchedAt,
             fund_from_address AS fundFromAddress, created_at_ts AS createdAtTs, raw_payload AS rawPayload
      FROM copytrade_wallet_stats WHERE chain = ?
      ORDER BY CASE WHEN period = '30d' THEN 0 ELSE 1 END, fetched_at DESC`,
-  ).all(chain) as unknown as Array<{ walletAddress: string; period: string; fetchedAt: string; fundFromAddress: string | null; createdAtTs: number | null; rawPayload: string }>;
+    )
+    .all(chain) as unknown as Array<{
+    walletAddress: string;
+    period: string;
+    fetchedAt: string;
+    fundFromAddress: string | null;
+    createdAtTs: number | null;
+    rawPayload: string;
+  }>;
   for (const row of walletStatRows) {
     // Prefer the requested 30-day aggregate, but retain the older 7-day stats as a fallback
     // for risk context and for already-created databases that have not fetched 30d yet.
     if (walletStats.has(row.walletAddress)) continue;
-    walletStats.set(row.walletAddress, { ...row, aggregate: row.period === '30d' ? readGmgnAggregate(row) ?? undefined : undefined });
+    walletStats.set(row.walletAddress, {
+      ...row,
+      aggregate: row.period === '30d' ? (readGmgnAggregate(row) ?? undefined) : undefined,
+    });
   }
 
-  type WalletEntry = { completed: CompletedTrade[]; excluded: number; sells: number; rows: TradeRow[] };
+  type WalletEntry = {
+    completed: CompletedTrade[];
+    excluded: number;
+    sells: number;
+    rows: TradeRow[];
+  };
   const byWallet = new Map<string, WalletEntry>();
   for (const row of rows) {
     let entry = byWallet.get(row.walletAddress);
-    if (!entry) { entry = { completed: [], excluded: 0, sells: 0, rows: [] }; byWallet.set(row.walletAddress, entry); }
+    if (!entry) {
+      entry = { completed: [], excluded: 0, sells: 0, rows: [] };
+      byWallet.set(row.walletAddress, entry);
+    }
     entry.rows.push(row);
     if (row.eventType !== 'sell') continue;
 
@@ -647,7 +794,10 @@ export const computeCopyTradeReport = (
     const costBasis = parseAmount(row.buyCostUsd);
     // A sell of tokens that were transferred in rather than bought has no cost basis, so its
     // return is genuinely unknowable from this data. Excluded and counted — never zeroed.
-    if (proceeds === null || costBasis === null || costBasis <= 0) { entry.excluded += 1; continue; }
+    if (proceeds === null || costBasis === null || costBasis <= 0) {
+      entry.excluded += 1;
+      continue;
+    }
     entry.completed.push({
       sourceId: row.id ?? -1,
       timestamp: row.observedTimestamp,
@@ -705,17 +855,35 @@ export const computeCopyTradeReport = (
     const lastTradeAt = lastTradeAtOf(entry.completed);
     const truncated = truncatedWallets.has(walletAddress);
     const historyFailed = failedHistoryWallets.has(walletAddress);
-    const { verdict, failedRules } = decideVerdict({ trades: summary.trades, spanDays, medianReturnPercent: summary.medianReturnPercent, riskFlags, truncated });
+    const { verdict, failedRules } = decideVerdict({
+      trades: summary.trades,
+      spanDays,
+      medianReturnPercent: summary.medianReturnPercent,
+      riskFlags,
+      truncated,
+    });
     if (truncated) anyTruncatedContributes = true;
 
     const holds = holdSecondsPerSell(entry.rows);
     const stats = walletStats.get(walletAddress);
     const medianHold = median(holds);
     const riskEvidence: RiskEvidence = {
-      fastRoundTripPercent: holds.length === 0 ? null
-        : round((holds.filter((seconds) => seconds <= FAST_ROUND_TRIP_SECONDS).length / holds.length) * 100, 1),
-      under15SecondsPercent: holds.length === 0 ? null
-        : round((holds.filter((seconds) => seconds <= UNDER_15_SECONDS).length / holds.length) * 100, 1),
+      fastRoundTripPercent:
+        holds.length === 0
+          ? null
+          : round(
+              (holds.filter((seconds) => seconds <= FAST_ROUND_TRIP_SECONDS).length /
+                holds.length) *
+                100,
+              1,
+            ),
+      under15SecondsPercent:
+        holds.length === 0
+          ? null
+          : round(
+              (holds.filter((seconds) => seconds <= UNDER_15_SECONDS).length / holds.length) * 100,
+              1,
+            ),
       under15SecondsCount: holds.filter((seconds) => seconds <= UNDER_15_SECONDS).length,
       pairedTradeCount: holds.length,
       noCostBasisPercent: entry.sells === 0 ? null : round((entry.excluded / entry.sells) * 100, 1),
@@ -727,13 +895,21 @@ export const computeCopyTradeReport = (
     };
     const riskNotes = buildRiskNotes(riskEvidence, riskFlags);
     const rankHistory = rankHistoryByAddress.get(walletAddress) ?? {
-      walletAddress, leaderboardCaptures: 0, appearances: 0, topFiveAppearances: 0,
-      topFiveMembershipPercent: null, currentRank: rosterEntry.rankPosition,
-      bestRank: rosterEntry.rankPosition, worstRank: rosterEntry.rankPosition,
-      firstObservedAt: null, lastObservedAt: null,
+      walletAddress,
+      leaderboardCaptures: 0,
+      appearances: 0,
+      topFiveAppearances: 0,
+      topFiveMembershipPercent: null,
+      currentRank: rosterEntry.rankPosition,
+      bestRank: rosterEntry.rankPosition,
+      worstRank: rosterEntry.rankPosition,
+      firstObservedAt: null,
+      lastObservedAt: null,
     };
     const sampleInfo = representative.byWallet.get(walletAddress) ?? {
-      populationSellCount: entry.sells, selectedSellCount: entry.sells, sampled: false,
+      populationSellCount: entry.sells,
+      selectedSellCount: entry.sells,
+      sampled: false,
     };
 
     reportRows.push({
@@ -758,7 +934,8 @@ export const computeCopyTradeReport = (
       // and rounding that to 0.00 days would read as "no coverage" instead of "very little".
       coveredDays: entry.completed.length === 0 ? null : round(spanDays, 4),
       lastTradeAt,
-      daysSinceLastTrade: lastTradeAt === null ? null : round((nowSeconds - lastTradeAt) / 86_400, 1),
+      daysSinceLastTrade:
+        lastTradeAt === null ? null : round((nowSeconds - lastTradeAt) / 86_400, 1),
       needsDuneBackfill: truncated,
       unreliableReason: truncated ? TRUNCATION_REASON : null,
       riskEvidence,
@@ -778,7 +955,8 @@ export const computeCopyTradeReport = (
 
   // Worst first: the point of the table is to show who fails, not to flatter the roster.
   reportRows.sort((a, b) => {
-    if (a.endingCapitalUsd === null && b.endingCapitalUsd === null) return a.walletAddress.localeCompare(b.walletAddress);
+    if (a.endingCapitalUsd === null && b.endingCapitalUsd === null)
+      return a.walletAddress.localeCompare(b.walletAddress);
     if (a.endingCapitalUsd === null) return 1;
     if (b.endingCapitalUsd === null) return -1;
     return b.endingCapitalUsd - a.endingCapitalUsd;
@@ -801,7 +979,9 @@ export const computeCopyTradeReport = (
     // A median of per-wallet medians, not of pooled trades — the typical trader's typical trade.
     winRatePercent: across((row) => row.winRatePercent),
     medianReturnPercent: (() => {
-      const medians = reportRows.map((row) => row.medianReturnPercent).filter((value): value is number => value !== null);
+      const medians = reportRows
+        .map((row) => row.medianReturnPercent)
+        .filter((value): value is number => value !== null);
       const middle = median(medians);
       return middle === null ? null : round(middle, 2);
     })(),
@@ -828,7 +1008,9 @@ export const computeCopyTradeReport = (
       // mean-based figures are withheld too rather than quietly inheriting the bias.
       averageReturnPercent: anyTruncatedContributes ? null : overallSummary.averageReturnPercent,
       endingCapitalUsd: anyTruncatedContributes ? null : overallSummary.endingCapitalUsd,
-      endingCapitalUsdCompounded: anyTruncatedContributes ? null : overallSummary.endingCapitalUsdCompounded,
+      endingCapitalUsdCompounded: anyTruncatedContributes
+        ? null
+        : overallSummary.endingCapitalUsdCompounded,
       unreliableReason: anyTruncatedContributes
         ? 'At least one wallet was truncated, so pooled average-based figures would be biased.'
         : null,
@@ -836,30 +1018,48 @@ export const computeCopyTradeReport = (
       wallets: null,
     },
     overallByWallet: walletWeighted,
-    rules: { minTrades: RULES.minTrades, minDays: RULES.minDays, requiresPositiveMedian: RULES.requiresPositiveMedian },
+    rules: {
+      minTrades: RULES.minTrades,
+      minDays: RULES.minDays,
+      requiresPositiveMedian: RULES.requiresPositiveMedian,
+    },
     scope: {
       chain,
       traderLimit: options.traderLimit ?? null,
       rosterSnapshotId,
       rosterSize: roster.length,
       methodologyVersion: METHODOLOGY_VERSION,
-      rosterProvenance: rosterSnapshotId === null ? null : readLeaderboardProvenance(database, rosterSnapshotId),
+      rosterProvenance:
+        rosterSnapshotId === null ? null : readLeaderboardProvenance(database, rosterSnapshotId),
     },
     walletPerformance: {
       status: 'available',
-      description: 'Historical realized performance of the target wallets. It does not include copy delay, slippage, fees, liquidity, or failed orders.',
+      description:
+        'Historical realized performance of the target wallets. It does not include copy delay, slippage, fees, liquidity, or failed orders.',
     },
     copySimulation: {
       status: 'not_available',
       description: 'Copy performance is intentionally separate and has not been simulated.',
-      requiredInputs: ['detection delay', 'entry and exit slippage', 'priority and platform fees', 'liquidity limits', 'failed-order assumptions'],
+      requiredInputs: [
+        'detection delay',
+        'entry and exit slippage',
+        'priority and platform fees',
+        'liquidity limits',
+        'failed-order assumptions',
+      ],
     },
     representativeSampling: {
       method: REPRESENTATIVE_SAMPLE_METHOD,
       maxSellsPerWallet: null,
       sampledWallets: reportRows.filter((row) => row.representativeSampled === true).length,
-      populationTrades: reportRows.reduce((total, row) => total + (row.representativePopulationTrades ?? row.trades), 0),
-      selectedTrades: reportRows.reduce((total, row) => total + (row.representativeSampleTrades ?? row.trades), 0),
+      populationTrades: reportRows.reduce(
+        (total, row) => total + (row.representativePopulationTrades ?? row.trades),
+        0,
+      ),
+      selectedTrades: reportRows.reduce(
+        (total, row) => total + (row.representativeSampleTrades ?? row.trades),
+        0,
+      ),
     },
   };
 };
@@ -872,22 +1072,32 @@ export type CopyTradeSummary = {
   lastRunAt: string | null;
 };
 
-export const readCopyTradeSummary = (database: DatabaseSync, options: { chain?: string } = {}): CopyTradeSummary => {
+export const readCopyTradeSummary = (
+  database: DatabaseSync,
+  options: { chain?: string } = {},
+): CopyTradeSummary => {
   const chain = options.chain ?? 'sol';
-  const stats = database.prepare(
-    `SELECT COUNT(*) AS trades, COUNT(DISTINCT wallet_address) AS traders,
+  const stats = database
+    .prepare(
+      `SELECT COUNT(*) AS trades, COUNT(DISTINCT wallet_address) AS traders,
             MIN(observed_timestamp) AS first, MAX(observed_timestamp) AS last
      FROM copytrade_trades WHERE chain = ?`,
-  ).get(chain) as { trades: number; traders: number; first: number | null; last: number | null };
+    )
+    .get(chain) as { trades: number; traders: number; first: number | null; last: number | null };
 
-  const lastRun = database.prepare(
-    `SELECT COALESCE(completed_at, started_at) AS at FROM copytrade_fetch_runs ORDER BY id DESC LIMIT 1`,
-  ).get() as { at: string | null } | undefined;
+  const lastRun = database
+    .prepare(
+      `SELECT COALESCE(completed_at, started_at) AS at FROM copytrade_fetch_runs ORDER BY id DESC LIMIT 1`,
+    )
+    .get() as { at: string | null } | undefined;
 
   return {
     traders: stats.traders,
     trades: stats.trades,
-    historyDays: stats.first !== null && stats.last !== null ? Math.max(0, Math.round((stats.last - stats.first) / 86_400)) : 0,
+    historyDays:
+      stats.first !== null && stats.last !== null
+        ? Math.max(0, Math.round((stats.last - stats.first) / 86_400))
+        : 0,
     // Dune cross-verification is a later step; null means "not measured", never "0% verified".
     verifiedPercent: null,
     lastRunAt: lastRun?.at ?? null,
@@ -898,21 +1108,23 @@ export const saveCopyTradeSnapshot = (
   database: DatabaseSync,
   report: CopyTradeReport,
 ): { snapshotId: number; computedAt: string } => {
-  database.prepare(
-    `INSERT INTO copytrade_result_snapshots (computed_at, params_json, report_json) VALUES (?, ?, ?)`,
-  ).run(
-    report.computedAt,
-    // Params are read off the report itself, never recomputed from defaults. The snapshot
-    // endpoint previously called computeCopyTradeReport() with no arguments, so a snapshot
-    // saved while viewing "top 25, 7 days" silently froze "all traders, 30 days" instead.
-    JSON.stringify({
-      periodDays: report.periodDays,
-      startingCapitalUsd: report.startingCapitalUsd,
-      rules: report.rules,
-      ...report.scope,
-    }),
-    JSON.stringify(report),
-  );
+  database
+    .prepare(
+      `INSERT INTO copytrade_result_snapshots (computed_at, params_json, report_json) VALUES (?, ?, ?)`,
+    )
+    .run(
+      report.computedAt,
+      // Params are read off the report itself, never recomputed from defaults. The snapshot
+      // endpoint previously called computeCopyTradeReport() with no arguments, so a snapshot
+      // saved while viewing "top 25, 7 days" silently froze "all traders, 30 days" instead.
+      JSON.stringify({
+        periodDays: report.periodDays,
+        startingCapitalUsd: report.startingCapitalUsd,
+        rules: report.rules,
+        ...report.scope,
+      }),
+      JSON.stringify(report),
+    );
   const row = database.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number };
   return { snapshotId: Number(row.id), computedAt: report.computedAt };
 };

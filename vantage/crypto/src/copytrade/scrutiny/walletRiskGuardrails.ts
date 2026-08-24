@@ -36,21 +36,33 @@ export type WalletRiskStats30d = {
 export const assessWalletRiskGuardrails = (stats30d: WalletRiskStats30d): string[] => {
   const reasons: string[] = [];
   if (stats30d.tags.includes('wash_trader')) reasons.push('GMGN-flagged wash trader');
-  if (stats30d.realizedProfitPnlPercent !== null && stats30d.realizedProfitPnlPercent <= STRONGLY_NEGATIVE_PNL_PERCENT) {
+  if (
+    stats30d.realizedProfitPnlPercent !== null &&
+    stats30d.realizedProfitPnlPercent <= STRONGLY_NEGATIVE_PNL_PERCENT
+  ) {
     reasons.push(`30d PnL ${stats30d.realizedProfitPnlPercent.toFixed(0)}%`);
   }
   const buys30d = stats30d.buyCount ?? 0;
   const sells30d = stats30d.sellCount ?? 0;
   const volume30d = buys30d + sells30d;
-  if (volume30d > HIGH_VOLUME_30D_THRESHOLD) reasons.push(`${volume30d.toLocaleString()} trades in 30d`);
-  if (stats30d.createdTokenCount !== null && stats30d.createdTokenCount > HIGH_CREATED_TOKEN_COUNT_THRESHOLD) {
+  if (volume30d > HIGH_VOLUME_30D_THRESHOLD)
+    reasons.push(`${volume30d.toLocaleString()} trades in 30d`);
+  if (
+    stats30d.createdTokenCount !== null &&
+    stats30d.createdTokenCount > HIGH_CREATED_TOKEN_COUNT_THRESHOLD
+  ) {
     reasons.push(`created ${stats30d.createdTokenCount.toLocaleString()} tokens`);
   }
-  if (volume30d > 0 && volume30d < THIN_SAMPLE_30D_THRESHOLD) reasons.push(`only ${volume30d} trades in 30d`);
-  if (stats30d.winRatePercent !== null && stats30d.winRatePercent < WEAK_WIN_RATE_PERCENT) reasons.push(`${stats30d.winRatePercent.toFixed(0)}% win rate`);
+  if (volume30d > 0 && volume30d < THIN_SAMPLE_30D_THRESHOLD)
+    reasons.push(`only ${volume30d} trades in 30d`);
+  if (stats30d.winRatePercent !== null && stats30d.winRatePercent < WEAK_WIN_RATE_PERCENT)
+    reasons.push(`${stats30d.winRatePercent.toFixed(0)}% win rate`);
   if (volume30d > 0) {
-    const imbalancePercent = Math.abs(buys30d - sells30d) / volume30d * 100;
-    if (imbalancePercent > ONE_SIDED_IMBALANCE_PERCENT) reasons.push(`${imbalancePercent.toFixed(0)}% one-sided (${buys30d} buys / ${sells30d} sells)`);
+    const imbalancePercent = (Math.abs(buys30d - sells30d) / volume30d) * 100;
+    if (imbalancePercent > ONE_SIDED_IMBALANCE_PERCENT)
+      reasons.push(
+        `${imbalancePercent.toFixed(0)}% one-sided (${buys30d} buys / ${sells30d} sells)`,
+      );
   }
   return reasons;
 };

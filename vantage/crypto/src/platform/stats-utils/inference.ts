@@ -11,7 +11,8 @@
 export const mulberry32 = (seed: number): (() => number) => {
   let a = seed >>> 0;
   return () => {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -23,7 +24,14 @@ const median = (sorted: number[]): number => {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 };
 
-export type BootstrapResult = { median: number; lower: number; upper: number; confidenceLevel: number; iterations: number; n: number };
+export type BootstrapResult = {
+  median: number;
+  lower: number;
+  upper: number;
+  confidenceLevel: number;
+  iterations: number;
+  n: number;
+};
 
 /**
  * Percentile-method bootstrap confidence interval for the median. `values` must already be one
@@ -31,7 +39,10 @@ export type BootstrapResult = { median: number; lower: number; upper: number; co
  * with replacement is therefore token-level resampling, not signal-level, as long as the caller
  * has already deduplicated to first-signal-per-token before passing values in.
  */
-export const bootstrapMedianCI = (values: number[], options: { iterations?: number; confidenceLevel?: number; seed?: number } = {}): BootstrapResult | null => {
+export const bootstrapMedianCI = (
+  values: number[],
+  options: { iterations?: number; confidenceLevel?: number; seed?: number } = {},
+): BootstrapResult | null => {
   const n = values.length;
   if (n === 0) return null;
   const iterations = options.iterations ?? 2000;
@@ -49,14 +60,25 @@ export const bootstrapMedianCI = (values: number[], options: { iterations?: numb
   const alpha = 1 - confidenceLevel;
   const lowerIndex = Math.max(0, Math.floor((alpha / 2) * iterations));
   const upperIndex = Math.min(iterations - 1, Math.ceil((1 - alpha / 2) * iterations) - 1);
-  return { median: median(sortedOriginal), lower: resampleMedians[lowerIndex], upper: resampleMedians[upperIndex], confidenceLevel, iterations, n };
+  return {
+    median: median(sortedOriginal),
+    lower: resampleMedians[lowerIndex],
+    upper: resampleMedians[upperIndex],
+    confidenceLevel,
+    iterations,
+    n,
+  };
 };
 
 // log-binomial-coefficient via log-gamma, to keep the exact binomial test numerically stable
 // for n in the hundreds without overflowing factorials.
 const logGamma = (x: number): number => {
   const g = 7;
-  const coefficients = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  const coefficients = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+    -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
+    1.5056327351493116e-7,
+  ];
   if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - logGamma(1 - x);
   const xx = x - 1;
   let a = coefficients[0];
@@ -64,7 +86,8 @@ const logGamma = (x: number): number => {
   for (let i = 1; i < g + 2; i++) a += coefficients[i] / (xx + i);
   return 0.5 * Math.log(2 * Math.PI) + (xx + 0.5) * Math.log(t) - t + Math.log(a);
 };
-const logChoose = (n: number, k: number): number => logGamma(n + 1) - logGamma(k + 1) - logGamma(n - k + 1);
+const logChoose = (n: number, k: number): number =>
+  logGamma(n + 1) - logGamma(k + 1) - logGamma(n - k + 1);
 const binomialPmf = (n: number, k: number, p: number): number => {
   if (k < 0 || k > n) return 0;
   if (p === 0) return k === 0 ? 1 : 0;
@@ -72,7 +95,13 @@ const binomialPmf = (n: number, k: number, p: number): number => {
   return Math.exp(logChoose(n, k) + k * Math.log(p) + (n - k) * Math.log(1 - p));
 };
 
-export type SignTestResult = { pValue: number; nPositive: number; nNegative: number; nTicked: number; nTotal: number };
+export type SignTestResult = {
+  pValue: number;
+  nPositive: number;
+  nNegative: number;
+  nTicked: number;
+  nTotal: number;
+};
 
 /**
  * Exact two-sided sign test of "is the median return different from zero," under the null that

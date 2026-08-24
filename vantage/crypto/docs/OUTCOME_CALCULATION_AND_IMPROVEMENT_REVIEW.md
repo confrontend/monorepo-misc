@@ -99,11 +99,11 @@ The application compares each checkpoint's target time with the Dune run's `comp
 
 The interpreted statuses are:
 
-| Condition | Status |
-|---|---|
-| Target time is later than run completion | `checkpoint not yet reached` |
-| Target has elapsed but no qualifying Dune trade exists | `not available` |
-| Target has elapsed and a price exists | `received` |
+| Condition                                              | Status                       |
+| ------------------------------------------------------ | ---------------------------- |
+| Target time is later than run completion               | `checkpoint not yet reached` |
+| Target has elapsed but no qualifying Dune trade exists | `not available`              |
+| Target has elapsed and a price exists                  | `received`                   |
 
 ### 3.6 Combining multiple executions
 
@@ -120,11 +120,11 @@ Consequences:
 
 For each horizon, Patterns compares its checkpoint with the `signal` checkpoint in [`src/db/patterns.ts`](../src/db/patterns.ts#L45-L58):
 
-| Classification | Current rule |
-|---|---|
-| Missing | Baseline or target is absent/null, or baseline price is zero |
-| Stale | Baseline and target matched the exact same trade timestamp |
-| Fresh | Both prices exist and the matched timestamps differ |
+| Classification | Current rule                                                 |
+| -------------- | ------------------------------------------------------------ |
+| Missing        | Baseline or target is absent/null, or baseline price is zero |
+| Stale          | Baseline and target matched the exact same trade timestamp   |
+| Fresh          | Both prices exist and the matched timestamps differ          |
 
 The return calculation for a fresh row is:
 
@@ -152,12 +152,12 @@ Missing and stale rows are excluded from all return denominators.
 
 A group is considered mechanically `reliable` when it has at least 10 fresh comparisons and at least 10 distinct tokens. The verdict then follows [`src/db/patterns.ts`](../src/db/patterns.ts#L73-L80):
 
-| Condition | Verdict |
-|---|---|
-| Reliability threshold not met | `insufficient data` |
-| Median > 0, at least 50% up, average >= 0 | `promising but fragile` |
-| Median > 0 and at least 50% up, but average < 0 | `mixed` |
-| Otherwise | `weak` |
+| Condition                                       | Verdict                 |
+| ----------------------------------------------- | ----------------------- |
+| Reliability threshold not met                   | `insufficient data`     |
+| Median > 0, at least 50% up, average >= 0       | `promising but fragile` |
+| Median > 0 and at least 50% up, but average < 0 | `mixed`                 |
+| Otherwise                                       | `weak`                  |
 
 This is descriptive logic, not a statistical significance test or proof of predictive value.
 
@@ -167,30 +167,30 @@ The following read-only audit was performed against `.data/crypto-research.sqlit
 
 ### 4.1 Capture and measurement coverage
 
-| Measure | Count |
-|---|---:|
-| Captured Type 7 signals | 1,249 |
-| Distinct Type 7 token addresses | 1,133 |
-| Type 7 signals submitted to Dune at least once | 1,249 |
-| Type 7 signals never submitted | 0 |
-| Measured exactly once | 1,218 |
-| Measured exactly twice | 19 |
-| Measured three or more times | 12 |
-| Type 7-related Dune runs | 96 |
-| Completed Type 7-related runs | 94 |
-| Raw Type 7 checkpoint rows across completed runs | 7,693 |
-| Completed-run archives present | 94 of 94 |
-| Archive hashes matching files on disk | 94 of 94 |
+| Measure                                          |    Count |
+| ------------------------------------------------ | -------: |
+| Captured Type 7 signals                          |    1,249 |
+| Distinct Type 7 token addresses                  |    1,133 |
+| Type 7 signals submitted to Dune at least once   |    1,249 |
+| Type 7 signals never submitted                   |        0 |
+| Measured exactly once                            |    1,218 |
+| Measured exactly twice                           |       19 |
+| Measured three or more times                     |       12 |
+| Type 7-related Dune runs                         |       96 |
+| Completed Type 7-related runs                    |       94 |
+| Raw Type 7 checkpoint rows across completed runs |    7,693 |
+| Completed-run archives present                   | 94 of 94 |
+| Archive hashes matching files on disk            | 94 of 94 |
 
 ### 4.2 Latest interpreted outcome coverage
 
 | Horizon | Missing | Stale | Fresh | Distinct fresh tokens |
-|---|---:|---:|---:|---:|
-| +5m | 1,080 | 140 | 29 | 23 |
-| +15m | 1,080 | 139 | 30 | 24 |
-| +30m | 1,090 | 128 | 31 | 25 |
-| +1h | 1,150 | 68 | 31 | 25 |
-| +3h | 1,218 | 0 | 31 | 25 |
+| ------- | ------: | ----: | ----: | --------------------: |
+| +5m     |   1,080 |   140 |    29 |                    23 |
+| +15m    |   1,080 |   139 |    30 |                    24 |
+| +30m    |   1,090 |   128 |    31 |                    25 |
+| +1h     |   1,150 |    68 |    31 |                    25 |
+| +3h     |   1,218 |     0 |    31 |                    25 |
 
 The missing counts decompose further:
 
@@ -206,9 +206,9 @@ No Type 7 +5m or +15m checkpoint was pending in its newest run. Their low fresh 
 The 31 Type 7 signals captured on August 11 had usable signal-time prices. The newer August 13 group contained 1,218 signals, but only 138 had baseline prices and none produced a fresh +5m comparison:
 
 | Observation period | Signals | Baseline price available | Fresh +5m |
-|---|---:|---:|---:|
-| 2026-08-11 | 31 | 31 | 29 |
-| 2026-08-13 | 1,218 | 138 | 0 |
+| ------------------ | ------: | -----------------------: | --------: |
+| 2026-08-11         |      31 |                       31 |        29 |
+| 2026-08-13         |   1,218 |                      138 |         0 |
 
 All 29 fresh +5m and all 31 fresh +3h Type 7 comparisons currently come from August 11. The large new import has not contributed to the Type 7 return statistics.
 
@@ -224,13 +224,13 @@ It is not accurate to label all 1,080 baseline failures simply “too fresh.” 
 
 These values use only fresh comparisons:
 
-| Horizon | Fresh | Up % | Average | Median | P25 | Worst | Best |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| +5m | 29 | 75.86% | -2.83% | 0.91% | 0.21% | -83.07% | 59.49% |
-| +15m | 30 | 73.33% | 7.48% | 2.07% | -0.45% | -82.69% | 192.42% |
-| +30m | 31 | 67.74% | -7.06% | 2.92% | -14.56% | approximately -100% | 57.91% |
-| +1h | 31 | 67.74% | -5.55% | 5.19% | -27.04% | approximately -100% | 126.25% |
-| +3h | 31 | 61.29% | -3.36% | 13.51% | -45.32% | approximately -100% | 98.22% |
+| Horizon | Fresh |   Up % | Average | Median |     P25 |               Worst |    Best |
+| ------- | ----: | -----: | ------: | -----: | ------: | ------------------: | ------: |
+| +5m     |    29 | 75.86% |  -2.83% |  0.91% |   0.21% |             -83.07% |  59.49% |
+| +15m    |    30 | 73.33% |   7.48% |  2.07% |  -0.45% |             -82.69% | 192.42% |
+| +30m    |    31 | 67.74% |  -7.06% |  2.92% | -14.56% | approximately -100% |  57.91% |
+| +1h     |    31 | 67.74% |  -5.55% |  5.19% | -27.04% | approximately -100% | 126.25% |
+| +3h     |    31 | 61.29% |  -3.36% | 13.51% | -45.32% | approximately -100% |  98.22% |
 
 These results describe a small, older, highly selected subset. They do not support a conclusion about the full Type 7 population.
 

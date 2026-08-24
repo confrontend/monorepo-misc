@@ -26,8 +26,14 @@ export type FullyCoveredResponse = {
 };
 
 export const validateFullyCoveredPeriodDays = (periodDays: number): number => {
-  if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > MAX_FULLY_COVERED_PERIOD_DAYS) {
-    throw new RangeError(`periodDays must be an integer between 1 and ${MAX_FULLY_COVERED_PERIOD_DAYS}.`);
+  if (
+    !Number.isInteger(periodDays) ||
+    periodDays <= 0 ||
+    periodDays > MAX_FULLY_COVERED_PERIOD_DAYS
+  ) {
+    throw new RangeError(
+      `periodDays must be an integer between 1 and ${MAX_FULLY_COVERED_PERIOD_DAYS}.`,
+    );
   }
   return periodDays;
 };
@@ -38,8 +44,9 @@ export const readFullyCoveredWallets = (
   requestedPeriodDays = DEFAULT_FULLY_COVERED_PERIOD_DAYS,
 ): FullyCoveredResponse => {
   const periodDays = validateFullyCoveredPeriodDays(requestedPeriodDays);
-  const rows = database.prepare(
-    `SELECT coverage.wallet_address AS walletAddress,
+  const rows = database
+    .prepare(
+      `SELECT coverage.wallet_address AS walletAddress,
             coverage.requested_period_days AS periodDays,
             coverage.stop_reason AS stopReason,
             coverage.updated_at AS updatedAt,
@@ -53,14 +60,16 @@ export const readFullyCoveredWallets = (
        AND coverage.truncated = 0
        AND coverage.requested_period_days = ?
      ORDER BY coverage.updated_at DESC, coverage.wallet_address ASC`,
-  ).all(periodDays) as Array<Record<string, unknown>>;
+    )
+    .all(periodDays) as Array<Record<string, unknown>>;
 
   return {
     requestedPeriodDays: periodDays,
     coverageSemantics: {
       kind: 'verified_local_history',
       label: '100% verified local history coverage',
-      description: 'The latest local GMGN history walk completed the requested period without truncation; storedTradeCount is the number of normalized local trade rows currently stored for that wallet and chain.',
+      description:
+        'The latest local GMGN history walk completed the requested period without truncation; storedTradeCount is the number of normalized local trade rows currently stored for that wallet and chain.',
       excludesDuneOutcomeCoverage: true,
     },
     rows: rows.map((row) => ({

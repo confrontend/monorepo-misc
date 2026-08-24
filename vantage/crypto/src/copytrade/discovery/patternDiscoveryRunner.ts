@@ -18,9 +18,13 @@ const execFileAsync = promisify(execFile);
 const VALIDATION_FRACTION = 0.3;
 const HOLDOUT_FRACTION = 0.2;
 const RUN_TIMEOUT_MS = 120_000;
-export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = Array.from({ length: 11 }, (_, index) => 50 + index * 5);
+export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = Array.from(
+  { length: 11 },
+  (_, index) => 50 + index * 5,
+);
 
-export type PatternDiscoveryStatus = 'discovered candidate' | 'validation survivor' | 'rejected' | 'insufficient data';
+export type PatternDiscoveryStatus =
+  'discovered candidate' | 'validation survivor' | 'rejected' | 'insufficient data';
 
 export type PatternDiscoveryPattern = {
   source?: string;
@@ -89,7 +93,10 @@ export type PatternDiscoveryProgress = {
 };
 
 export class PatternDiscoveryRunnerError extends Error {
-  constructor(message: string, public readonly statusCode = 503) {
+  constructor(
+    message: string,
+    public readonly statusCode = 503,
+  ) {
     super(message);
     this.name = 'PatternDiscoveryRunnerError';
   }
@@ -99,8 +106,15 @@ export const validatePatternDiscoveryRunInput = (
   periodDays: number = DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
   minN = 10,
 ): { periodDays: number; minN: number } => {
-  if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > MAX_PATTERN_DISCOVERY_PERIOD_DAYS) {
-    throw new PatternDiscoveryRunnerError(`periodDays must be an integer between 1 and ${MAX_PATTERN_DISCOVERY_PERIOD_DAYS}.`, 400);
+  if (
+    !Number.isInteger(periodDays) ||
+    periodDays <= 0 ||
+    periodDays > MAX_PATTERN_DISCOVERY_PERIOD_DAYS
+  ) {
+    throw new PatternDiscoveryRunnerError(
+      `periodDays must be an integer between 1 and ${MAX_PATTERN_DISCOVERY_PERIOD_DAYS}.`,
+      400,
+    );
   }
   if (!Number.isInteger(minN) || minN < 2 || minN > 10_000) {
     throw new PatternDiscoveryRunnerError('minN must be an integer between 2 and 10000.', 400);
@@ -116,8 +130,14 @@ export const resolvePatternDiscoveryPython = (
   const configured = environment.PATTERN_DISCOVERY_PYTHON?.trim();
   if (configured) return configured;
   const candidates = patternDiscoveryPythonCandidates(projectRoot, sharedRoot, environment);
-  const bundledOverride = environment.PATTERN_DISCOVERY_BUNDLED_PYTHON?.trim() || environment.PATTERN_DISCOVERY_PYTHON_BUNDLE?.trim();
-  return candidates.find((candidate) => existsSync(candidate)) ?? bundledOverride ?? (process.platform === 'win32' ? 'python' : 'python3');
+  const bundledOverride =
+    environment.PATTERN_DISCOVERY_BUNDLED_PYTHON?.trim() ||
+    environment.PATTERN_DISCOVERY_PYTHON_BUNDLE?.trim();
+  return (
+    candidates.find((candidate) => existsSync(candidate)) ??
+    bundledOverride ??
+    (process.platform === 'win32' ? 'python' : 'python3')
+  );
 };
 
 export const patternDiscoveryPythonCandidates = (
@@ -127,30 +147,65 @@ export const patternDiscoveryPythonCandidates = (
 ): string[] => {
   const executable = process.platform === 'win32' ? 'python.exe' : 'python';
   const workspaceRoot = path.resolve(sharedRoot, '..', '..');
-  const workspaceVenvCandidates = process.platform === 'win32'
-    ? [path.join(projectRoot, '.venv', 'Scripts', executable), path.join(workspaceRoot, '.venv', 'Scripts', executable), path.join(sharedRoot, '.venv', 'Scripts', executable)]
-    : [path.join(projectRoot, '.venv', 'bin', executable), path.join(workspaceRoot, '.venv', 'bin', executable), path.join(sharedRoot, '.venv', 'bin', executable)];
+  const workspaceVenvCandidates =
+    process.platform === 'win32'
+      ? [
+          path.join(projectRoot, '.venv', 'Scripts', executable),
+          path.join(workspaceRoot, '.venv', 'Scripts', executable),
+          path.join(sharedRoot, '.venv', 'Scripts', executable),
+        ]
+      : [
+          path.join(projectRoot, '.venv', 'bin', executable),
+          path.join(workspaceRoot, '.venv', 'bin', executable),
+          path.join(sharedRoot, '.venv', 'bin', executable),
+        ];
   const runtimeRoots = [environment.PATTERN_DISCOVERY_RUNTIME_ROOT, environment.CODEX_RUNTIME_ROOT]
     .map((value) => value?.trim())
     .filter((value): value is string => Boolean(value));
-  const bundledNames = process.platform === 'win32'
-    ? ['python', path.join('python', 'python.exe'), path.join('python', 'Scripts', 'python.exe')]
-    : ['python', path.join('python', 'bin', 'python'), path.join('python', 'python')];
-  const configuredBundle = environment.PATTERN_DISCOVERY_BUNDLED_PYTHON?.trim() || environment.PATTERN_DISCOVERY_PYTHON_BUNDLE?.trim();
+  const bundledNames =
+    process.platform === 'win32'
+      ? ['python', path.join('python', 'python.exe'), path.join('python', 'Scripts', 'python.exe')]
+      : ['python', path.join('python', 'bin', 'python'), path.join('python', 'python')];
+  const configuredBundle =
+    environment.PATTERN_DISCOVERY_BUNDLED_PYTHON?.trim() ||
+    environment.PATTERN_DISCOVERY_PYTHON_BUNDLE?.trim();
   const configuredRuntimeCandidates = [
     ...runtimeRoots.flatMap((root) => bundledNames.map((name) => path.join(root, name))),
     ...(configuredBundle ? [configuredBundle] : []),
   ];
   const localBundleCandidates = [
-    ...[projectRoot, workspaceRoot, sharedRoot].flatMap((root) => process.platform === 'win32'
-      ? [path.join(root, '.runtime', 'python.exe'), path.join(root, '.bundled-python', 'python.exe')]
-      : [path.join(root, '.runtime', 'bin', 'python'), path.join(root, '.bundled-python', 'bin', 'python')]),
+    ...[projectRoot, workspaceRoot, sharedRoot].flatMap((root) =>
+      process.platform === 'win32'
+        ? [
+            path.join(root, '.runtime', 'python.exe'),
+            path.join(root, '.bundled-python', 'python.exe'),
+          ]
+        : [
+            path.join(root, '.runtime', 'bin', 'python'),
+            path.join(root, '.bundled-python', 'bin', 'python'),
+          ],
+    ),
   ];
   const home = environment.USERPROFILE?.trim() || environment.HOME?.trim();
   const homeBundleCandidates = home
-    ? [path.join(home, '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'python', executable)]
+    ? [
+        path.join(
+          home,
+          '.cache',
+          'codex-runtimes',
+          'codex-primary-runtime',
+          'dependencies',
+          'python',
+          executable,
+        ),
+      ]
     : [];
-  return [...workspaceVenvCandidates, ...configuredRuntimeCandidates, ...localBundleCandidates, ...homeBundleCandidates];
+  return [
+    ...workspaceVenvCandidates,
+    ...configuredRuntimeCandidates,
+    ...localBundleCandidates,
+    ...homeBundleCandidates,
+  ];
 };
 
 export const resolvePatternDiscoverySharedRoot = (projectRoot: string): string => {
@@ -174,14 +229,22 @@ export const buildPatternDiscoveryCommand = (input: {
     inputPath,
     outputPath,
     args: [
-      '-m', 'shared_pattern_discovery.cli',
-      '--project', 'crypto',
-      '--input', inputPath,
-      '--output', outputPath,
-      '--min-n', String(input.minN),
-      '--validation-fraction', String(VALIDATION_FRACTION),
-      '--holdout-fraction', String(HOLDOUT_FRACTION),
-      '--seed', '0',
+      '-m',
+      'shared_pattern_discovery.cli',
+      '--project',
+      'crypto',
+      '--input',
+      inputPath,
+      '--output',
+      outputPath,
+      '--min-n',
+      String(input.minN),
+      '--validation-fraction',
+      String(VALIDATION_FRACTION),
+      '--holdout-fraction',
+      String(HOLDOUT_FRACTION),
+      '--seed',
+      '0',
     ],
   };
 };
@@ -191,48 +254,108 @@ export const parsePatternDiscoveryReport = (raw: string): PatternDiscoveryReport
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    throw new PatternDiscoveryRunnerError(`Shared Python discovery returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`, 502);
+    throw new PatternDiscoveryRunnerError(
+      `Shared Python discovery returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      502,
+    );
   }
   if (!parsed || typeof parsed !== 'object') {
-    throw new PatternDiscoveryRunnerError('Shared Python discovery returned a non-object report.', 502);
+    throw new PatternDiscoveryRunnerError(
+      'Shared Python discovery returned a non-object report.',
+      502,
+    );
   }
   const report = parsed as Partial<PatternDiscoveryReport>;
-  if (report.project !== 'crypto' || !Array.isArray(report.patterns) || !report.status_counts || typeof report.status_counts !== 'object' || !report.split || typeof report.split !== 'object') {
-    throw new PatternDiscoveryRunnerError('Shared Python discovery returned an incomplete crypto report.', 502);
+  if (
+    report.project !== 'crypto' ||
+    !Array.isArray(report.patterns) ||
+    !report.status_counts ||
+    typeof report.status_counts !== 'object' ||
+    !report.split ||
+    typeof report.split !== 'object'
+  ) {
+    throw new PatternDiscoveryRunnerError(
+      'Shared Python discovery returned an incomplete crypto report.',
+      502,
+    );
   }
   return report as PatternDiscoveryReport;
 };
 
 export const runPatternDiscoveryReport = async (
   database: DatabaseSync,
-  options: { projectRoot: string; periodDays?: number; minN?: number; minimumCoveragePercent?: number; signal?: AbortSignal },
-): Promise<{ report: PatternDiscoveryReport; execution?: { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string } }> => {
+  options: {
+    projectRoot: string;
+    periodDays?: number;
+    minN?: number;
+    minimumCoveragePercent?: number;
+    signal?: AbortSignal;
+  },
+): Promise<{
+  report: PatternDiscoveryReport;
+  execution?: {
+    pythonExecutable: string;
+    inputPath: string;
+    outputPath: string;
+    sharedRoot: string;
+  };
+}> => {
   const { periodDays, minN } = validatePatternDiscoveryRunInput(options.periodDays, options.minN);
   const minimumCoveragePercent = options.minimumCoveragePercent ?? 100;
   const dataFingerprint = readPatternDiscoveryDataFingerprint(database);
   const cachedReport = readPatternDiscoveryCache<PatternDiscoveryReport>(
     database,
-    patternDiscoveryCacheKey('report', periodDays, minimumCoveragePercent, minN, MAX_PATTERN_DISCOVERY_WALLETS),
+    patternDiscoveryCacheKey(
+      'report',
+      periodDays,
+      minimumCoveragePercent,
+      minN,
+      MAX_PATTERN_DISCOVERY_WALLETS,
+    ),
     dataFingerprint,
   );
   if (cachedReport) {
     return { report: cachedReport };
   }
   const sharedRoot = resolvePatternDiscoverySharedRoot(options.projectRoot);
-  const exportCacheKey = patternDiscoveryCacheKey('export', periodDays, minimumCoveragePercent, undefined, MAX_PATTERN_DISCOVERY_WALLETS);
-  const normalized = readPatternDiscoveryCache<ReturnType<typeof readPatternDiscoveryExport>>(database, exportCacheKey, dataFingerprint)
-    ?? readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
+  const exportCacheKey = patternDiscoveryCacheKey(
+    'export',
+    periodDays,
+    minimumCoveragePercent,
+    undefined,
+    MAX_PATTERN_DISCOVERY_WALLETS,
+  );
+  const normalized =
+    readPatternDiscoveryCache<ReturnType<typeof readPatternDiscoveryExport>>(
+      database,
+      exportCacheKey,
+      dataFingerprint,
+    ) ?? readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
   writePatternDiscoveryCache(database, exportCacheKey, dataFingerprint, normalized);
   if (normalized.rows.length === 0) {
-    throw new PatternDiscoveryRunnerError(`No outcome-coverage rows meet the selected ${normalized.metadata.minimum_coverage_percent}% threshold for the selected ${periodDays}-day period.`, 422);
+    throw new PatternDiscoveryRunnerError(
+      `No outcome-coverage rows meet the selected ${normalized.metadata.minimum_coverage_percent}% threshold for the selected ${periodDays}-day period.`,
+      422,
+    );
   }
-  const runRoot = path.join(sharedRoot, 'runs', 'crypto', `pattern-discovery-${periodDays}d-${Date.now()}`);
+  const runRoot = path.join(
+    sharedRoot,
+    'runs',
+    'crypto',
+    `pattern-discovery-${periodDays}d-${Date.now()}`,
+  );
   mkdirSync(runRoot, { recursive: true });
   const inputPath = path.join(runRoot, 'normalized-export.json');
   const outputPath = path.join(runRoot, 'report.json');
   writeFileSync(inputPath, JSON.stringify(normalized, null, 2), 'utf8');
   const executable = resolvePatternDiscoveryPython(options.projectRoot, sharedRoot);
-  const command = buildPatternDiscoveryCommand({ executable, sharedRoot, inputPath, outputPath, minN });
+  const command = buildPatternDiscoveryCommand({
+    executable,
+    sharedRoot,
+    inputPath,
+    outputPath,
+    minN,
+  });
   try {
     await execFileAsync(command.executable, command.args, {
       cwd: command.cwd,
@@ -242,22 +365,44 @@ export const runPatternDiscoveryReport = async (
       signal: options.signal,
     });
   } catch (error) {
-    const detail = error && typeof error === 'object' && 'stderr' in error && typeof error.stderr === 'string' && error.stderr.trim()
-      ? error.stderr.trim()
-      : error instanceof Error ? error.message : String(error);
+    const detail =
+      error &&
+      typeof error === 'object' &&
+      'stderr' in error &&
+      typeof error.stderr === 'string' &&
+      error.stderr.trim()
+        ? error.stderr.trim()
+        : error instanceof Error
+          ? error.message
+          : String(error);
     const dependencyHint = /No module named ['"]numpy['"]|ModuleNotFoundError/.test(detail)
       ? 'The selected runtime is missing the required NumPy dependency.'
       : '';
-    throw new PatternDiscoveryRunnerError(`Shared Python discovery could not run with ${executable}. ${dependencyHint} Configure PATTERN_DISCOVERY_PYTHON (highest priority), PATTERN_DISCOVERY_BUNDLED_PYTHON, PATTERN_DISCOVERY_RUNTIME_ROOT, or a workspace .venv. ${detail}`);
+    throw new PatternDiscoveryRunnerError(
+      `Shared Python discovery could not run with ${executable}. ${dependencyHint} Configure PATTERN_DISCOVERY_PYTHON (highest priority), PATTERN_DISCOVERY_BUNDLED_PYTHON, PATTERN_DISCOVERY_RUNTIME_ROOT, or a workspace .venv. ${detail}`,
+    );
   }
   let reportRaw: string;
   try {
     reportRaw = readFileSync(outputPath, 'utf8');
   } catch (error) {
-    throw new PatternDiscoveryRunnerError(`Shared Python discovery completed without a readable report at ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new PatternDiscoveryRunnerError(
+      `Shared Python discovery completed without a readable report at ${outputPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   const report = parsePatternDiscoveryReport(reportRaw);
-  writePatternDiscoveryCache(database, patternDiscoveryCacheKey('report', periodDays, minimumCoveragePercent, minN, MAX_PATTERN_DISCOVERY_WALLETS), dataFingerprint, report);
+  writePatternDiscoveryCache(
+    database,
+    patternDiscoveryCacheKey(
+      'report',
+      periodDays,
+      minimumCoveragePercent,
+      minN,
+      MAX_PATTERN_DISCOVERY_WALLETS,
+    ),
+    dataFingerprint,
+    report,
+  );
   return {
     report,
     execution: { pythonExecutable: executable, inputPath, outputPath, sharedRoot },
@@ -269,15 +414,35 @@ export const runPatternDiscoveryReport = async (
  * from the database cache instead of invoking Python again. */
 export const runPatternDiscoverySensitivity = async (
   database: DatabaseSync,
-  options: { projectRoot: string; periodDays?: number; minN?: number; signal?: AbortSignal; onProgress?: (progress: { threshold: number; index: number; total: number; phase: 'starting' | 'complete' }) => void },
+  options: {
+    projectRoot: string;
+    periodDays?: number;
+    minN?: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: {
+      threshold: number;
+      index: number;
+      total: number;
+      phase: 'starting' | 'complete';
+    }) => void;
+  },
 ): Promise<PatternDiscoverySensitivity> => {
   const thresholds = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
   const points: PatternDiscoverySensitivityPoint[] = [];
   for (const minimumCoveragePercent of thresholds) {
-    if (options.signal?.aborted) throw new PatternDiscoveryRunnerError('Pattern discovery was cancelled.', 499);
-    options.onProgress?.({ threshold: minimumCoveragePercent, index: points.length, total: thresholds.length, phase: 'starting' });
+    if (options.signal?.aborted)
+      throw new PatternDiscoveryRunnerError('Pattern discovery was cancelled.', 499);
+    options.onProgress?.({
+      threshold: minimumCoveragePercent,
+      index: points.length,
+      total: thresholds.length,
+      phase: 'starting',
+    });
     try {
-      const { report } = await runPatternDiscoveryReport(database, { ...options, minimumCoveragePercent });
+      const { report } = await runPatternDiscoveryReport(database, {
+        ...options,
+        minimumCoveragePercent,
+      });
       const summary = report.dataset_summary ?? {};
       const counts = report.status_counts;
       points.push({
@@ -291,11 +456,32 @@ export const runPatternDiscoverySensitivity = async (
         insufficientData: Number(counts['insufficient data'] ?? 0),
         reportAvailable: true,
       });
-      options.onProgress?.({ threshold: minimumCoveragePercent, index: points.length, total: thresholds.length, phase: 'complete' });
+      options.onProgress?.({
+        threshold: minimumCoveragePercent,
+        index: points.length,
+        total: thresholds.length,
+        phase: 'complete',
+      });
     } catch (error) {
       if (error instanceof PatternDiscoveryRunnerError && error.statusCode === 422) {
-        points.push({ minimumCoveragePercent, wallets: 0, rows: 0, independentEntries: 0, validationSurvivors: 0, discoveredCandidates: 0, rejected: 0, insufficientData: 0, reportAvailable: false, error: error.message });
-        options.onProgress?.({ threshold: minimumCoveragePercent, index: points.length, total: thresholds.length, phase: 'complete' });
+        points.push({
+          minimumCoveragePercent,
+          wallets: 0,
+          rows: 0,
+          independentEntries: 0,
+          validationSurvivors: 0,
+          discoveredCandidates: 0,
+          rejected: 0,
+          insufficientData: 0,
+          reportAvailable: false,
+          error: error.message,
+        });
+        options.onProgress?.({
+          threshold: minimumCoveragePercent,
+          index: points.length,
+          total: thresholds.length,
+          phase: 'complete',
+        });
         continue;
       }
       throw error;

@@ -16,23 +16,58 @@ type DataTableProps<Row> = {
   columns: DataTableColumn<Row>[];
   rows: Row[];
   getRowKey: (row: Row, index: number) => Key;
-  rowProps?: (row: Row, index: number) => (HTMLAttributes<HTMLTableRowElement> & { [dataAttribute: `data-${string}`]: string | number | boolean | undefined }) | undefined;
+  rowProps?: (
+    row: Row,
+    index: number,
+  ) =>
+    | (HTMLAttributes<HTMLTableRowElement> & {
+        [dataAttribute: `data-${string}`]: string | number | boolean | undefined;
+      })
+    | undefined;
   emptyMessage?: ReactNode;
   wrapClassName?: string;
   tableClassName?: string;
 };
 
-export function DataTable<Row>({ columns, rows, getRowKey, rowProps, emptyMessage, wrapClassName = 'table-wrap', tableClassName }: DataTableProps<Row>) {
+export function DataTable<Row>({
+  columns,
+  rows,
+  getRowKey,
+  rowProps,
+  emptyMessage,
+  wrapClassName = 'table-wrap',
+  tableClassName,
+}: DataTableProps<Row>) {
   const visibleColumns = columns.filter((column) => !column.hidden);
   return (
     <div className={`${wrapClassName} data-table-wrap`}>
       <table className={tableClassName}>
-        <thead><tr>{visibleColumns.map((column) => <th key={column.key} {...column.headerProps}>{column.header}</th>)}</tr></thead>
+        <thead>
+          <tr>
+            {visibleColumns.map((column) => (
+              <th key={column.key} {...column.headerProps}>
+                {column.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
-          {rows.map((row, index) => <tr key={getRowKey(row, index)} {...rowProps?.(row, index)}>
-            {visibleColumns.map((column) => <td key={column.key} {...column.cellProps?.(row, index)}>{column.render(row, index)}</td>)}
-          </tr>)}
-          {rows.length === 0 && emptyMessage !== undefined && <tr><td colSpan={visibleColumns.length} className="muted">{emptyMessage}</td></tr>}
+          {rows.map((row, index) => (
+            <tr key={getRowKey(row, index)} {...rowProps?.(row, index)}>
+              {visibleColumns.map((column) => (
+                <td key={column.key} {...column.cellProps?.(row, index)}>
+                  {column.render(row, index)}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {rows.length === 0 && emptyMessage !== undefined && (
+            <tr>
+              <td colSpan={visibleColumns.length} className="muted">
+                {emptyMessage}
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

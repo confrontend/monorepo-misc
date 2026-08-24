@@ -3,7 +3,11 @@ const versionEl = document.getElementById('version');
 // getManifest() is synchronous and local, but guard it anyway for consistency with
 // safeSendMessage below — a popup left open across a reload can have its whole chrome.*
 // surface invalidated, and a version label that fails silently is worse than a missing one.
-try { versionEl.textContent = `v${chrome.runtime.getManifest().version}`; } catch { versionEl.textContent = 'v?'; }
+try {
+  versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+} catch {
+  versionEl.textContent = 'v?';
+}
 const toggleBtn = document.getElementById('toggle');
 const exportBtn = document.getElementById('export');
 const clearBtn = document.getElementById('clear');
@@ -25,43 +29,62 @@ async function safeSendMessage(message) {
   try {
     return await chrome.runtime.sendMessage(message);
   } catch (error) {
-    console.error('gmgn-signal-capture popup: message failed, likely a stale popup after an extension reload', error);
+    console.error(
+      'gmgn-signal-capture popup: message failed, likely a stale popup after an extension reload',
+      error,
+    );
     return null;
   }
 }
 
 async function refresh() {
   const state = await safeSendMessage({ type: 'GET_STATE' });
-  if (!state) { statusEl.textContent = 'Extension was reloaded — close and reopen this popup.'; return; }
+  if (!state) {
+    statusEl.textContent = 'Extension was reloaded — close and reopen this popup.';
+    return;
+  }
   statusEl.textContent = `${state.active ? 'Capturing' : 'Stopped'} — ${state.count} event batch(es), ${state.coverageWindowCount} coverage window(s). Investigation: ${state.investigationActive ? 'ON' : 'off'} (${state.investigationCount} unique endpoint(s), ${state.investigationHitCount} sampled hit(s)).`;
   toggleBtn.textContent = state.active ? 'Stop capture' : 'Start capture';
   toggleBtn.classList.toggle('active', state.active);
-  investigationBtn.textContent = state.investigationActive ? 'Stop investigation sampling' : 'Start investigation sampling';
+  investigationBtn.textContent = state.investigationActive
+    ? 'Stop investigation sampling'
+    : 'Start investigation sampling';
   investigationBtn.classList.toggle('active', state.investigationActive);
   captureStatsEl.textContent = `${state.count} event batch(es) · ${state.coverageWindowCount} coverage window(s)`;
   investigationStatsEl.textContent = `${state.investigationCount} unique endpoint(s) · ${state.investigationHitCount} sampled hit(s)`;
-  riskAutoBtn.textContent = state.riskAutoActive ? 'Disable 30d risk capture' : 'Enable 30d risk capture';
+  riskAutoBtn.textContent = state.riskAutoActive
+    ? 'Disable 30d risk capture'
+    : 'Enable 30d risk capture';
   riskAutoBtn.classList.toggle('active', state.riskAutoActive);
   riskStatsEl.textContent = `${state.riskCaptureCount} wallet risk response(s) · 30d only`;
 }
 
 toggleBtn.addEventListener('click', async () => {
   const state = await safeSendMessage({ type: 'GET_STATE' });
-  if (!state) { refresh(); return; }
+  if (!state) {
+    refresh();
+    return;
+  }
   await safeSendMessage({ type: 'SET_ACTIVE', active: !state.active });
   refresh();
 });
 
 investigationBtn.addEventListener('click', async () => {
   const state = await safeSendMessage({ type: 'GET_STATE' });
-  if (!state) { refresh(); return; }
+  if (!state) {
+    refresh();
+    return;
+  }
   await safeSendMessage({ type: 'SET_INVESTIGATION', active: !state.investigationActive });
   refresh();
 });
 
 riskAutoBtn.addEventListener('click', async () => {
   const state = await safeSendMessage({ type: 'GET_STATE' });
-  if (!state) { refresh(); return; }
+  if (!state) {
+    refresh();
+    return;
+  }
   await safeSendMessage({ type: 'SET_RISK_AUTO', active: !state.riskAutoActive });
   refresh();
 });

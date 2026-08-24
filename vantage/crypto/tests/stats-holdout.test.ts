@@ -25,7 +25,9 @@ test('suggestSplitDate: returns null when fewer than 2 distinct dates exist (can
 });
 
 test('suggestSplitDate: with several distinct dates, produces a date that actually splits the data', () => {
-  const observations = Array.from({ length: 7 }, (_, day) => ({ observedAt: `2026-08-${String(10 + day).padStart(2, '0')}T05:00:00.000Z` }));
+  const observations = Array.from({ length: 7 }, (_, day) => ({
+    observedAt: `2026-08-${String(10 + day).padStart(2, '0')}T05:00:00.000Z`,
+  }));
   const split = suggestSplitDate(observations, 0.3);
   assert.ok(split);
   const result = splitByDate(observations, split);
@@ -34,9 +36,14 @@ test('suggestSplitDate: with several distinct dates, produces a date that actual
 });
 
 test('suggestSplitDate: clamps an extreme testFraction rather than producing a degenerate split', () => {
-  const observations = Array.from({ length: 5 }, (_, day) => ({ observedAt: `2026-08-${String(10 + day).padStart(2, '0')}T05:00:00.000Z` }));
+  const observations = Array.from({ length: 5 }, (_, day) => ({
+    observedAt: `2026-08-${String(10 + day).padStart(2, '0')}T05:00:00.000Z`,
+  }));
   const split = suggestSplitDate(observations, 0.99);
   assert.ok(split);
   const result = splitByDate(observations, split);
-  assert.ok(result.discovery.length > 0, 'an extreme fraction request must still leave something to discover on');
+  assert.ok(
+    result.discovery.length > 0,
+    'an extreme fraction request must still leave something to discover on',
+  );
 });

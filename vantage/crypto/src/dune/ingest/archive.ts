@@ -118,7 +118,10 @@ export const readZipEntries = (archive: Buffer): ZipReadEntry[] => {
     if (compressionMethod !== 0) {
       throw new Error(`Entry "${name}" uses unsupported compression method ${compressionMethod}.`);
     }
-    if (localHeaderOffset + 30 > archive.length || archive.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+    if (
+      localHeaderOffset + 30 > archive.length ||
+      archive.readUInt32LE(localHeaderOffset) !== 0x04034b50
+    ) {
       throw new Error(`Entry "${name}" has an invalid local file header.`);
     }
     const localNameLength = archive.readUInt16LE(localHeaderOffset + 26);
@@ -127,7 +130,10 @@ export const readZipEntries = (archive: Buffer): ZipReadEntry[] => {
     if (dataStart + compressedSize > archive.length) {
       throw new Error(`Entry "${name}" data extends past the end of the file.`);
     }
-    entries.push({ name, data: Buffer.from(archive.subarray(dataStart, dataStart + compressedSize)) });
+    entries.push({
+      name,
+      data: Buffer.from(archive.subarray(dataStart, dataStart + compressedSize)),
+    });
     cursor += 46 + nameLength + extraLength + commentLength;
   }
   return entries;
@@ -147,13 +153,17 @@ export const archiveDuneSource = (input: DuneArchiveInput): DuneArchiveResult =>
     return { archivePath, archiveSha256: createHash('sha256').update(bytes).digest('hex') };
   }
 
-  const manifest = JSON.stringify({
-    batchId: input.batchId,
-    sourceName: safeName(input.sourceName),
-    sourceSha256: input.sourceSha256,
-    archivedAt: input.archivedAt,
-    summary: input.summary,
-  }, null, 2);
+  const manifest = JSON.stringify(
+    {
+      batchId: input.batchId,
+      sourceName: safeName(input.sourceName),
+      sourceSha256: input.sourceSha256,
+      archivedAt: input.archivedAt,
+      summary: input.summary,
+    },
+    null,
+    2,
+  );
   const archive = zipStored([
     { name: safeName(input.sourceName), data: Buffer.from(input.rawSource, 'utf8') },
     { name: 'manifest.json', data: Buffer.from(manifest, 'utf8') },

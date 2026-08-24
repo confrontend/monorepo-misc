@@ -23,9 +23,12 @@ type DuneSimCoverage = {
  */
 export function computeDuneQueriedPercent(sim: DuneSimTargets | null | undefined): number | null {
   if (!sim) return null;
-  const total = (sim.pendingDuneTargets ?? 0) + (sim.duneNoMatchTargets ?? 0) + (sim.duneMatchedTargets ?? 0);
+  const total =
+    (sim.pendingDuneTargets ?? 0) + (sim.duneNoMatchTargets ?? 0) + (sim.duneMatchedTargets ?? 0);
   if (total <= 0) return null;
-  return Math.round(((sim.duneNoMatchTargets ?? 0) + (sim.duneMatchedTargets ?? 0)) / total * 100);
+  return Math.round(
+    (((sim.duneNoMatchTargets ?? 0) + (sim.duneMatchedTargets ?? 0)) / total) * 100,
+  );
 }
 
 /**
@@ -50,7 +53,10 @@ export function buildDuneFetchProgressText(duneQueriedPercent: number | null): s
  * drifted to a whole-number percentage with no fraction shown — that call site is migrated to
  * this shared text as part of this change (see decisionSelectors usage in ui/main.tsx).
  */
-export function buildUsableCoverageText(coverage: number | null | undefined, sim: DuneSimCoverage | null | undefined): string {
+export function buildUsableCoverageText(
+  coverage: number | null | undefined,
+  sim: DuneSimCoverage | null | undefined,
+): string {
   if (coverage === null || coverage === undefined) return 'Dune usable coverage is not available.';
   return `Dune usable coverage is ${coverage.toFixed(1)}% (${sim?.copiedTrades ?? 0} matched of ${sim?.roundTripsConsidered ?? 0} eligible round trips).`;
 }
@@ -66,10 +72,12 @@ export function buildEvidenceReason(params: {
   coverage: number | null | undefined;
   sim: (DuneSimTargets & DuneSimCoverage) | null | undefined;
 }): string {
-  if (!params.needsMoreEvidence) return 'This wallet does not currently need more decision evidence.';
-  const reasonsText = params.decisionReasons && params.decisionReasons.length > 0
-    ? params.decisionReasons.join('\n')
-    : 'Required decision evidence is incomplete.';
+  if (!params.needsMoreEvidence)
+    return 'This wallet does not currently need more decision evidence.';
+  const reasonsText =
+    params.decisionReasons && params.decisionReasons.length > 0
+      ? params.decisionReasons.join('\n')
+      : 'Required decision evidence is incomplete.';
   const coverageText = buildUsableCoverageText(params.coverage, params.sim);
   const queryText = buildDuneFetchProgressText(computeDuneQueriedPercent(params.sim));
   return `${reasonsText}\n\n${coverageText}\n${queryText}`;

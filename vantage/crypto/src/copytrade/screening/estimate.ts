@@ -53,13 +53,16 @@ type EstimateRow = {
   freshWalletPeriodDays: number;
 };
 
-const readRow = (database: DatabaseSync): EstimateRow | undefined => database.prepare(
-  `SELECT last_run_id AS lastRunId, runs_counted AS runsCounted, total_seconds AS totalSeconds,
+const readRow = (database: DatabaseSync): EstimateRow | undefined =>
+  database
+    .prepare(
+      `SELECT last_run_id AS lastRunId, runs_counted AS runsCounted, total_seconds AS totalSeconds,
           total_requests AS totalRequests, fresh_wallets AS freshWallets, fresh_requests AS freshRequests,
           covered_wallets AS coveredWallets, covered_requests AS coveredRequests,
           fresh_wallet_period_days AS freshWalletPeriodDays
    FROM copytrade_fetch_estimate WHERE cache_key = ?`,
-).get(FETCH_ESTIMATE_KEY) as EstimateRow | undefined;
+    )
+    .get(FETCH_ESTIMATE_KEY) as EstimateRow | undefined;
 
 const confidenceFor = (runsCounted: number): FetchProjection['confidence'] =>
   runsCounted === 0 ? 'seeded' : runsCounted < 3 ? 'low' : runsCounted < 8 ? 'medium' : 'high';
@@ -88,7 +91,11 @@ const classifyWallets = (
     const row = readOldest.get(wallet.walletAddress, options.chain) as { oldest: number | null };
     if (row.oldest !== null && row.oldest <= cutoffSeconds) covered += 1;
   }
-  return { walletCount: wallets.length, freshWallets: wallets.length - covered, coveredWallets: covered };
+  return {
+    walletCount: wallets.length,
+    freshWallets: wallets.length - covered,
+    coveredWallets: covered,
+  };
 };
 
 export const readFetchEstimateBasis = (database: DatabaseSync): FetchEstimateBasis => {
@@ -110,12 +117,26 @@ export const readFetchEstimateBasis = (database: DatabaseSync): FetchEstimateBas
     runsCounted: row.runsCounted,
     lastRunId: row.lastRunId,
     secondsPerRequest: row.totalSeconds / row.totalRequests,
-    requestsPerFreshWallet: row.freshWallets > 0 ? row.freshRequests / row.freshWallets : DEFAULT_REQUESTS_PER_FRESH_WALLET,
-    requestsPerCoveredWallet: row.coveredWallets > 0 ? row.coveredRequests / row.coveredWallets : DEFAULT_REQUESTS_PER_COVERED_WALLET,
-    observedPeriodDays: row.freshWallets > 0 ? row.freshWalletPeriodDays / row.freshWallets : DEFAULT_OBSERVED_PERIOD_DAYS,
-    updatedAt: (database.prepare(
-      `SELECT updated_at AS updatedAt FROM copytrade_fetch_estimate WHERE cache_key = ?`,
-    ).get(FETCH_ESTIMATE_KEY) as { updatedAt: string } | undefined)?.updatedAt ?? null,
+    requestsPerFreshWallet:
+      row.freshWallets > 0
+        ? row.freshRequests / row.freshWallets
+        : DEFAULT_REQUESTS_PER_FRESH_WALLET,
+    requestsPerCoveredWallet:
+      row.coveredWallets > 0
+        ? row.coveredRequests / row.coveredWallets
+        : DEFAULT_REQUESTS_PER_COVERED_WALLET,
+    observedPeriodDays:
+      row.freshWallets > 0
+        ? row.freshWalletPeriodDays / row.freshWallets
+        : DEFAULT_OBSERVED_PERIOD_DAYS,
+    updatedAt:
+      (
+        database
+          .prepare(
+            `SELECT updated_at AS updatedAt FROM copytrade_fetch_estimate WHERE cache_key = ?`,
+          )
+          .get(FETCH_ESTIMATE_KEY) as { updatedAt: string } | undefined
+      )?.updatedAt ?? null,
   };
 };
 
@@ -128,14 +149,28 @@ export const readFetchEstimateBasis = (database: DatabaseSync): FetchEstimateBas
  * the same run (or replaying an old one) can never double-count. Nothing here reads more than
  * the single run being folded in.
  */
-export const recordFetchRunEstimate = (database: DatabaseSync, runId: number, now = new Date()): boolean => {
+export const recordFetchRunEstimate = (
+  database: DatabaseSync,
+  runId: number,
+  now = new Date(),
+): boolean => {
   const existing = readRow(database);
   if (existing && runId <= existing.lastRunId) return false;
 
-  const run = database.prepare(
-    `SELECT id, started_at AS startedAt, completed_at AS completedAt, status, requests_made AS requestsMade
+  const run = database
+    .prepare(
+      `SELECT id, started_at AS startedAt, completed_at AS completedAt, status, requests_made AS requestsMade
      FROM copytrade_fetch_runs WHERE id = ?`,
-  ).get(runId) as { id: number; startedAt: string; completedAt: string | null; status: string; requestsMade: number } | undefined;
+    )
+    .get(runId) as
+    | {
+        id: number;
+        startedAt: string;
+        completedAt: string | null;
+        status: string;
+        requestsMade: number;
+      }
+    | undefined;
   if (!run || run.status !== 'completed' || !run.completedAt) return false;
 
   const seconds = (Date.parse(run.completedAt) - Date.parse(run.startedAt)) / 1000;
@@ -143,22 +178,37 @@ export const recordFetchRunEstimate = (database: DatabaseSync, runId: number, no
 
   // `up_to_date` is the fetcher's own name for "stored history already covers the window",
   // which is exactly the covered/fresh split the projection needs.
-  const events = database.prepare(
-    `SELECT stop_reason AS stopReason, requests_used AS requestsUsed, requested_period_days AS periodDays
+  const events = database
+    .prepare(
+      `SELECT stop_reason AS stopReason, requests_used AS requestsUsed, requested_period_days AS periodDays
      FROM copytrade_wallet_coverage_events WHERE run_id = ?`,
-  ).all(runId) as unknown as Array<{ stopReason: string | null; requestsUsed: number; periodDays: number | null }>;
+    )
+    .all(runId) as unknown as Array<{
+    stopReason: string | null;
+    requestsUsed: number;
+    periodDays: number | null;
+  }>;
 
-  let freshWallets = 0; let freshRequests = 0; let coveredWallets = 0; let coveredRequests = 0; let freshPeriodDays = 0;
+  let freshWallets = 0;
+  let freshRequests = 0;
+  let coveredWallets = 0;
+  let coveredRequests = 0;
+  let freshPeriodDays = 0;
   for (const event of events) {
     if (event.stopReason === 'cancelled') continue;
-    if (event.stopReason === 'up_to_date') { coveredWallets += 1; coveredRequests += event.requestsUsed; continue; }
+    if (event.stopReason === 'up_to_date') {
+      coveredWallets += 1;
+      coveredRequests += event.requestsUsed;
+      continue;
+    }
     freshWallets += 1;
     freshRequests += event.requestsUsed;
     freshPeriodDays += event.periodDays ?? DEFAULT_OBSERVED_PERIOD_DAYS;
   }
 
-  database.prepare(
-    `INSERT INTO copytrade_fetch_estimate
+  database
+    .prepare(
+      `INSERT INTO copytrade_fetch_estimate
        (cache_key, last_run_id, runs_counted, total_seconds, total_requests,
         fresh_wallets, fresh_requests, covered_wallets, covered_requests, fresh_wallet_period_days, updated_at)
      VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -173,10 +223,19 @@ export const recordFetchRunEstimate = (database: DatabaseSync, runId: number, no
        covered_requests = copytrade_fetch_estimate.covered_requests + excluded.covered_requests,
        fresh_wallet_period_days = copytrade_fetch_estimate.fresh_wallet_period_days + excluded.fresh_wallet_period_days,
        updated_at = excluded.updated_at`,
-  ).run(
-    FETCH_ESTIMATE_KEY, runId, seconds, run.requestsMade,
-    freshWallets, freshRequests, coveredWallets, coveredRequests, freshPeriodDays, now.toISOString(),
-  );
+    )
+    .run(
+      FETCH_ESTIMATE_KEY,
+      runId,
+      seconds,
+      run.requestsMade,
+      freshWallets,
+      freshRequests,
+      coveredWallets,
+      coveredRequests,
+      freshPeriodDays,
+      now.toISOString(),
+    );
   return true;
 };
 
@@ -195,11 +254,19 @@ export const projectFetchDuration = (
   const chain = options.chain ?? 'sol';
   const now = options.now ?? new Date();
   const basis = readFetchEstimateBasis(database);
-  const { walletCount, freshWallets, coveredWallets } = classifyWallets(database, { chain, limit: options.limit, periodDays: options.periodDays, now });
+  const { walletCount, freshWallets, coveredWallets } = classifyWallets(database, {
+    chain,
+    limit: options.limit,
+    periodDays: options.periodDays,
+    now,
+  });
 
-  const periodScale = basis.observedPeriodDays > 0 ? options.periodDays / basis.observedPeriodDays : 1;
+  const periodScale =
+    basis.observedPeriodDays > 0 ? options.periodDays / basis.observedPeriodDays : 1;
   const perFresh = Math.min(MAX_REQUESTS_PER_WALLET, basis.requestsPerFreshWallet * periodScale);
-  const estimatedRequests = Math.round(freshWallets * perFresh + coveredWallets * basis.requestsPerCoveredWallet);
+  const estimatedRequests = Math.round(
+    freshWallets * perFresh + coveredWallets * basis.requestsPerCoveredWallet,
+  );
 
   return {
     walletCount,
@@ -221,17 +288,25 @@ export const projectFetchDuration = (
  */
 export const estimateRemainingSeconds = (
   database: DatabaseSync,
-  run: { startedAt: string; walletDone: number; walletTotal: number; periodDays: number | null; chain?: string },
+  run: {
+    startedAt: string;
+    walletDone: number;
+    walletTotal: number;
+    periodDays: number | null;
+    chain?: string;
+  },
   now = new Date(),
 ): number | null => {
   const remaining = run.walletTotal - run.walletDone;
   if (remaining <= 0 || run.walletTotal <= 0) return null;
   if (run.walletDone > 0) {
     const elapsed = (now.getTime() - Date.parse(run.startedAt)) / 1000;
-    if (Number.isFinite(elapsed) && elapsed > 0) return Math.round((elapsed / run.walletDone) * remaining);
+    if (Number.isFinite(elapsed) && elapsed > 0)
+      return Math.round((elapsed / run.walletDone) * remaining);
   }
   const basis = readFetchEstimateBasis(database);
-  const periodScale = basis.observedPeriodDays > 0 && run.periodDays ? run.periodDays / basis.observedPeriodDays : 1;
+  const periodScale =
+    basis.observedPeriodDays > 0 && run.periodDays ? run.periodDays / basis.observedPeriodDays : 1;
   const perFresh = Math.min(MAX_REQUESTS_PER_WALLET, basis.requestsPerFreshWallet * periodScale);
   return Math.round(remaining * perFresh * basis.secondsPerRequest);
 };
