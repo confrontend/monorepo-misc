@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { Modal } from './components/Modal.js';
 import { DataTable } from './components/DataTable.js';
+import { WorkflowStep } from './components/WorkflowStep.js';
+import { PanelHeading } from './components/PanelHeading.js';
+import { useSortState } from './components/useSortState.js';
 import { normalizeGmgnProfitStat } from '../src/gmgn/normalize.js';
 import { assessWalletRiskGuardrails } from '../src/copytrade/scrutiny/walletRiskGuardrails.js';
 import { decideThirtyDayVerdict, explainThirtyDayDecision, thirtyDayDecisionPriority } from '../src/copytrade/scrutiny/decisionEngine.js';
@@ -977,7 +980,7 @@ function App() {
   const [outcomeTimelines, setOutcomeTimelines] = useState<OutcomeTimeline[]>([]);
   const [outcomePageSize, setOutcomePageSize] = useState<number | 'all'>(25);
   const [outcomePage, setOutcomePage] = useState(0);
-  const [outcomeSort, setOutcomeSort] = useState<{ key: OutcomeSortKey; direction: 'asc' | 'desc' }>({ key: 'signal', direction: 'asc' });
+  const { sort: outcomeSort, toggleSort: toggleOutcomeSort, sortIndicator } = useSortState<OutcomeSortKey>('signal', 'asc');
   const [patternReport, setPatternReport] = useState<SignalPatternReport | null>(null);
   const [patternSnapshots, setPatternSnapshots] = useState<SignalPatternSnapshot[]>([]);
   const [patternHorizon, setPatternHorizon] = useState<string | null>(null);
@@ -1110,10 +1113,10 @@ function App() {
   const [gmgnRiskBusy, setGmgnRiskBusy] = useState(false);
   const scrutinyLoadAbortRef = useRef<AbortController | null>(null);
   const [browserActivityImportBusy, setBrowserActivityImportBusy] = useState(false);
-  const [copyTradeSort, setCopyTradeSort] = useState<{ key: CopyTradeSortKey; direction: 'asc' | 'desc' }>({ key: 'endingCapitalUsd', direction: 'desc' });
-  const [decisionSort, setDecisionSort] = useState<{ key: DecisionSortKey; direction: 'asc' | 'desc' }>({ key: 'default', direction: 'asc' });
-  const [gmgnStatsSort, setGmgnStatsSort] = useState<{ key: GmgnStatsSortKey; direction: 'asc' | 'desc' }>({ key: 'pnl30d', direction: 'desc' });
-  const [copyDelaySort, setCopyDelaySort] = useState<{ key: CopyDelaySortKey; direction: 'asc' | 'desc' }>({ key: 'edge', direction: 'desc' });
+  const { sort: copyTradeSort, toggleSort: toggleCopyTradeSort, sortIndicator: copyTradeSortIndicator } = useSortState<CopyTradeSortKey>('endingCapitalUsd', 'desc');
+  const { sort: decisionSort, toggleSort: toggleDecisionSort, sortIndicator: decisionSortIndicator } = useSortState<DecisionSortKey>('default', 'asc');
+  const { sort: gmgnStatsSort, toggleSort: toggleGmgnStatsSort, sortIndicator: gmgnStatsSortIndicator } = useSortState<GmgnStatsSortKey>('pnl30d', 'desc');
+  const { sort: copyDelaySort, toggleSort: toggleCopyDelaySort, sortIndicator: copyDelaySortIndicator } = useSortState<CopyDelaySortKey>('edge', 'desc');
   const [showDelaySurvivorsOnly, setShowDelaySurvivorsOnly] = useState(true);
   const [decisionColumns, setDecisionColumns] = useState<Record<DecisionColumnKey, boolean>>(() => {
     const defaults = Object.fromEntries(DECISION_COLUMNS.map(({ key }) => [key, true])) as Record<DecisionColumnKey, boolean>;
@@ -2255,8 +2258,6 @@ function App() {
     return () => { window.removeEventListener('popstate', onLocationChange); window.removeEventListener('hashchange', onLocationChange); };
   }, []);
 
-  const toggleOutcomeSort = (key: OutcomeSortKey) => setOutcomeSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
-  const sortIndicator = (key: typeof outcomeSort.key) => outcomeSort.key === key ? (outcomeSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
   const outcomeColumns: Array<{ key: OutcomeSortKey; label: string }> = [
     { key: 'signal', label: 'Signal' },
     { key: 'type', label: 'Type' },
@@ -2716,8 +2717,6 @@ function App() {
   const wideRetryRemaining = copySimulationRunStatus?.mode === 'wide_retry'
     ? copySimulationRunStatus.retryableTargetsRemaining
     : null;
-  const toggleCopyDelaySort = (key: CopyDelaySortKey) => setCopyDelaySort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
-  const copyDelaySortIndicator = (key: CopyDelaySortKey) => copyDelaySort.key === key ? (copyDelaySort.direction === 'asc' ? ' ↑' : ' ↓') : '';
   const exportCopyDelayCsv = () => {
     if (visibleCopyDelayRows.length === 0) return;
     saveCsv(visibleCopyDelayRows.map((entry) => ({
@@ -2856,8 +2855,6 @@ function App() {
       walletAgeDays: row.riskEvidence?.walletAgeDays ?? null,
     };
   }).find((example) => example.holdSeconds !== null) ?? null;
-  const toggleGmgnStatsSort = (key: GmgnStatsSortKey) => setGmgnStatsSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
-  const gmgnStatsSortIndicator = (key: GmgnStatsSortKey) => gmgnStatsSort.key === key ? (gmgnStatsSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
   const gmgnStatsRowsWithData = copyTradeRows.filter((row) => gmgnLeaderboardMetrics[row.walletAddress] || gmgnStatsByWallet.has(row.walletAddress)).length;
   const gmgnStatsFreshRows = copyTradeRows.filter((row) => {
     const periods = gmgnStatsByWallet.get(row.walletAddress);
@@ -3106,10 +3103,6 @@ function App() {
     }
   };
 
-  const toggleCopyTradeSort = (key: CopyTradeSortKey) => setCopyTradeSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
-  const copyTradeSortIndicator = (key: CopyTradeSortKey) => copyTradeSort.key === key ? (copyTradeSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
-  const toggleDecisionSort = (key: Exclude<DecisionSortKey, 'default'>) => setDecisionSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
-  const decisionSortIndicator = (key: Exclude<DecisionSortKey, 'default'>) => decisionSort.key === key ? (decisionSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
   const toggleDecisionColumn = (key: DecisionColumnKey) => setDecisionColumns((current) => {
     const next = { ...current, [key]: !current[key] };
     try { localStorage.setItem(decisionColumnsStorageKey, JSON.stringify(next)); } catch { /* preference is optional */ }
@@ -3220,7 +3213,7 @@ function App() {
 
     <section id="imports" className="menu-section work-grid">
       <article className="panel upload-panel">
-        <div className="panel-heading"><div><p className="eyebrow">01 · DUNE COHORT</p><h2>Import historical tokens</h2></div><span className="tag">CSV / JSON</span></div>
+        <PanelHeading eyebrow="01 · DUNE COHORT" title="Import historical tokens" tag="CSV / JSON" />
         <p>Choose an export from your computer. Duplicate files and token addresses are safely skipped; malformed rows remain in the audit log.</p>
         <div className="credential-status">
           <span className={`status-dot ${duneBusyFile ? '' : stats.tokenCount > 0 ? 'good' : ''}`} />
@@ -3243,14 +3236,14 @@ function App() {
       </article>
 
       <article className="panel signal-panel">
-        <div className="panel-heading"><div><p className="eyebrow">MANUAL OVERRIDE</p><h2>Paste a raw observation</h2></div><span className="tag">JSON</span></div>
+        <PanelHeading eyebrow="MANUAL OVERRIDE" title="Paste a raw observation" tag="JSON" />
         <p>Optional: paste one captured event by hand instead of using automated capture below. The normalized fields are only a convenience; the complete payload is always retained.</p>
         <textarea value={gmgnPayload} onChange={(event) => setGmgnPayload(event.target.value)} spellCheck={false} />
         <button className="primary" disabled={busy} onClick={() => void captureGmgn()}>Save GMGN observation</button>
       </article>
 
       <article className="panel upload-panel">
-        <div className="panel-heading"><div><p className="eyebrow">TARGETED ENRICHMENT</p><h2>Look up GMGN tokens in Dune</h2></div><span className="tag">CSV / JSON</span></div>
+        <PanelHeading eyebrow="TARGETED ENRICHMENT" title="Look up GMGN tokens in Dune" tag="CSV / JSON" />
         <p>Most GMGN signals land on tokens the Dune cohort export never covered. Export the addresses GMGN has actually observed, look them up in Dune yourself, then upload the result here — it's stored separately from the original cohort and never overwrites an address already on file.</p>
         <div className="watch-controls">
           <button className="secondary" disabled={exportingAddresses} onClick={() => void exportGmgnTokenAddresses()}>{exportingAddresses ? 'Exporting…' : 'Export addresses (.txt)'}</button>
@@ -3284,7 +3277,7 @@ function App() {
     </section>
 
     <section id="capture" className="menu-section panel browser-import-panel">
-      <div className="panel-heading"><div><p className="eyebrow">GMGN BROWSER CAPTURE</p><h2>Import website signal evidence</h2></div><span className="tag">JSON EXPORT</span></div>
+      <PanelHeading eyebrow="GMGN BROWSER CAPTURE" title="Import website signal evidence" tag="JSON EXPORT" />
       <p>Upload an export produced by the authorized GMGN browser capture extension. Events are tagged <code>gmgn-browser-extension</code>, stored through the same append-only signal path, and the complete upload is archived with a manifest. This does not scrape or infer anything.</p>
       <div className="credential-status">
         <span className={`status-dot ${browserImportBusy ? '' : lastBrowserImport ? 'good' : ''}`} />
@@ -3341,7 +3334,7 @@ function App() {
     </section>
 
     <section id="analysis" className="menu-section panel snapshot-analysis-panel">
-      <div className="panel-heading"><div><p className="eyebrow">DESCRIPTIVE ANALYSIS</p><h2>Captured-signal snapshot</h2></div><span className="tag">NO SCORING</span></div>
+      <PanelHeading eyebrow="DESCRIPTIVE ANALYSIS" title="Captured-signal snapshot" tag="NO SCORING" />
       <p>This summarizes what is currently in the database. It describes the snapshot only; it does not decide whether any signal is good or bad.</p>
       {analysis && <>
         <div className="quality-grid">
@@ -3359,7 +3352,7 @@ function App() {
     </section>
 
     <section id="scoring" className="menu-section panel scoring-panel">
-      <div className="panel-heading"><div><p className="eyebrow">EXPLORATORY SCORING</p><h2>Signal data-readiness score</h2></div><span className="tag">PROVISIONAL</span></div>
+      <PanelHeading eyebrow="EXPLORATORY SCORING" title="Signal data-readiness score" tag="PROVISIONAL" />
       <p>This is the first transparent scoring experiment. It scores how much supporting data we have for each signal—not whether the signal made money.</p>
       {scoring && <>
         <div className="quality-grid"><div className="quality-metric"><strong>{scoring.averageScore}/8</strong><span>average readiness</span><small>{scoring.totalSignals} signals scored</small></div><div className="quality-metric"><strong>{scoring.scoreDistribution.find((item) => item.score === 8)?.count ?? 0}</strong><span>fully documented</span><small>all eight checks passed</small></div></div>
@@ -3371,7 +3364,7 @@ function App() {
 
     <section id="dune-capture" className="menu-section panel signal-outcome-batch-panel">
       <section className="outcome-inner">
-      <div className="panel-heading"><div><p className="eyebrow">DUNE SIGNAL OUTCOME TIMELINE</p><h2>Measure captured GMGN signals</h2></div><span className="tag">DUNE PRICE HISTORY</span></div>
+      <PanelHeading eyebrow="DUNE SIGNAL OUTCOME TIMELINE" title="Measure captured GMGN signals" tag="DUNE PRICE HISTORY" />
       <div className={`dune-activity ${duneActivity ? 'is-active' : 'is-idle'}`} role="status" aria-live="polite"><span className="activity-spinner" aria-hidden="true"></span><span>{duneActivityLabel}</span>{outcomeBatchProgress && outcomeBatchBusy && <small>{outcomeBatchProgress.completed}/{outcomeBatchProgress.total} signals · batch {Math.min(outcomeBatchProgress.current + 1, outcomeBatchProgress.batches)}/{outcomeBatchProgress.batches}</small>}</div>
       <details className="signal-legend"><summary>Signal-type legend</summary><div className="signal-legend-grid">{Object.keys(SIGNAL_TYPE_LABELS).map((code) => <div key={code}><b>{code} · {SIGNAL_TYPE_LABELS[code]}</b><small>{SIGNAL_TYPE_DESCRIPTIONS[code]}</small></div>)}</div><small>Names and high-level meanings are from GMGNAI’s official gmgn-skills CLI documentation. GMGN does not publish every wallet-classification, amount, count, or time-window threshold here, so these labels are observations—not quality or profitability verdicts.</small></details>
        <label className="select-all-row"><span>Signal type</span><select value={outcomeTypeFilter} onChange={(event) => setOutcomeTypeFilter(event.target.value)}><option value="all">All types</option>{outcomeTypeOptions.map((type) => <option key={type} value={type}>{type} · {formatSignalType(type)}</option>)}</select><small>{filteredOutcomeCandidates.length} captured signal{filteredOutcomeCandidates.length === 1 ? '' : 's'} in this filter</small></label>
@@ -3422,7 +3415,7 @@ function App() {
     </section>
 
     <section id="patterns" className="menu-section panel patterns-panel">
-      <div className="panel-heading"><div><p className="eyebrow">SIGNAL PATTERN BREAKDOWN</p><h2>Which signal types moved after the signal?</h2></div><span className="tag">DESCRIPTIVE</span></div>
+      <PanelHeading eyebrow="SIGNAL PATTERN BREAKDOWN" title="Which signal types moved after the signal?" tag="DESCRIPTIVE" />
       <p className="analysis-limitations"><strong>{displayedPatternReport?.disclaimer ?? 'Descriptive research only. This does not prove any signal type is profitable or predictive going forward.'}</strong></p>
       {displayedPatternReport && measurementPlan && <p className="measurement-plan-note">Patterns status: <span className={measurementPlan.latestDuneCompletedAt && displayedPatternReport.computedAt >= measurementPlan.latestDuneCompletedAt ? 'status-good' : 'status-warn'}>{measurementPlan.latestDuneCompletedAt && displayedPatternReport.computedAt >= measurementPlan.latestDuneCompletedAt ? 'UP TO DATE' : 'REFRESH NEEDED'}</span> · computed {formatTime(displayedPatternReport.computedAt)} · latest Dune run {formatTime(measurementPlan.latestDuneCompletedAt)} · this report issues no new Dune request.</p>}
       {displayedPatternReport && <p className="muted">V3 coverage gate: {displayedPatternReport.minCoveragePct}% fresh coverage across {displayedPatternReport.minCaptureDates} fresh capture dates; analysis unit is {displayedPatternReport.analysisUnit}. Trade-age cutoffs are enforced before a comparison can count as fresh.</p>}
@@ -3596,7 +3589,7 @@ function App() {
     </section>
 
     {copyTradeSubTab === 'wallet-stats' && <section id="copytrade-wallet-stats" className="menu-section panel copytrade-research-route">
-      <div className="panel-heading"><div><p className="eyebrow">30-DAY COHORT · 30-DAY DECISION</p><h2>Who is worth following?</h2></div><span className="tag">30D DECISION VIEW</span></div>
+      <PanelHeading eyebrow="30-DAY COHORT · 30-DAY DECISION" title="Who is worth following?" tag="30D DECISION VIEW" />
       {walletStatsTableLoading && <div className="copytrade-analysis-status running" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><strong>Loading saved trader evidence…</strong><small>Reading the roster, GMGN summaries, and Dune results from SQLite. Temporary verdicts are hidden until loading finishes.</small></div></div>}
       <div className="copytrade-final-decision-panel">
         <div className="copytrade-decision-state-counts">
@@ -3621,7 +3614,7 @@ function App() {
         <div className="copytrade-top-fetch-heading"><strong>Fetch controls</strong><span>Update saved GMGN history first, then run the Dune copy test.</span></div>
         <div className="copytrade-workflow-row copytrade-prefetch-scope-row">
           <div className="copytrade-workflow-label">
-            <span className="copytrade-workflow-step" title="Runs before step 1 — this only narrows which wallets steps 1 and 2 will touch, it fetches nothing itself.">0</span>
+            <WorkflowStep number={0} title="Runs before step 1 — this only narrows which wallets steps 1 and 2 will touch, it fetches nothing itself." />
             <div>
               <strong>Narrow the Dune scope first</strong>
               <small>
@@ -3652,7 +3645,7 @@ function App() {
         {researchUpdateBusy && <div className="copytrade-live-fetch-status" role="status" aria-live="polite"><div><strong>{researchUpdateStage ?? 'Preparing research…'}</strong><small>Existing GMGN and Dune responses are retained; only missing work is requested.</small></div>{gmgnStatsStatus?.running && <div><b>GMGN summaries</b><span>{gmgnStatsStatus.walletDone} / {gmgnStatsStatus.walletTotal} wallets · {gmgnStatsStatus.requestsMade} requests</span><small>Fetching and parsing wallet statistics</small></div>}{copySimulationRunStatus?.running && <div><b>Dune copy prices</b><span>Query {copySimulationRunStatus.currentBatch || '—'} / {copySimulationRunStatus.batchesTotal || '—'} · {copySimulationRunStatus.targetsProcessed.toLocaleString()} / {copySimulationRunStatus.targetsTotal.toLocaleString()} targets</span><small>{copySimulationRunStatus.storedTargets.toLocaleString()} stored · {copySimulationRunStatus.failedTargets.toLocaleString()} failed · {copySimulationRunStatus.remainingTargets.toLocaleString()} remaining · Dune {copySimulationRunStatus.duneState?.replace('QUERY_STATE_', '').toLowerCase() ?? 'submitting'}</small><small>{copySimulationRunStatus.message}</small></div>}</div>}
         <div className="copytrade-workflow-actions">
           <div className="copytrade-workflow-row">
-            <div className="copytrade-workflow-label"><span className="copytrade-workflow-step">1</span><div><strong>GMGN screening</strong><small>{visibleWalletScreenSummary ? `${visibleWalletScreenSummary.statsWalletCount}/${visibleWalletScreenSummary.walletCount} wallets · fetched ${formatFetchTime(visibleWalletScreenSummary.lastFetchedAt)}` : 'No saved screening yet'}</small></div><button type="button" className="copytrade-icon-button" onClick={() => void openRosterComparison()} disabled={rosterComparisonLoading} title="Compare the current GMGN top 100 with the previous saved list" aria-label="Open GMGN top 100 comparison">{rosterComparisonLoading ? '…' : '☷'}</button></div>
+            <div className="copytrade-workflow-label"><WorkflowStep number={1} /><div><strong>GMGN screening</strong><small>{visibleWalletScreenSummary ? `${visibleWalletScreenSummary.statsWalletCount}/${visibleWalletScreenSummary.walletCount} wallets · fetched ${formatFetchTime(visibleWalletScreenSummary.lastFetchedAt)}` : 'No saved screening yet'}</small></div><button type="button" className="copytrade-icon-button" onClick={() => void openRosterComparison()} disabled={rosterComparisonLoading} title="Compare the current GMGN top 100 with the previous saved list" aria-label="Open GMGN top 100 comparison">{rosterComparisonLoading ? '…' : '☷'}</button></div>
             <div className="copytrade-workflow-status"><strong>{rosterFetchStatus?.running ? 'Fetching…' : visibleWalletScreenSummary ? 'Saved screening available' : 'Not fetched'}</strong><small>Complete wallet history and 30-day summaries</small></div>
             {rosterFetchStatus?.running && <div className="copytrade-top-fetch-detail" role="status" aria-live="polite">
               <div className="copytrade-top-fetch-detail-head"><strong>{rosterFetchStatus.walletDone ?? 0}/{rosterFetchStatus.walletTotal ?? 0} wallets</strong><span>{rosterProgressPercent === null ? 'Progress calculating' : `${rosterProgressPercent.toFixed(1)}%`}</span></div>
@@ -3682,7 +3675,7 @@ function App() {
             </div>}
           </div>
           <div className="copytrade-workflow-row">
-            <div className="copytrade-workflow-label"><span className="copytrade-workflow-step">2</span><div><strong>Dune copy test</strong><small>{copySimulationRunStatus?.persistedRun?.completedAt ? `Last fetched ${formatFetchTime(copySimulationRunStatus.persistedRun.completedAt)}` : 'No saved Dune run yet'}</small></div></div>
+            <div className="copytrade-workflow-label"><WorkflowStep number={2} /><div><strong>Dune copy test</strong><small>{copySimulationRunStatus?.persistedRun?.completedAt ? `Last fetched ${formatFetchTime(copySimulationRunStatus.persistedRun.completedAt)}` : 'No saved Dune run yet'}</small></div></div>
             <div className="copytrade-workflow-status"><strong>{duneRunActive ? 'Processing Dune targets…' : preciseTargetsRemaining === 0 ? 'Dune complete · no new targets' : copySimulationRunStatus?.outcome === 'complete' ? 'Dune run complete' : copySimulationRunStatus?.persistedRun ? 'Saved Dune evidence available' : 'Not fetched'}</strong><small>{duneRunActive && copySimulationRunStatus ? `${copySimulationRunStatus.targetsProcessed.toLocaleString()} / ${copySimulationRunStatus.targetsTotal.toLocaleString()} targets processed · ${copySimulationRunStatus.remainingTargets.toLocaleString()} remaining` : `${duneNeedsDataCount} wallets need more evidence; ${preciseTargetsRemaining === null ? 'Dune target count is loading' : `${preciseTargetsRemaining.toLocaleString()} price targets remain`}`}</small></div>
             {copySimulationRunStatus?.running
               ? <button className="primary copytrade-stop-button" onClick={() => void stopCopySimulation()} disabled={copySimulationStopBusy}>{copySimulationStopBusy ? 'Stopping…' : 'Stop Dune fetch'}</button>
@@ -4039,7 +4032,7 @@ function App() {
       <summary>Advanced diagnostics</summary>
       <p className="muted">Research-maintenance tooling, not a recommendation view. Use the canonical table above to decide who to follow; use this to investigate why a wallet reads the way it does.</p>
       <div id="copytrade-elimination" className="copytrade-temp-panel">
-      <div className="panel-heading"><div><p className="eyebrow">TEMPORARY · PRE-SIMULATION TRIAGE</p><h2>Which wallets can we stop chasing?</h2></div><span className="tag">EXPERIMENTAL</span></div>
+      <PanelHeading eyebrow="TEMPORARY · PRE-SIMULATION TRIAGE" title="Which wallets can we stop chasing?" tag="EXPERIMENTAL" />
       <p className="muted">
         Judged over 30 days of history, matching the GMGN 30-day P&amp;L this eliminates on. Eliminates
         a wallet only when its data is trustworthy — GMGN history complete and not failed, at least
@@ -4121,7 +4114,7 @@ function App() {
     </details>}
 
     {copyTradeSubTab === 'pattern-discovery' && <section id="copytrade-pattern-discovery" className="menu-section panel copytrade-research-route pattern-discovery-panel">
-      <div className="panel-heading"><div><p className="eyebrow">GMGN COPYTRADE · SHARED ENGINE EXPORT</p><h2>Pattern Discovery</h2></div><span className="tag">100% OUTCOME COVERAGE</span></div>
+      <PanelHeading eyebrow="GMGN COPYTRADE · SHARED ENGINE EXPORT" title="Pattern Discovery" tag="100% OUTCOME COVERAGE" />
       <p className="compact-info-line"><span>Read-only normalized export for wallets with exactly 100% Dune copy-simulation outcome coverage in the selected period.</span></p>
       <p className="copytrade-outcome-coverage-warning"><strong>Complete outcome set:</strong> every paired round trip for these wallets has a usable delayed-copy result for the selected period.</p>
       <p className="muted"><strong>Strict feature gate:</strong> the shared run uses only the explicit event-time <code>features</code> object. Return, hold-duration, delay, fee, outcome, and post-event matching fields are rejected as leakage and are never valid discovery features. The current GMGN export may therefore produce insufficient data rather than a valid pattern.</p>
@@ -4195,7 +4188,7 @@ function App() {
     </section>
 
     <section className="menu-section quality-panel panel">
-      <div className="panel-heading"><div><p className="eyebrow">DATA QUALITY · V1.1 LINKAGE</p><h2>Cohort ↔ GMGN coverage</h2></div><span className="tag">ADDRESS JOIN</span></div>
+      <PanelHeading eyebrow="DATA QUALITY · V1.1 LINKAGE" title="Cohort ↔ GMGN coverage" tag="ADDRESS JOIN" />
       <p>Signals are matched to the imported cohort by exact <code>token_address</code>. Unmatched observations stay preserved for later review.</p>
       <div className="quality-grid">
         <div className="quality-metric"><strong>{quality.coveragePercent}%</strong><span>signals matched to cohort</span><small>{quality.matchedSignalCount} of {quality.signalCount}</small></div>
@@ -4206,10 +4199,10 @@ function App() {
     </section>
 
     <section className="menu-section lower-grid">
-      <article className="panel"><div className="panel-heading"><div><p className="eyebrow">ACTIVITY</p><h2>Recent imports</h2></div></div>
+      <article className="panel"><PanelHeading eyebrow="ACTIVITY" title="Recent imports" />
         {imports.length === 0 ? <p className="muted">No Dune exports processed yet.</p> : <div className="table-wrap"><table><thead><tr><th>Source</th><th>Rows</th><th>Archive</th></tr></thead><tbody>{imports.map((item) => <tr key={item.id ?? item.batchId}><td><strong>{item.sourcePath.split(/[\\/]/).pop()}</strong><small>{item.status ?? 'completed'}</small></td><td><span className="count-good">+{item.imported}</span> / {item.skipped} skipped / {item.errors} errors</td><td>{item.archivePath ? <span className="archived">ZIP archived</span> : '—'}</td></tr>)}</tbody></table></div>}
       </article>
-      <article className="panel"><div className="panel-heading"><div><p className="eyebrow">SIGNAL MIX</p><h2>By signal type</h2></div></div>
+      <article className="panel"><PanelHeading eyebrow="SIGNAL MIX" title="By signal type" />
         {stats.signalsByType.length === 0 ? <p className="muted">No signal types captured yet.</p> : <div className="bars">{stats.signalsByType.map((item) => <div className="bar-row" key={item.signalType}><span>{item.signalType}</span><b style={{ width: `${Math.max(8, item.count / Math.max(...stats.signalsByType.map((entry) => entry.count)) * 100)}%` }}>{item.count}</b></div>)}</div>}
       </article>
     </section>
