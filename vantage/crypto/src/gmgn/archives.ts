@@ -73,7 +73,7 @@ const readOneArchive = (directory: string, fileName: string): GmgnArchiveSummary
   const stats = statSync(archivePath);
   const archiveSha256 = createHash('sha256').update(bytes).digest('hex');
   const nameMatch = FILENAME_PATTERN.exec(fileName);
-  const expectedShaPrefix = nameMatch ? nameMatch[1]! : null;
+  const expectedShaPrefix = nameMatch ? nameMatch[1] : null;
   const hashVerified = expectedShaPrefix !== null && archiveSha256.startsWith(expectedShaPrefix);
 
   let structureVerified = false;

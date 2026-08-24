@@ -481,7 +481,7 @@ export const listRosterWallets = (
      FROM copytrade_wallets
      WHERE chain = ? AND ${scope}
      ORDER BY rank_position IS NULL, rank_position ASC, wallet_address ASC`,
-  ).all(chain, options.allSnapshots ? chain : latestSnapshotId as number) as unknown as Array<Omit<RosterWallet, 'riskFlags' | 'gmgnTags'> & { riskFlags: string; gmgnTags: string }>;
+  ).all(chain, options.allSnapshots ? chain : latestSnapshotId) as unknown as Array<Omit<RosterWallet, 'riskFlags' | 'gmgnTags'> & { riskFlags: string; gmgnTags: string }>;
 
   const wallets = rows.map((row) => {
     // Unparseable flags mean "we do not know", and the safe reading of "we do not know" is

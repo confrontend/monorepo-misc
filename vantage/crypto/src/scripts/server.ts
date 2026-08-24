@@ -32,7 +32,7 @@ import { computeCopyTradeReport, readCopyTradeSummary, saveCopyTradeSnapshot } f
 import { computeHistoricalConsistency } from '../copytrade/scrutiny/historicalConsistency.js';
 import { computeCopyCandidates, computeHighUpsideEligibleCandidates, computeScreenPassCandidates, type CopySimulationSurvivalInput } from '../copytrade/scrutiny/copyCandidates.js';
 import { listLeaderboardSnapshotStatuses, listRosterWallets, readCaptureHealth, resolveSingleTrader, syncCopyTradeRoster } from '../copytrade/screening/roster.js';
-import { refreshCurrentWalletRank, RESEARCH_RANK_MIN_WINRATE_30D, RESEARCH_RANK_ORDERBY } from '../gmgn/walletRankFetch.js';
+import { importWalletRankSnapshot, refreshCurrentWalletRank, RESEARCH_RANK_MIN_WINRATE_30D, RESEARCH_RANK_ORDERBY } from '../gmgn/walletRankFetch.js';
 import { compareLatestRosterSnapshots } from '../copytrade/screening/roster.js';
 import { hasActiveFetchRun, readFetchRunState, reconcileStaleFetchRuns, requestCopyTradeFetchStop, resetCopyTradeFetchResume, startCopyTradeFetch } from '../copytrade/screening/fetch.js';
 import { readGmgnStatsFetchStatus, startGmgnStatsFetch, stopGmgnStatsFetch } from '../copytrade/screening/statsFetch.js';
@@ -46,6 +46,8 @@ import { PatternDiscoveryRunnerError, runPatternDiscoveryReport } from '../copyt
 import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
+import { computeExperimentalDecisionReport } from '../copytrade/experimentalDecision.js';
+import { API_CATALOG } from '../apiCatalog.js';
 
 /** Scrutiny interrogates individually-pinned wallets, not a ranked top-N — so its roster scope
  *  must cover the whole roster (well above its current ~113-wallet size), unlike /winners's
@@ -331,6 +333,10 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
   };
 
   try {
+    if (request.method === 'GET' && requestUrl.pathname === '/api/docs') {
+      respond(200, { generatedAt: new Date().toISOString(), source: 'server API catalog', count: API_CATALOG.length, endpoints: API_CATALOG });
+      return;
+    }
     if (request.method === 'GET' && requestUrl.pathname === '/api/stats') {
       respond(200, readDatabaseStats(database));
       return;
@@ -399,7 +405,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/subgroups') {
       const property = requestUrl.searchParams.get('property');
       if (property !== 'launchPlatform' && property !== 'tokenAge' && property !== 'combined') { respond(400, { error: 'property must be "launchPlatform", "tokenAge", or "combined".' }); return; }
-      respond(200, computeSignalPatternSubgroupReport(database, property as SubgroupProperty));
+      respond(200, computeSignalPatternSubgroupReport(database, property));
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/robust') {
@@ -650,6 +656,18 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, result);
       return;
     }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/roster/import') {
+      const payload = await readJsonBody(request) as { name?: unknown; content?: unknown };
+      if (typeof payload.content !== 'string' || payload.content.trim().length === 0) { respond(400, { error: 'A non-empty roster JSON file is required.' }); return; }
+      try {
+        const imported = importWalletRankSnapshot(database, JSON.parse(payload.content));
+        const roster = syncCopyTradeRoster(database, { chain: 'sol', limit: 100 });
+        respond(200, { ...imported, roster, sourceName: typeof payload.name === 'string' ? payload.name : 'roster.json' });
+      } catch (error) {
+        respond(400, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/roster/refresh') {
       const payload = await readJsonBody(request).catch(() => ({})) as { limit?: unknown; orderby?: unknown; minWinrate30d?: unknown; useSavedSnapshot?: unknown };
       const limit = Number(payload.limit);
@@ -696,6 +714,58 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const traderLimit = Number.isInteger(payload.limit) && Number(payload.limit) > 0 ? Number(payload.limit) : undefined;
       const rosterSnapshotId = Number.isInteger(payload.snapshotId) && Number(payload.snapshotId) > 0 ? Number(payload.snapshotId) : undefined;
       respond(200, saveCopyTradeSnapshot(database, computeCopyTradeReport(database, { periodDays, traderLimit, rosterSnapshotId })));
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/trades/bulk') {
+      const payload = await readJsonBody(request) as { walletAddresses?: unknown };
+      const walletAddresses = Array.isArray(payload.walletAddresses)
+        ? [...new Set(payload.walletAddresses.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean))]
+        : [];
+      if (walletAddresses.length === 0) { respond(400, { error: 'At least one wallet address is required.' }); return; }
+      if (walletAddresses.length > 500) { respond(400, { error: 'A maximum of 500 wallet addresses can be requested.' }); return; }
+
+      // Read-only history endpoint. It returns every locally stored row for each requested
+      // wallet; no GMGN/Dune request is made and no rows are modified. Keeping the same
+      // response shape as the single-wallet endpoint lets export consume one authoritative
+      // stored-history representation.
+      const placeholders = walletAddresses.map(() => '?').join(', ');
+      const rows = database.prepare(
+        `SELECT id, wallet_address AS walletAddress, chain, tx_hash AS txHash,
+                event_type AS eventType, token_address AS tokenAddress,
+                token_symbol AS tokenSymbol, observed_timestamp AS observedTimestamp,
+                token_amount AS tokenAmount, cost_usd AS costUsd,
+                buy_cost_usd AS buyCostUsd, price_usd AS priceUsd,
+                gas_usd AS gasUsd, dex_usd AS dexUsd,
+                launchpad_platform AS launchpadPlatform, fetched_at AS fetchedAt
+         FROM copytrade_trades
+         WHERE wallet_address IN (${placeholders}) AND chain = 'sol'
+         ORDER BY wallet_address, observed_timestamp DESC, id DESC`,
+      ).all(...walletAddresses) as Array<Record<string, unknown>>;
+      const coverageRows = database.prepare(
+        `SELECT wallet_address AS walletAddress, requests_used AS requestsUsed,
+                requested_period_days AS periodDays, truncated,
+                stop_reason AS stopReason, updated_at AS updatedAt,
+                resume_cursor AS resumeCursor
+         FROM copytrade_wallet_coverage
+         WHERE wallet_address IN (${placeholders}) AND chain = 'sol'`,
+      ).all(...walletAddresses) as Array<Record<string, unknown>>;
+      const rowsByWallet = new Map<string, Array<Record<string, unknown>>>();
+      for (const row of rows) {
+        const walletAddress = String(row.walletAddress);
+        const walletRows = rowsByWallet.get(walletAddress) ?? [];
+        walletRows.push(row);
+        rowsByWallet.set(walletAddress, walletRows);
+      }
+      const coverageByWallet = new Map(coverageRows.map((row) => [String(row.walletAddress), row]));
+      respond(200, {
+        histories: walletAddresses.map((walletAddress) => ({
+          walletAddress,
+          chain: 'sol',
+          total: rowsByWallet.get(walletAddress)?.length ?? 0,
+          rows: rowsByWallet.get(walletAddress) ?? [],
+          coverage: coverageByWallet.get(walletAddress) ?? null,
+        })),
+      });
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/copytrade/trades/')) {
@@ -858,6 +928,16 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       }));
       return;
     }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/experimental-decision') {
+      const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
+      const snapshotRaw = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, Math.floor(limitRaw))) : 100;
+      const rosterSnapshotId = Number.isInteger(snapshotRaw) && snapshotRaw > 0 ? snapshotRaw : undefined;
+      // This endpoint is intentionally not wired to any fetch runner. It only computes a
+      // separately named experiment from saved SQLite evidence and cannot spend provider credits.
+      respond(200, readCachedResearch(`experimental-decision-v4:${limit}:${rosterSnapshotId ?? 'latest'}`, () => computeExperimentalDecisionReport(database, { limit, rosterSnapshotId })));
+      return;
+    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/scrutiny/refresh-trades') {
       // Scoped re-fetch for the pinned candidates only — same startCopyTradeFetch call and the
       // same 'single' scope as POST /api/copytrade/fetch/single above, just for several wallets
@@ -987,7 +1067,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       // way; only which wallets it covers changes.
       const wideRetry = requestUrl.pathname.endsWith('/wide-retry');
       const body = request.headers['content-length'] && request.headers['content-length'] !== '0'
-        ? (await readJsonBody(request)) as { walletAddresses?: unknown; periodDays?: unknown }
+        ? (await readJsonBody(request)) as { walletAddresses?: unknown; periodDays?: unknown; searchWindowMinutes?: unknown }
         : {};
       const requested = Array.isArray(body.walletAddresses)
         ? body.walletAddresses.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -1002,6 +1082,9 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       // actual Dune queue answer different questions.
       if (requestedPeriod !== 30) { respond(400, { error: 'Dune copy simulation is fixed to the 30-day decision period.' }); return; }
       const periodDays = 30;
+      const requestedSearchWindow = typeof body.searchWindowMinutes === 'number' && Number.isFinite(body.searchWindowMinutes)
+        ? Math.floor(body.searchWindowMinutes) : 120;
+      const searchWindowMinutes = wideRetry && [15, 30, 60, 120].includes(requestedSearchWindow) ? requestedSearchWindow : wideRetry ? 120 : undefined;
 
       let walletAddresses: string[];
       if (requested) {
@@ -1030,7 +1113,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           walletAddresses,
           periodDays,
           retryNoMatch: wideRetry,
-          searchWindowMinutes: wideRetry ? 120 : undefined,
+            searchWindowMinutes,
           shouldStop: () => copySimulationRunState.cancelRequested,
           onPlan: (plan) => {
             database.prepare('UPDATE copytrade_dune_fetch_audits SET planned_targets = ? WHERE id = ?').run(plan.targetsTotal, auditId);

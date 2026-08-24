@@ -47,9 +47,9 @@ test('readZipEntries round-trips entries written by zipStored, including empty a
   const entries = readZipEntries(archive);
   assert.equal(entries.length, 3);
   assert.deepEqual(entries.map((entry) => entry.name), ['gmgn-signal-response.json', 'manifest.json', 'empty.txt']);
-  assert.equal(entries[0]!.data.toString('utf8'), '[{"id":"evt-1"}]');
-  assert.deepEqual(JSON.parse(entries[1]!.data.toString('utf8')), { capturedAt: '2026-08-10T00:00:00.000Z', eventCount: 1 });
-  assert.equal(entries[2]!.data.length, 0);
+  assert.equal(entries[0].data.toString('utf8'), '[{"id":"evt-1"}]');
+  assert.deepEqual(JSON.parse(entries[1].data.toString('utf8')), { capturedAt: '2026-08-10T00:00:00.000Z', eventCount: 1 });
+  assert.equal(entries[2].data.length, 0);
 });
 
 test('readZipEntries rejects a file that is not a valid ZIP archive', () => {

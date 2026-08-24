@@ -52,12 +52,12 @@ export const probeGmgn = async (): Promise<GmgnProbeResult> => {
     try {
       const parsed: unknown = JSON.parse(stdout);
       if (Array.isArray(parsed)) observedItems = parsed.length;
-      else if (parsed && typeof parsed === 'object' && 'list' in parsed && Array.isArray((parsed as { list: unknown }).list)) observedItems = (parsed as { list: unknown[] }).list.length;
+      else if (parsed && typeof parsed === 'object' && 'list' in parsed && Array.isArray((parsed).list)) observedItems = (parsed as { list: unknown[] }).list.length;
     } catch { /* CLI may wrap JSON in human-readable output; status still proves the request completed. */ }
     return { ok: true, status: 'connected', message: 'GMGN read-only signal request completed. Raw response was not retained by the probe.', observedItems, checkedAt };
   } catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : '';
-    const stderr = error && typeof error === 'object' && 'stderr' in error ? String((error as { stderr: unknown }).stderr) : '';
+    const code = error && typeof error === 'object' && 'code' in error ? String((error).code) : '';
+    const stderr = error && typeof error === 'object' && 'stderr' in error ? String((error).stderr) : '';
     const details = `${code} ${stderr}`.toLowerCase();
     writeDiagnostics({
       checkedAt,

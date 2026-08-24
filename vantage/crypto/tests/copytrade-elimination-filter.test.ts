@@ -14,7 +14,7 @@ import { RULES, type CopyTradeRow, type Verdict } from '../src/copytrade/scrutin
 
 const baseRow = (walletAddress: string, over: Partial<CopyTradeRow> = {}): CopyTradeRow => ({
   walletAddress, name: null, trades: ELIMINATION_MIN_TRADES, winRatePercent: 60, medianReturnPercent: 10,
-  averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass' as Verdict,
+  averageReturnPercent: 10, endingCapitalUsd: 110, verdict: 'screen_pass',
   riskFlags: [], failedRules: [], excludedNoCostBasis: 0, endingCapitalUsdCompounded: 110,
   truncated: false, coveredDays: 90, lastTradeAt: null, daysSinceLastTrade: null,
   needsDuneBackfill: false, unreliableReason: null,

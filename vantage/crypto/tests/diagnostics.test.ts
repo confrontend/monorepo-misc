@@ -37,16 +37,16 @@ test('diagnostic logs are appended and read back newest first', () => {
 
     const logs = readRecentDiagnostics(database);
     assert.equal(logs.length, 3);
-    assert.equal(logs[0]!.event, 'request-error');
-    assert.equal(logs[0]!.level, 'error');
-    assert.equal(JSON.parse(logs[0]!.detail!).stack.startsWith('Error: Boom'), true);
-    assert.equal(logs[1]!.event, 'client-disconnected');
-    assert.equal(logs[1]!.requestBytes, 1_700_000);
-    assert.equal(logs[2]!.event, 'request-complete');
+    assert.equal(logs[0].event, 'request-error');
+    assert.equal(logs[0].level, 'error');
+    assert.equal(JSON.parse(logs[0].detail!).stack.startsWith('Error: Boom'), true);
+    assert.equal(logs[1].event, 'client-disconnected');
+    assert.equal(logs[1].requestBytes, 1_700_000);
+    assert.equal(logs[2].event, 'request-complete');
 
     const limited = readRecentDiagnostics(database, 1);
     assert.equal(limited.length, 1);
-    assert.equal(limited[0]!.event, 'request-error');
+    assert.equal(limited[0].event, 'request-error');
   } finally {
     database.close();
   }
@@ -74,7 +74,7 @@ test('diagnostics redact common API-key and authorization encodings before stora
       message: 'GMGN_API_KEY=not-for-storage Authorization: Bearer also-not-for-storage',
       detail: { api_key: 'not-for-storage', nested: 'Authorization: Bearer also-not-for-storage' },
     });
-    const saved = readRecentDiagnostics(database, 1)[0]!;
+    const saved = readRecentDiagnostics(database, 1)[0];
     assert.doesNotMatch(saved.message!, /not-for-storage|also-not-for-storage/);
     assert.doesNotMatch(saved.detail!, /not-for-storage|also-not-for-storage/);
     assert.match(saved.message!, /\[REDACTED\]/);
