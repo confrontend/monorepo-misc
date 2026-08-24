@@ -467,6 +467,29 @@ h2 {
   color: #91aa9e;
   line-height: 1.35;
 }
+.pattern-discovery-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  color: #c9e9d8;
+  font-size: 0.78rem;
+}
+.pattern-discovery-progress {
+  display: block;
+  width: 100%;
+  height: 7px;
+  margin: 7px 0 5px;
+  accent-color: #72d8aa;
+}
+.copytrade-loading-steps {
+  margin: 0.55rem 0 0.35rem;
+  padding-left: 1.25rem;
+  color: #c9e9d8;
+}
+.copytrade-loading-steps li {
+  margin: 0.18rem 0;
+}
 .copytrade-analysis-status-dot {
   width: 9px;
   height: 9px;
@@ -5072,6 +5095,159 @@ footer {
 }
 .pattern-discovery-rule-meta b {
   color: #cce9d8;
+}
+.pattern-discovery-rule {
+  display: block;
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.pattern-discovery-rule:hover,
+.pattern-discovery-rule:focus-visible {
+  border-color: rgba(114, 216, 175, 0.72);
+  background: rgba(114, 216, 175, 0.08);
+  outline: none;
+}
+.pattern-discovery-rule-title,
+.pattern-discovery-rule-main,
+.pattern-discovery-rule-meta {
+  width: 100%;
+}
+.pattern-discovery-results-heading p {
+  margin: 0.15rem 0 0;
+  max-width: 52rem;
+}
+.pattern-discovery-open-hint {
+  margin-left: auto;
+  color: #72d8aa;
+  font-weight: 700;
+}
+.pattern-discovery-rule-modal {
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: min(90vh, 52rem);
+  overflow: auto;
+}
+.pattern-rule-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.pattern-rule-dialog-heading h2 {
+  margin: 0.2rem 0 0;
+}
+.pattern-rule-summary,
+.pattern-rule-visual,
+.pattern-rule-example {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(114, 216, 175, 0.22);
+  border-radius: 0.6rem;
+  background: rgba(7, 25, 18, 0.3);
+}
+.pattern-rule-summary {
+  border-left: 3px solid #72d8aa;
+}
+.pattern-rule-summary.negative-rule {
+  border-left-color: #e58b91;
+}
+.pattern-rule-summary small {
+  display: block;
+  color: #789b8b;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+}
+.pattern-rule-summary > strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: #e4f6eb;
+  font-size: 1.05rem;
+}
+.pattern-rule-summary p,
+.pattern-rule-example p {
+  margin: 0.55rem 0 0;
+  color: #b9d6c6;
+  line-height: 1.5;
+}
+.pattern-rule-visual-heading,
+.pattern-effect-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pattern-rule-visual-heading {
+  justify-content: space-between;
+  color: #e2f6ea;
+}
+.pattern-rule-visual-heading span {
+  color: #8fe4ba;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.pattern-correlation-plot {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0 0;
+  overflow: visible;
+}
+.pattern-correlation-plot text {
+  fill: #8fa99c;
+  font-size: 10px;
+}
+.pattern-plot-axis { stroke: #45695a; stroke-width: 3; }
+.pattern-plot-zero { stroke: #9bc8b1; stroke-dasharray: 3 3; }
+.pattern-plot-positive { stroke: #72d8aa; stroke-width: 5; }
+.pattern-plot-negative { stroke: #e58b91; stroke-width: 5; }
+.pattern-plot-positive-fill { fill: #72d8aa; }
+.pattern-plot-negative-fill { fill: #e58b91; }
+.pattern-effect-row {
+  margin-top: 0.8rem;
+}
+.pattern-effect-row > span:first-child {
+  width: 5rem;
+  color: #a9c8b5;
+  font-size: 0.78rem;
+}
+.pattern-effect-track {
+  flex: 1;
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #19372a;
+}
+.pattern-effect-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+.pattern-effect-track i.positive { background: #72d8aa; }
+.pattern-effect-track i.negative { background: #e58b91; }
+.pattern-effect-row b {
+  min-width: 4.5rem;
+  color: #dff8ea;
+  text-align: right;
+}
+.pattern-rule-visual .muted {
+  margin: 0.7rem 0 0;
+  font-size: 0.75rem;
+}
+.pattern-rule-dialog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  margin-top: 1rem;
+  color: #8fa99c;
+  font-size: 0.78rem;
+}
+.pattern-rule-dialog-meta b {
+  color: #dff8ea;
+}
+.pattern-rule-reason {
+  margin-top: 1rem;
+  color: #f0c875;
+  font-size: 0.8rem;
 }
 .pattern-discovery-details {
   margin-top: 0.9rem;

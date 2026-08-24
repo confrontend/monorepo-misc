@@ -6,7 +6,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
   MAX_PATTERN_DISCOVERY_PERIOD_DAYS,
+  MAX_PATTERN_DISCOVERY_WALLETS,
+  patternDiscoveryCacheKey,
+  readPatternDiscoveryCache,
+  readPatternDiscoveryDataFingerprint,
   readPatternDiscoveryExport,
+  writePatternDiscoveryCache,
 } from './patternDiscovery.js';
 
 const execFileAsync = promisify(execFile);
@@ -169,11 +174,24 @@ export const parsePatternDiscoveryReport = (raw: string): PatternDiscoveryReport
 
 export const runPatternDiscoveryReport = async (
   database: DatabaseSync,
-  options: { projectRoot: string; periodDays?: number; minN?: number; minimumCoveragePercent?: number },
-): Promise<{ report: PatternDiscoveryReport; execution: { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string } }> => {
+  options: { projectRoot: string; periodDays?: number; minN?: number; minimumCoveragePercent?: number; signal?: AbortSignal },
+): Promise<{ report: PatternDiscoveryReport; execution?: { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string } }> => {
   const { periodDays, minN } = validatePatternDiscoveryRunInput(options.periodDays, options.minN);
+  const minimumCoveragePercent = options.minimumCoveragePercent ?? 100;
+  const dataFingerprint = readPatternDiscoveryDataFingerprint(database);
+  const cachedReport = readPatternDiscoveryCache<PatternDiscoveryReport>(
+    database,
+    patternDiscoveryCacheKey('report', periodDays, minimumCoveragePercent, minN, MAX_PATTERN_DISCOVERY_WALLETS),
+    dataFingerprint,
+  );
+  if (cachedReport) {
+    return { report: cachedReport };
+  }
   const sharedRoot = resolvePatternDiscoverySharedRoot(options.projectRoot);
-  const normalized = readPatternDiscoveryExport(database, periodDays, undefined, options.minimumCoveragePercent ?? 100);
+  const exportCacheKey = patternDiscoveryCacheKey('export', periodDays, minimumCoveragePercent, undefined, MAX_PATTERN_DISCOVERY_WALLETS);
+  const normalized = readPatternDiscoveryCache<ReturnType<typeof readPatternDiscoveryExport>>(database, exportCacheKey, dataFingerprint)
+    ?? readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
+  writePatternDiscoveryCache(database, exportCacheKey, dataFingerprint, normalized);
   if (normalized.rows.length === 0) {
     throw new PatternDiscoveryRunnerError(`No outcome-coverage rows meet the selected ${normalized.metadata.minimum_coverage_percent}% threshold for the selected ${periodDays}-day period.`, 422);
   }
@@ -190,6 +208,7 @@ export const runPatternDiscoveryReport = async (
       timeout: RUN_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
       windowsHide: true,
+      signal: options.signal,
     });
   } catch (error) {
     const detail = error && typeof error === 'object' && 'stderr' in error && typeof error.stderr === 'string' && error.stderr.trim()
@@ -206,8 +225,10 @@ export const runPatternDiscoveryReport = async (
   } catch (error) {
     throw new PatternDiscoveryRunnerError(`Shared Python discovery completed without a readable report at ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
+  const report = parsePatternDiscoveryReport(reportRaw);
+  writePatternDiscoveryCache(database, patternDiscoveryCacheKey('report', periodDays, minimumCoveragePercent, minN, MAX_PATTERN_DISCOVERY_WALLETS), dataFingerprint, report);
   return {
-    report: parsePatternDiscoveryReport(reportRaw),
+    report,
     execution: { pythonExecutable: executable, inputPath, outputPath, sharedRoot },
   };
 };

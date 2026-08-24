@@ -3,7 +3,14 @@ import test from 'node:test';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDatabase } from '../src/platform/db/client.js';
 import { applyMigrations } from '../src/platform/db/schema.js';
-import { readPatternDiscoveryExport, readPreEventFeatures } from '../src/copytrade/discovery/patternDiscovery.js';
+import {
+  patternDiscoveryCacheKey,
+  readPatternDiscoveryCache,
+  readPatternDiscoveryDataFingerprint,
+  readPatternDiscoveryExport,
+  readPreEventFeatures,
+  writePatternDiscoveryCache,
+} from '../src/copytrade/discovery/patternDiscovery.js';
 
 const setup = (): DatabaseSync => {
   const database = openDatabase(':memory:');
@@ -70,5 +77,25 @@ test('pattern discovery pre-event features exclude the current and later same-se
     assert.equal(features.priorWalletMedianHoldSeconds, 10);
     assert.equal(features.priorWalletUnder15SecondsPercent, 100);
     assert.equal(features.priorWalletPairedTradeCount, 1);
+  } finally { database.close(); }
+});
+
+test('pattern discovery cache changes when persisted evidence changes', () => {
+  const database = setup();
+  try {
+    const key = patternDiscoveryCacheKey('report', 30, 100, 10);
+    const firstFingerprint = readPatternDiscoveryDataFingerprint(database);
+    writePatternDiscoveryCache(database, key, firstFingerprint, { cached: true });
+    assert.deepEqual(readPatternDiscoveryCache(database, key, firstFingerprint), { cached: true });
+
+    database.prepare(
+      `INSERT INTO copytrade_trades
+         (wallet_address, chain, tx_hash, event_type, token_address, observed_timestamp,
+          raw_payload, fetched_at, dedup_key)
+       VALUES ('CACHE_WALLET', 'sol', 'CACHE_TX', 'buy', 'CACHE_TOKEN', 1700000000, '{}', ?, 'CACHE_DEDUP')`,
+    ).run('2026-08-21T00:00:00.000Z');
+    const secondFingerprint = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(secondFingerprint, firstFingerprint);
+    assert.equal(readPatternDiscoveryCache(database, key, secondFingerprint), null);
   } finally { database.close(); }
 });

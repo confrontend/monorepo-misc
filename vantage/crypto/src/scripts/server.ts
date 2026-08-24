@@ -41,7 +41,7 @@ import { computeCopySimulationReport, computeLiquidityImpactReport, runCopySimul
 import { computeEliminationReport, estimateDuneRefetchDuration } from '../copytrade/scrutiny/eliminationFilter.js';
 import { computeCandidateScrutinyBatch, MAX_SCRUTINY_WALLETS } from '../copytrade/scrutiny/candidateScrutiny.js';
 import { DEFAULT_FULLY_COVERED_PERIOD_DAYS, readFullyCoveredWallets } from '../copytrade/scrutiny/fullyCovered.js';
-import { DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS, MAX_PATTERN_DISCOVERY_PERIOD_DAYS, readPatternDiscoveryExport } from '../copytrade/discovery/patternDiscovery.js';
+import { DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS, MAX_PATTERN_DISCOVERY_PERIOD_DAYS, patternDiscoveryCacheKey, readPatternDiscoveryCache, readPatternDiscoveryDataFingerprint, readPatternDiscoveryExport, writePatternDiscoveryCache } from '../copytrade/discovery/patternDiscovery.js';
 import { PatternDiscoveryRunnerError, runPatternDiscoveryReport } from '../copytrade/discovery/patternDiscoveryRunner.js';
 import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
@@ -486,7 +486,12 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         return;
       }
       try {
-        respond(200, readPatternDiscoveryExport(database, periodDays, limit, minimumCoveragePercent));
+        const fingerprint = readPatternDiscoveryDataFingerprint(database);
+        const cacheKey = patternDiscoveryCacheKey('export', periodDays, minimumCoveragePercent, undefined, limit);
+        const cached = readPatternDiscoveryCache(database, cacheKey, fingerprint);
+        const value = cached ?? readPatternDiscoveryExport(database, periodDays, limit, minimumCoveragePercent);
+        if (!cached) writePatternDiscoveryCache(database, cacheKey, fingerprint, value);
+        respond(200, value);
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -503,9 +508,12 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const periodDays = payload.periodDays === undefined ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS : Number(payload.periodDays);
       const minN = payload.minN === undefined ? 10 : Number(payload.minN);
       const minimumCoveragePercent = payload.minimumCoveragePercent === undefined ? 100 : Number(payload.minimumCoveragePercent);
+      const abortController = new AbortController();
+      request.once('aborted', () => abortController.abort());
       try {
-        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN, minimumCoveragePercent }));
+        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN, minimumCoveragePercent, signal: abortController.signal }));
       } catch (error) {
+        if (abortController.signal.aborted) return;
         const statusCode = error instanceof PatternDiscoveryRunnerError ? error.statusCode : 500;
         respond(statusCode, { error: error instanceof Error ? error.message : String(error) });
       }

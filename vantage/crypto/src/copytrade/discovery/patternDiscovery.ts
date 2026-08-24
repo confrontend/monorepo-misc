@@ -1,9 +1,12 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { computeCopySimulationReport, type CopySimulationTradeResult, type CopySimulationWalletReport } from '../simulation/copySimulation.js';
 
 export const DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS = 30;
 export const MAX_PATTERN_DISCOVERY_PERIOD_DAYS = 90;
 export const MAX_PATTERN_DISCOVERY_WALLETS = 500;
+/** Change this when the normalized export or discovery input contract changes. */
+export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v1';
 
 export type PatternDiscoveryExportRow = {
   project: 'crypto';
@@ -82,6 +85,86 @@ export type PatternDiscoveryExport = {
 };
 
 type FullyCoveredWallet = { walletAddress: string };
+
+type PatternDiscoveryCacheRow = { reportJson: string };
+
+/**
+ * Fingerprint every persisted input that can change the discovery population or outcome.
+ * Counts/max ids are not sufficient here: Dune runs are updated in place from running to
+ * completed, so the relevant row values are included in the digest as well.
+ */
+export const readPatternDiscoveryDataFingerprint = (database: DatabaseSync): string => {
+  const hash = createHash('sha256');
+  const addRows = (label: string, rows: unknown[]): void => {
+    hash.update(label, 'utf8');
+    for (const row of rows) hash.update(JSON.stringify(row), 'utf8');
+  };
+  addRows('wallets\n', database.prepare(
+    `SELECT wallet_address, chain, rank_position, source_snapshot_id, gmgn_tags
+     FROM copytrade_wallets ORDER BY wallet_address, chain, source_snapshot_id, rank_position`,
+  ).all());
+  addRows('coverage\n', database.prepare(
+    `SELECT wallet_address, chain, last_run_id, requests_used, truncated, coverage_complete,
+            requested_period_days, stop_reason, updated_at
+     FROM copytrade_wallet_coverage ORDER BY wallet_address, chain`,
+  ).all());
+  addRows('trades\n', database.prepare(
+    `SELECT id, wallet_address, chain, event_type, token_address, observed_timestamp,
+            cost_usd, buy_cost_usd, price_usd, gas_usd, fetched_at
+     FROM copytrade_trades ORDER BY id`,
+  ).all());
+  addRows('dune-runs\n', database.prepare(
+    `SELECT id, trade_refs, status, requested_at, completed_at, raw_result, search_window_minutes,
+            match_source, dune_last_state, dune_last_status_at
+     FROM copytrade_copy_simulation_runs ORDER BY id`,
+  ).all());
+  return hash.digest('hex');
+};
+
+export const patternDiscoveryCacheKey = (
+  kind: 'export' | 'report',
+  periodDays: number,
+  minimumCoveragePercent: number,
+  minN?: number,
+  limit = MAX_PATTERN_DISCOVERY_WALLETS,
+): string => [
+  PATTERN_DISCOVERY_ENGINE_VERSION,
+  kind,
+  periodDays,
+  minimumCoveragePercent,
+  minN ?? '',
+  limit,
+].join(':');
+
+export const readPatternDiscoveryCache = <T>(
+  database: DatabaseSync,
+  cacheKey: string,
+  dataFingerprint: string,
+): T | null => {
+  const row = database.prepare(
+    `SELECT report_json AS reportJson
+     FROM copytrade_report_cache
+     WHERE cache_key = ? AND data_fingerprint = ?`,
+  ).get(cacheKey, dataFingerprint) as PatternDiscoveryCacheRow | undefined;
+  if (!row) return null;
+  try { return JSON.parse(row.reportJson) as T; } catch { return null; }
+};
+
+export const writePatternDiscoveryCache = (
+  database: DatabaseSync,
+  cacheKey: string,
+  dataFingerprint: string,
+  value: unknown,
+): void => {
+  database.prepare(
+    `INSERT INTO copytrade_report_cache (cache_key, data_fingerprint, report_json, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET
+       data_fingerprint = excluded.data_fingerprint,
+       report_json = excluded.report_json,
+       updated_at = excluded.updated_at`,
+  ).run(cacheKey, dataFingerprint, JSON.stringify(value), new Date().toISOString());
+};
 
 const validatePeriodDays = (periodDays: number): number => {
   if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > MAX_PATTERN_DISCOVERY_PERIOD_DAYS) {
