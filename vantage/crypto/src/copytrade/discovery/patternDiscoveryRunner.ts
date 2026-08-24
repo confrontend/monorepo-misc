@@ -17,7 +17,6 @@ import {
 const execFileAsync = promisify(execFile);
 const VALIDATION_FRACTION = 0.3;
 const HOLDOUT_FRACTION = 0.2;
-const RUN_TIMEOUT_MS = 120_000;
 export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = Array.from(
   { length: 11 },
   (_, index) => 50 + index * 5,
@@ -35,6 +34,12 @@ export type PatternDiscoveryPattern = {
   discovery_sample_size?: number;
   validationStatus?: PatternDiscoveryStatus;
   validation?: { sample_size?: number; effect_vs_all?: number | null; reason?: string };
+  historical_stability?: {
+    status: 'stable' | 'unstable' | 'insufficient data';
+    blocks: number;
+    surviving_blocks: number;
+    reason?: string;
+  };
   reason?: string;
 };
 
@@ -69,6 +74,8 @@ export type PatternDiscoverySensitivityPoint = {
   independentEntries: number;
   validationSurvivors: number;
   discoveredCandidates: number;
+  promotedPatterns: number;
+  historicalStablePatterns: number;
   rejected: number;
   insufficientData: number;
   reportAvailable: boolean;
@@ -79,17 +86,43 @@ export type PatternDiscoverySensitivity = {
   thresholds: PatternDiscoverySensitivityPoint[];
   weighting: 'equal wallet total weight';
   note: string;
+  /** The 100% grid member, returned as a projection of the same run for legacy report consumers. */
+  report?: PatternDiscoveryReport;
+  execution?: {
+    pythonExecutable: string;
+    inputPath: string;
+    outputPath: string;
+    sharedRoot: string;
+  };
 };
 
 export type PatternDiscoveryProgress = {
   status: 'idle' | 'preparing' | 'running' | 'complete' | 'stopped' | 'error';
-  stage: 'loading evidence' | 'running threshold' | 'complete' | 'stopped' | 'error';
+  stage:
+    | 'loading evidence'
+    | 'building dataset'
+    | 'running threshold'
+    | 'running engine'
+    | 'validating'
+    | 'promoting'
+    | 'complete'
+    | 'stopped'
+    | 'error';
   message: string;
   thresholdsTotal: number;
   thresholdsCompleted: number;
   currentThreshold: number | null;
   startedAt: string | null;
   completedAt: string | null;
+  wallets?: number;
+  independentEntries?: number;
+  featuresCompleted?: number;
+  featuresTotal?: number;
+  candidatePatterns?: number;
+  validationSurvivors?: number;
+  historicalStablePatterns?: number;
+  promotedPatterns?: number;
+  heartbeatAt?: string;
 };
 
 export class PatternDiscoveryRunnerError extends Error {
@@ -220,6 +253,7 @@ export const buildPatternDiscoveryCommand = (input: {
   inputPath: string;
   outputPath: string;
   minN: number;
+  progressPath?: string;
 }): { executable: string; cwd: string; args: string[]; inputPath: string; outputPath: string } => {
   const inputPath = path.resolve(input.inputPath);
   const outputPath = path.resolve(input.outputPath);
@@ -245,6 +279,7 @@ export const buildPatternDiscoveryCommand = (input: {
       String(HOLDOUT_FRACTION),
       '--seed',
       '0',
+      ...(input.progressPath ? ['--progress-file', path.resolve(input.progressPath)] : []),
     ],
   };
 };
@@ -290,6 +325,7 @@ export const runPatternDiscoveryReport = async (
     minN?: number;
     minimumCoveragePercent?: number;
     signal?: AbortSignal;
+    onProgress?: (progress: Partial<PatternDiscoveryProgress>) => void;
   },
 ): Promise<{
   report: PatternDiscoveryReport;
@@ -332,6 +368,13 @@ export const runPatternDiscoveryReport = async (
       dataFingerprint,
     ) ?? readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
   writePatternDiscoveryCache(database, exportCacheKey, dataFingerprint, normalized);
+  options.onProgress?.({
+    stage: 'building dataset',
+    message: `Built the ${minimumCoveragePercent}% dataset: ${normalized.metadata.selected_wallet_count} wallets, ${normalized.rows.length} independent entries.`,
+    wallets: Number(normalized.metadata.selected_wallet_count ?? 0),
+    independentEntries: normalized.rows.length,
+    heartbeatAt: new Date().toISOString(),
+  });
   if (normalized.rows.length === 0) {
     throw new PatternDiscoveryRunnerError(
       `No outcome-coverage rows meet the selected ${normalized.metadata.minimum_coverage_percent}% threshold for the selected ${periodDays}-day period.`,
@@ -347,6 +390,7 @@ export const runPatternDiscoveryReport = async (
   mkdirSync(runRoot, { recursive: true });
   const inputPath = path.join(runRoot, 'normalized-export.json');
   const outputPath = path.join(runRoot, 'report.json');
+  const progressPath = path.join(runRoot, 'progress.json');
   writeFileSync(inputPath, JSON.stringify(normalized, null, 2), 'utf8');
   const executable = resolvePatternDiscoveryPython(options.projectRoot, sharedRoot);
   const command = buildPatternDiscoveryCommand({
@@ -355,11 +399,24 @@ export const runPatternDiscoveryReport = async (
     inputPath,
     outputPath,
     minN,
+    progressPath,
   });
+  const progressTimer = setInterval(() => {
+    try {
+      const raw = readFileSync(progressPath, 'utf8');
+      const update = JSON.parse(raw) as Partial<PatternDiscoveryProgress>;
+      options.onProgress?.({ ...update, heartbeatAt: new Date().toISOString() });
+    } catch {
+      options.onProgress?.({
+        stage: 'running engine',
+        message: `Running the shared Python engine for ${minimumCoveragePercent}% coverage…`,
+        heartbeatAt: new Date().toISOString(),
+      });
+    }
+  }, 500);
   try {
     await execFileAsync(command.executable, command.args, {
       cwd: command.cwd,
-      timeout: RUN_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
       windowsHide: true,
       signal: options.signal,
@@ -381,6 +438,8 @@ export const runPatternDiscoveryReport = async (
     throw new PatternDiscoveryRunnerError(
       `Shared Python discovery could not run with ${executable}. ${dependencyHint} Configure PATTERN_DISCOVERY_PYTHON (highest priority), PATTERN_DISCOVERY_BUNDLED_PYTHON, PATTERN_DISCOVERY_RUNTIME_ROOT, or a workspace .venv. ${detail}`,
     );
+  } finally {
+    clearInterval(progressTimer);
   }
   let reportRaw: string;
   try {
@@ -425,10 +484,15 @@ export const runPatternDiscoverySensitivity = async (
       total: number;
       phase: 'starting' | 'complete';
     }) => void;
+    onEngineProgress?: (progress: Partial<PatternDiscoveryProgress>) => void;
   },
 ): Promise<PatternDiscoverySensitivity> => {
   const thresholds = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
   const points: PatternDiscoverySensitivityPoint[] = [];
+  let finalReport: PatternDiscoveryReport | undefined;
+  let finalExecution:
+    | { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string }
+    | undefined;
   for (const minimumCoveragePercent of thresholds) {
     if (options.signal?.aborted)
       throw new PatternDiscoveryRunnerError('Pattern discovery was cancelled.', 499);
@@ -439,19 +503,34 @@ export const runPatternDiscoverySensitivity = async (
       phase: 'starting',
     });
     try {
-      const { report } = await runPatternDiscoveryReport(database, {
+      const { report, execution } = await runPatternDiscoveryReport(database, {
         ...options,
         minimumCoveragePercent,
+        onProgress: options.onEngineProgress,
       });
+      if (minimumCoveragePercent === thresholds[thresholds.length - 1]) {
+        finalReport = report;
+        finalExecution = execution;
+      }
       const summary = report.dataset_summary ?? {};
       const counts = report.status_counts;
+      const historicalStablePatterns = (report.patterns ?? []).filter(
+        (pattern) => pattern.historical_stability?.status === 'stable',
+      ).length;
+      const promotedPatterns = (report.patterns ?? []).filter(
+        (pattern) =>
+          pattern.validationStatus === 'validation survivor' &&
+          pattern.historical_stability?.status === 'stable',
+      ).length;
       points.push({
         minimumCoveragePercent,
         wallets: Number(summary.wallets ?? 0),
         rows: Number(summary.rows ?? 0),
         independentEntries: Number(summary.independence_groups ?? 0),
         validationSurvivors: Number(counts['validation survivor'] ?? 0),
-        discoveredCandidates: Number(counts['discovered candidate'] ?? 0),
+        discoveredCandidates: (report.patterns ?? []).length,
+        promotedPatterns,
+        historicalStablePatterns,
         rejected: Number(counts.rejected ?? 0),
         insufficientData: Number(counts['insufficient data'] ?? 0),
         reportAvailable: true,
@@ -471,6 +550,8 @@ export const runPatternDiscoverySensitivity = async (
           independentEntries: 0,
           validationSurvivors: 0,
           discoveredCandidates: 0,
+          promotedPatterns: 0,
+          historicalStablePatterns: 0,
           rejected: 0,
           insufficientData: 0,
           reportAvailable: false,
@@ -491,5 +572,7 @@ export const runPatternDiscoverySensitivity = async (
     thresholds: points,
     weighting: 'equal wallet total weight',
     note: 'Each wallet contributes equal total weight; multiple exits from one buy are aggregated into one independent entry before discovery.',
+    report: finalReport,
+    execution: finalExecution,
   };
 };

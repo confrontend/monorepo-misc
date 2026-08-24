@@ -148,12 +148,24 @@ def mean_stats(values: Iterable[float]) -> dict[str, float | int | None]:
     return {"n": int(len(array)), "mean": float(np.mean(array)), "median": float(np.median(array)), "std": float(np.std(array, ddof=1)) if len(array) > 1 else 0.0}
 
 
-def bootstrap_ci(values: Sequence[float], seed: int = 0, draws: int = 400) -> dict[str, float | int | None]:
+def bootstrap_ci(
+    values: Sequence[float],
+    seed: int = 0,
+    draws: int = 400,
+    weights: Sequence[float] | None = None,
+) -> dict[str, float | int | None]:
     array = np.asarray(values, dtype=float)
     array = array[np.isfinite(array)]
     if len(array) < 2:
         return {"n": int(len(array)), "low": None, "high": None}
     rng = np.random.default_rng(seed)
-    samples = rng.choice(array, size=(draws, len(array)), replace=True)
+    probabilities = None
+    if weights is not None and len(weights) == len(values):
+        raw_weights = np.asarray(weights, dtype=float)
+        raw_weights = raw_weights[np.isfinite(np.asarray(values, dtype=float))]
+        total = float(np.sum(raw_weights))
+        if total > 0:
+            probabilities = raw_weights / total
+    samples = rng.choice(array, size=(draws, len(array)), replace=True, p=probabilities)
     medians = np.median(samples, axis=1)
     return {"n": int(len(array)), "low": float(np.quantile(medians, 0.025)), "high": float(np.quantile(medians, 0.975))}

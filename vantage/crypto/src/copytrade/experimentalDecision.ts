@@ -20,11 +20,11 @@ import {
 } from './discovery/patternDiscovery.js';
 import { PATTERN_DISCOVERY_COVERAGE_THRESHOLDS } from './discovery/patternDiscoveryRunner.js';
 
-const BASE_DECISION_WEIGHTS = {
-  edge: 0.35,
+const NEUTRAL_DECISION_WEIGHTS = {
+  edge: 0.25,
   consistency: 0.25,
-  robustness: 0.2,
-  copyability: 0.2,
+  robustness: 0.25,
+  copyability: 0.25,
 } as const;
 const PROMOTION_THRESHOLDS = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
 const MIN_PROMOTION_WALLETS = 10;
@@ -36,7 +36,7 @@ export type ExperimentalDecisionWeights = {
   copyability: number;
 };
 export type ExperimentalDecisionWeighting = {
-  mode: 'fixed-fallback' | 'validated-patterns';
+  mode: 'neutral-fallback' | 'validated-patterns';
   weights: ExperimentalDecisionWeights;
   detail: string;
   supportingThresholds: number[];
@@ -112,7 +112,12 @@ const holdScore = (seconds: number | null): number | null =>
       );
 
 type CachedDiscoveryReport = {
-  patterns?: Array<{ feature?: string; effect?: number | null; validationStatus?: string }>;
+  patterns?: Array<{
+    feature?: string;
+    effect?: number | null;
+    validationStatus?: string;
+    historical_stability?: { status?: string };
+  }>;
   dataset_summary?: { wallets?: number };
 };
 
@@ -150,7 +155,12 @@ export const readExperimentalDecisionWeighting = (
     if (!report || (report.dataset_summary?.wallets ?? 0) < MIN_PROMOTION_WALLETS) continue;
     supportingWallets = Math.max(supportingWallets, report.dataset_summary?.wallets ?? 0);
     for (const pattern of report.patterns ?? []) {
-      if (pattern.validationStatus !== 'validation survivor' || !pattern.feature) continue;
+      if (
+        pattern.validationStatus !== 'validation survivor' ||
+        pattern.historical_stability?.status !== 'stable' ||
+        !pattern.feature
+      )
+        continue;
       const category = weightCategoryForFeature(pattern.feature);
       if (!category) continue;
       const thresholds = evidence.get(category) ?? new Set<number>();
@@ -164,19 +174,19 @@ export const readExperimentalDecisionWeighting = (
   const promotedCategories = [...evidence.values()].filter((thresholds) => thresholds.size >= 2);
   if (promotedCategories.length === 0) {
     return {
-      mode: 'fixed-fallback',
-      weights: { ...BASE_DECISION_WEIGHTS },
+      mode: 'neutral-fallback',
+      weights: { ...NEUTRAL_DECISION_WEIGHTS },
       detail:
-        'Fixed weights remain active until validated patterns repeat across at least two coverage levels and enough wallets.',
+        'Neutral 25/25/25/25 weights remain active because no pattern has survived both coverage-level and chronological historical validation with enough wallets.',
       supportingThresholds,
       supportingWallets,
     };
   }
   const signal = (category: keyof ExperimentalDecisionWeights): number =>
     1 + (evidence.get(category)?.size ?? 0);
-  const raw = (Object.keys(BASE_DECISION_WEIGHTS) as Array<keyof ExperimentalDecisionWeights>).map(
-    (category) => [category, signal(category)] as const,
-  );
+  const raw = (
+    Object.keys(NEUTRAL_DECISION_WEIGHTS) as Array<keyof ExperimentalDecisionWeights>
+  ).map((category) => [category, signal(category)] as const);
   const total = raw.reduce((sum, [, value]) => sum + value, 0);
   const weights = Object.fromEntries(
     raw.map(([category, value]) => [category, value / total]),
@@ -184,7 +194,7 @@ export const readExperimentalDecisionWeighting = (
   return {
     mode: 'validated-patterns',
     weights,
-    detail: `Promoted only from validation survivors repeated at ${supportingThresholds.join('%, ')}% coverage; each supporting report had at least ${MIN_PROMOTION_WALLETS} wallets.`,
+    detail: `Adaptive weights use only patterns that survived all required chronological blocks and repeated across coverage levels ${supportingThresholds.join('%, ')}%; each supporting report had at least ${MIN_PROMOTION_WALLETS} wallets.`,
     supportingThresholds,
     supportingWallets,
   };
@@ -236,7 +246,7 @@ const evidenceFor = (
       detail: `Unrankable: only ${simulation.roundTripsConsidered} eligible round trips; at least 30 are required for comparison.`,
     };
   const coverage = simulation.coverageRatePercent ?? 0;
-  if (!hasReliableCopyEvidence(simulation) || row.truncated || row.historyFailed || coverage < 90)
+  if (!hasReliableCopyEvidence(simulation) || row.truncated || row.historyFailed)
     return {
       level: 'partial',
       detail: `${coverage.toFixed(1)}% of eligible round trips have usable delayed-copy evidence.`,

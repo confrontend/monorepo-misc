@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--buckets", type=int, default=4, help="Quantile bucket count (default: 4).")
     parser.add_argument("--fdr-alpha", type=float, default=0.05, help="Benjamini-Hochberg alpha (default: 0.05).")
     parser.add_argument("--seed", type=int, default=0, help="Deterministic model/bootstrap seed.")
+    parser.add_argument("--progress-file", help="Optional JSON heartbeat file for long-running callers.")
     return parser
 
 
@@ -39,6 +40,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_project_config(args.project, args.config)
         dataset = load_dataset(input_path, args.project, config, args.outcome)
+        progress_path = Path(args.progress_file).resolve() if args.progress_file else None
+
+        def progress(update: dict[str, object]) -> None:
+            if progress_path is None:
+                return
+            progress_path.parent.mkdir(parents=True, exist_ok=True)
+            progress_path.write_text(json.dumps(update, ensure_ascii=False), encoding="utf-8")
+
         report = run_discovery(
             dataset,
             config,
@@ -51,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             input_path=str(input_path),
             output_path=str(output_path),
+            progress_callback=progress if progress_path else None,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

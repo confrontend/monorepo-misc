@@ -43,6 +43,27 @@ Rules:
 - Do not log API keys, tokens, passwords, or sensitive values.
 - Update `progress.md` before finishing each task.
 
+## UI strings
+
+User-facing text in `ui/` (labels, button text, tooltips, error/empty-state messages) goes in
+`ui/strings.ts`, not inline in JSX. Add new copy there and reference it, instead of writing a new
+string literal at the call site.
+
 ## Future implementation ideas
 
 When the user writes `idea: ...`, treat the text after `idea:` as an idea to record, not as an immediate implementation request. Append it with the current date to [`ideas-for-future-implementation.md`](./ideas-for-future-implementation.md). Keep the wording concise, preserve the user's intent, and do not modify source code unless the user separately asks to implement the idea.
+
+## Local development tooling
+
+- Use `npm run arch:check` for the dependency-cruiser architecture check. Its rules live in `.dependency-cruiser.cjs`.
+- Use the project-local `.mcp.json` when the active coding agent supports MCP. Context7 is for current library/API documentation; Serena is for symbol-aware TypeScript navigation and refactoring.
+- Spec Kit is an optional workflow tool. Use the official `specify` CLI to initialize or extend spec-driven artifacts only after reviewing its proposed file changes.
+
+## Brownfield baseline
+
+- Read `docs/BROWNFIELD_SYSTEM_BASELINE.md` before making architectural or cross-layer changes.
+- Treat current TypeScript routes, SQLite migrations, tests, and runtime behavior as the source of
+  truth. `progress.md`, `research/`, and `.specify/specs/` may contain historical or prospective
+  material and must be checked against code.
+- Keep retrospective specs separate from future feature specifications; do not turn historical
+  proposals into implied requirements.

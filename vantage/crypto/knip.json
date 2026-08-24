@@ -1,0 +1,32 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "src/scripts/server.ts",
+    "src/scripts/cli.ts",
+    "ui/main.tsx",
+    "extension/**/*.js",
+    "tests/**/*.test.ts"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "ui/**/*.{ts,tsx}",
+    "extension/**/*.js",
+    "tests/**/*.ts",
+    "scripts/**/*.mjs"
+  ],
+  "ignore": [
+    "node_modules/**",
+    "dist/**",
+    "dist-ui/**",
+    "build/**",
+    "coverage/**",
+    "graphify-out/**",
+    ".data/**",
+    ".secrets/**",
+    "ui-mockups/**",
+    "research/**"
+  ],
+  "ignoreDependencies": [
+    "gmgn-cli"
+  ]
+}

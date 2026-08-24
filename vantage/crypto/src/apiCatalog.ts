@@ -341,6 +341,13 @@ export const API_CATALOG: ApiDoc[] = [
   ),
   route(
     'POST',
+    '/api/copytrade/pattern-discovery/stop',
+    'Stop pattern discovery',
+    'Requests cancellation of the active local discovery run; completed coverage levels remain resumable from the saved cache.',
+    { stopping: true, message: 'Stop requested.' },
+  ),
+  route(
+    'POST',
     '/api/dune/reconcile',
     'Reconcile Dune runs',
     'Checks saved Dune executions and updates runs that completed or failed externally.',

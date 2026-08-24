@@ -1,0 +1,21 @@
+{
+  "format": ["typescript", "tsx", "javascript"],
+  "minLines": 5,
+  "minTokens": 50,
+  "mode": "weak",
+  "ignorePattern": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/dist-ui/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/graphify-out/**",
+    "**/.data/**",
+    "**/.secrets/**",
+    "**/ui-mockups/**",
+    "**/research/**",
+    "**/*.generated.*"
+  ],
+  "reporters": ["console"],
+  "threshold": 0
+}
