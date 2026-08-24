@@ -111,6 +111,8 @@ const researchDataFingerprint = (): string => {
       (SELECT COALESCE(MAX(source_snapshot_id), 0) FROM copytrade_wallets) AS walletsMaxSnapshot,
       (SELECT COUNT(*) FROM copytrade_wallet_stats) AS statsCount,
       (SELECT COALESCE(MAX(rowid), 0) FROM copytrade_wallet_stats) AS statsMaxRowid,
+      (SELECT COUNT(*) FROM copytrade_gmgn_risk_stats) AS gmgnRiskCount,
+      (SELECT COALESCE(MAX(fetched_at), '') FROM copytrade_gmgn_risk_stats) AS gmgnRiskMaxFetchedAt,
       (SELECT COUNT(*) FROM copytrade_copy_simulation_runs) AS simulationCount,
       (SELECT COALESCE(MAX(id), 0) FROM copytrade_copy_simulation_runs) AS simulationMaxId
   `).get() as Record<string, unknown>;
@@ -1003,13 +1005,14 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/scrutiny/gmgn-risk/import') {
       const payload = (await readJsonBody(request)) as { results?: unknown };
       const imported = Array.isArray(payload.results) ? payload.results : [];
+      let ignored = 0;
       const savedResults = imported.flatMap((value) => {
         const result = asRecord(value);
         const walletAddress = typeof result.walletAddress === 'string' ? result.walletAddress.trim() : '';
-        if (!walletAddress || result.period !== '30d' || result.available !== true || !('metrics' in result)) return [];
-        return [saveGmgnRiskResult(database, { walletAddress, period: '30d', available: true, metrics: result.metrics })];
+        if (!walletAddress || result.period !== '30d' || result.available !== true || !('metrics' in result)) { ignored += 1; return []; }
+        return [saveGmgnRiskResult(database, { walletAddress, period: '30d', available: true, metrics: normalizeGmgnProfitStat(result.metrics) })];
       });
-      respond(200, { results: savedResults, imported: savedResults.length });
+      respond(200, { results: savedResults, imported: savedResults.length, ignored });
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/scrutiny/gmgn-risk') {

@@ -49,9 +49,8 @@
     </details>
     <details class="route-card">
       <summary><h2>Wallet risk details</h2></summary>
-      <p>When enabled, fetches and saves only GMGN’s 30-day JSON risk data when you visit a wallet page. Cookies are never saved or exported.</p>
+      <p>When enabled, passively captures GMGN’s own 30-day JSON risk response when GMGN requests it. The extension never requests this data itself. Cookies are never saved or exported.</p>
       <button id="riskAuto">Enable 30d risk capture</button>
-      <button id="copyCookie">Copy latest GMGN Cookie header</button>
       <button id="exportRisk">Export 30d risk JSON</button>
       <button id="clearRisk">Clear risk data</button>
       <div id="risk-stats" class="route-stats">0 wallet risk response(s)</div>

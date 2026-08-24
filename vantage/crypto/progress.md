@@ -3028,3 +3028,47 @@ TODO
 - Agent: Codex, GPT-5
 - Score cells now show only the number; a legend explains that every score is out of 100.
 - Score headers wrap into two lines and score columns have compact widths. The wallet column is narrower to remove excess empty space.
+
+## 2026-08-23 — Fixed Decision Lab tag and header wrapping
+
+- Agent: Codex, GPT-5
+- Tags now render as separate wrapping chips instead of one long line.
+- Score headers use normal horizontal text with a stable minimum width, preventing letter-by-letter vertical rendering.
+## 2026-08-23 — Multi-wallet GMGN risk bundle collection
+- Agent: Codex, GPT-5
+- Added an explicit extension action to collect the currently open GMGN wallet’s 30-day risk response; repeated wallets are replaced in the stored collection.
+- Decision Lab now accepts the extension’s exported `captures` JSON bundle and imports all valid 30-day responses into SQLite in one operation, then reloads the saved experiment.
+- Decision Lab wallet names and addresses now link directly to the corresponding GMGN wallet page.
+- Automatic 30-day risk capture now detects SPA wallet changes even when GMGN emits no history event, while suppressing duplicate in-flight requests.
+
+## 2026-08-23 — Shared GMGN tag presentation
+- Agent: Codex, GPT-5
+- Moved GMGN tag explanations, tone classification, tooltip text, and colored tag rendering into the shared GmgnTag component; Wallet Stats and Decision Lab now use the same logic.
+
+## 2026-08-24 — Enforced 30-day-only GMGN risk imports
+- Agent: Codex, GPT-5
+- Verified the supplied risk bundle contains 17 30-day captures; 14 returned usable HTTP 200 responses and 3 returned HTTP 401.
+- Added defense-in-depth guards so the extension, import endpoint, database reads, and Decision Lab only accept and score `30d` risk data.
+- Imports now report how many entries were ignored instead of silently dropping non-usable or non-30-day records.
+- Added GMGN-risk row count/timestamp data to the report-cache fingerprint so imported risk results immediately appear in Decision Lab instead of remaining hidden behind an older cached response.
+
+## 2026-08-24 — Gated Decision Lab scores by evidence
+- Agent: Codex, GPT-5
+- Wallets below the existing 100-GMGN-trade screen minimum or 30 eligible Dune round trips are now marked insufficient/unrankable.
+- Their overall score is null, so thin samples cannot be compared with wallets supported by meaningful evidence.
+- The score legend and methodology now explain the evidence gate.
+
+## 2026-08-24 — Standardized Decision Lab delay reference
+- Agent: Codex, GPT-5
+- Corrected the copyability formula and explanations to use the actual 15-second delay assumption instead of the incorrect 15-minute label.
+### 2026-08-23 — GMGN risk extension is passive-only
+
+- Removed the extension's automatic and manual `profit_stat/30d` requests.
+- Risk capture now only records 30-day responses that GMGN itself requests while capture is enabled.
+- Removed the popup's manual request control and updated its explanation to make this behavior explicit.
+
+## 2026-08-23 — Removed cookie-header handling
+
+- Removed cookie/authorization header capture, session storage, clipboard export, and related extension permissions.
+- Bumped the extension version to 0.9.4.
+2026-08-23 23:29:10 -07:00 — Expanded Pattern Discovery to export point-in-time historical wallet features: prior P&L, win rate, positive-day consistency, profit concentration, buy/sell volumes, median hold, and under-15-second rate. Future delayed-copy results remain outcomes, not inputs. Updated the feature allowlist to v3 and added assertions. Files: src/copytrade/discovery/patternDiscovery.ts, tests/copytrade-pattern-discovery.test.ts. Agent: Codex GPT-5. Tests: server build passed; three Pattern Discovery tests passed; UI build passed earlier in this task. Errors: graphify refresh could not run because uv cache path is a file. Next: expose/inspect the new fields in the shared-engine report if desired.
