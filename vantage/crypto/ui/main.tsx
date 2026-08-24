@@ -573,6 +573,7 @@ type PatternDiscoveryProgress = {
     | 'running engine'
     | 'validating'
     | 'promoting'
+    | 'persisting results'
     | 'complete'
     | 'stopped'
     | 'error';
@@ -4074,8 +4075,11 @@ function App() {
     if (copyTradeSubTab !== 'pattern-discovery') return;
     let disposed = false;
     let timer: number | undefined;
+    let requestInFlight = false;
 
     const poll = async () => {
+      if (disposed || requestInFlight) return;
+      requestInFlight = true;
       try {
         const progress = await api<PatternDiscoveryProgress>(
           '/api/copytrade/pattern-discovery/status',
@@ -4091,14 +4095,16 @@ function App() {
             setPatternDiscoveryRunLoading(true);
             if (progress.startedAt) setPatternDiscoveryStartedAt(Date.parse(progress.startedAt));
           }
-          timer = window.setTimeout(() => void poll(), 500);
+          timer = window.setTimeout(() => void poll(), 1000);
         } else if (!patternDiscoveryRunInFlight.current) {
           setPatternDiscoveryRunLoading(false);
           setPatternDiscoveryStartedAt(null);
         }
       } catch {
         // Retry while this tab is open; the run endpoint reports actionable failures.
-        if (!disposed) timer = window.setTimeout(() => void poll(), 1000);
+        if (!disposed) timer = window.setTimeout(() => void poll(), 1500);
+      } finally {
+        requestInFlight = false;
       }
     };
 
@@ -4107,7 +4113,7 @@ function App() {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [api, copyTradeSubTab, patternDiscoveryLoading, patternDiscoveryRunLoading]);
+  }, [api, copyTradeSubTab]);
   useEffect(() => {
     if (copyTradeSubTab !== 'wallet-stats' || !gmgnStatsStatus?.running) return;
     const timer = window.setInterval(async () => {

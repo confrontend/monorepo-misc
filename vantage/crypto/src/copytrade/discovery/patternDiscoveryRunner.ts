@@ -105,6 +105,7 @@ export type PatternDiscoveryProgress = {
     | 'running engine'
     | 'validating'
     | 'promoting'
+    | 'persisting results'
     | 'complete'
     | 'stopped'
     | 'error';
@@ -367,6 +368,13 @@ export const runPatternDiscoveryReport = async (
       exportCacheKey,
       dataFingerprint,
     ) ?? readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
+  options.onProgress?.({
+    stage: 'persisting results',
+    message: `Saving the ${minimumCoveragePercent}% normalized dataset before discovery…`,
+    wallets: Number(normalized.metadata.selected_wallet_count ?? 0),
+    independentEntries: normalized.rows.length,
+    heartbeatAt: new Date().toISOString(),
+  });
   writePatternDiscoveryCache(database, exportCacheKey, dataFingerprint, normalized);
   options.onProgress?.({
     stage: 'building dataset',
@@ -450,6 +458,11 @@ export const runPatternDiscoveryReport = async (
     );
   }
   const report = parsePatternDiscoveryReport(reportRaw);
+  options.onProgress?.({
+    stage: 'persisting results',
+    message: `Saving validated ${minimumCoveragePercent}% results and updating the run cache…`,
+    heartbeatAt: new Date().toISOString(),
+  });
   writePatternDiscoveryCache(
     database,
     patternDiscoveryCacheKey(

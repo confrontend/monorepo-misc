@@ -3418,3 +3418,38 @@ TODO
 2026-08-24 13:34:00 -07:00 - Removed the 120-second timeout from the shared Pattern Discovery Python runner after a real 30-day run reached validation pattern 102/102 but was killed before writing report.json. Files changed: src/copytrade/discovery/patternDiscoveryRunner.ts. Decision: allow long local discovery runs to complete; retain the existing AbortSignal/Stop discovery cancellation path. Test result: npm run build passed; full Node suite passed 308/308. Errors/unresolved: no automatic timeout remains; a hung Python process now requires manual Stop/cancellation. Agent name and model: Codex GPT-5. Next step: use Stop discovery to cancel any genuinely stuck run.
 2026-08-24 14:00:00 -07:00 - Improved Pattern Discovery cancellation and resume handling. Files changed: src/scripts/server.ts, ui/main.tsx, src/apiCatalog.ts. Decision: browser refreshes and dev-server reconnects no longer cancel the server-owned run; cancellation is explicit through the Stop discovery endpoint, while completed coverage levels remain cached and resumable on the next Run action. The Pattern Discovery tab now reconnects to an active server run after refresh and continues polling until it reaches a terminal state. Test result: npm run build passed; full Node suite passed 308/308. Errors/unresolved: server progress is still in memory and is reset by a full server restart, but persisted threshold caches remain reusable. Agent name and model: Codex GPT-5. Next step: verify refresh, Stop, and rerun behavior in the browser.
 2026-08-24 14:05:00 -07:00 - Committed the current root, crypto, and research changes. Decision: stage the project changes while excluding unrelated SeekingAlpha LFS archive modifications. Agent name and model: Codex GPT-5. Test result: npm run build passed; full Node suite passed 308/308 before commit. Errors/unresolved: Graphify remains blocked by the uv cache OS error 183; unrelated SeekingAlpha LFS files remain uncommitted. Next step: continue from the new commit.
+# 2026-08-24 14:12 - Pattern Discovery status polling and persistence progress
+
+- Agent/model: Codex GPT-5
+- User request: Diagnose the long-running Pattern Discovery status and improve progress visibility.
+- Changes: Made Pattern Discovery polling single-flight and independent of progress-state dependencies, reducing overlapping `/pattern-discovery/status` requests. Added explicit `persisting results` progress updates before normalized-export and report-cache writes.
+- Diagnosis: The latest run produced a saved report with 83 wallets, 36,021 independent entries, and 21 promoted patterns, but the UI status endpoint became unresponsive while the browser had created many overlapping polls. The runner uses one sequential Python process per coverage level, synchronous SQLite/file persistence, and no GPU execution.
+- Tests: Pending after this change.
+- Next: Run build and test suite; inspect whether the live status endpoint recovers after the development server reload.
+# 2026-08-24 14:15 - Reviewed latest CLAUDE.md instructions
+
+- Agent/model: Codex GPT-5
+- Step: Read `crypto/CLAUDE.md` and summarized new project rules.
+- Files inspected: `crypto/CLAUDE.md`.
+- Decision: Follow Graphify-first for architecture questions, append factual progress entries, centralize UI strings in `ui/strings.ts`, run architecture checks for structural changes, and read the brownfield baseline before cross-layer changes.
+- Tests: Not run; documentation-only review.
+- Errors/unresolved: None.
+- Next: Apply these rules to future crypto changes.
+# 2026-08-24 14:15 - Reviewed crypto project AGENTS.md
+
+- Agent/model: Codex GPT-5
+- Step: Read `crypto/AGENTS.md`.
+- Files inspected: `crypto/AGENTS.md`.
+- Decision: `crypto/CLAUDE.md` is the single source of truth for project instructions.
+- Tests: Not run; documentation-only review.
+- Errors/unresolved: None.
+- Next: Continue following `crypto/CLAUDE.md`.
+
+# 2026-08-24 14:24 - Diagnosed blocked Pattern Discovery progress
+
+- Agent/model: Codex GPT-5
+- Diagnosis: The 50%, 55%, and 60% reports are cached, but the run has not reached 65%. The API process is consuming one CPU core and `/pattern-discovery/status` times out because `readPatternDiscoveryDataFingerprint` synchronously hashes the full 3.35 GB SQLite evidence set on the Node event loop for each coverage level.
+- UI impact: The displayed `No discovery run is active`, `0/11`, and 100%-coverage loading text are stale because status requests cannot complete while the event loop is blocked.
+- Tests: Read-only runtime/API/database inspection; no source code changed.
+- Errors/unresolved: Graphify query remained unavailable because the local uv cache fails with OS error 183.
+- Next: Compute the evidence fingerprint once per shared run or outside the request thread, then persist independently queryable progress for each coverage level.
