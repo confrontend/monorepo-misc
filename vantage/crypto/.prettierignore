@@ -1,0 +1,14 @@
+node_modules
+package-lock.json
+dist
+dist-ui
+.data
+.uv-cache
+.uv-cache-audit
+.uv-cache-risk
+graphify-out
+coverage
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl

@@ -6,7 +6,7 @@ export const DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS = 30;
 export const MAX_PATTERN_DISCOVERY_PERIOD_DAYS = 90;
 export const MAX_PATTERN_DISCOVERY_WALLETS = 500;
 /** Change this when the normalized export or discovery input contract changes. */
-export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v1';
+export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v2-entry-wallet-balanced';
 
 export type PatternDiscoveryExportRow = {
   project: 'crypto';
@@ -56,6 +56,8 @@ export type PatternDiscoveryExportRow = {
   usable: true;
   coverage_rate_percent: number;
   coverage_status: 'fully_covered' | 'partially_covered';
+  entry_id: string;
+  exit_count: number;
 };
 
 export type PatternDiscoveryExport = {
@@ -79,6 +81,10 @@ export type PatternDiscoveryExport = {
     eligible_wallets_before_threshold: number;
     excluded_wallets_below_threshold: number;
     coverage_distribution_percent: number[];
+    aggregation: 'one_row_per_buy_entry_all_exits_usable';
+    independent_entry_count: number;
+    exit_rows_collapsed: number;
+    wallet_balanced_validation: string;
     export_generated_at: string;
   };
   rows: PatternDiscoveryExportRow[];
@@ -301,19 +307,52 @@ const fullyCoveredWalletAddresses = (database: DatabaseSync, periodDays: number,
   return rows.map((row) => row.walletAddress);
 };
 
-const normalizedRow = (database: DatabaseSync, wallet: CopySimulationWalletReport, trade: CopySimulationTradeResult, index: number, periodDays: number): PatternDiscoveryExportRow => {
+type AggregatedEntry = {
+  buyTradeId: number;
+  trades: CopySimulationTradeResult[];
+};
+
+const aggregateEntry = (trades: CopySimulationTradeResult[]): AggregatedEntry => {
+  const first = trades[0];
+  if (first?.buyTradeId === undefined) throw new Error('Pattern discovery entry is missing its source buy id.');
+  return { buyTradeId: first.buyTradeId, trades };
+};
+
+const aggregateEntries = (trades: CopySimulationTradeResult[]): AggregatedEntry[] => {
+  const groups = new Map<number, CopySimulationTradeResult[]>();
+  for (const trade of trades) {
+    if (trade.buyTradeId === undefined) continue;
+    const group = groups.get(trade.buyTradeId) ?? [];
+    group.push(trade);
+    groups.set(trade.buyTradeId, group);
+  }
+  return [...groups.values()]
+    .filter((group) => group.length > 0 && group.every((trade) => trade.status === 'simulated' && trade.simulatedReturnPercent !== null && trade.buyAt && trade.sellAt))
+    .map(aggregateEntry);
+};
+
+const normalizedRow = (database: DatabaseSync, wallet: CopySimulationWalletReport, entry: AggregatedEntry, periodDays: number): PatternDiscoveryExportRow => {
+  const trade = entry.trades[0];
   if (trade.status !== 'simulated' || trade.simulatedReturnPercent === null || !trade.buyAt || !trade.sellAt) {
     throw new Error(`Fully covered wallet ${wallet.walletAddress} contained a non-simulated or incomplete round trip.`);
   }
-  if (trade.buyTradeId === undefined) throw new Error(`Fully covered wallet ${wallet.walletAddress} contained a trade without its source buy id.`);
-  const prior = readPreEventFeatures(database, wallet.walletAddress, trade.tokenAddress, trade.buyAt, trade.buyTradeId);
+  const prior = readPreEventFeatures(database, wallet.walletAddress, trade.tokenAddress, trade.buyAt, entry.buyTradeId);
+  const stake = entry.trades.reduce((sum, item) => sum + (item.copyStakeUsd ?? 0), 0) || entry.trades.length;
+  const simulatedPnl = entry.trades.reduce((sum, item) => sum + ((item.copyStakeUsd ?? 1) * (item.simulatedReturnPercent ?? 0) / 100), 0);
+  const walletPnl = entry.trades.reduce((sum, item) => sum + ((item.copyStakeUsd ?? 1) * (item.walletReturnPercent ?? 0) / 100), 0);
+  const simulatedReturnPercent = (simulatedPnl / stake) * 100;
+  const walletReturnPercent = entry.trades.every((item) => item.walletReturnPercent !== null) ? (walletPnl / stake) * 100 : null;
+  const lastTrade = entry.trades[entry.trades.length - 1];
+  const exitTradeAmountUsd = entry.trades.reduce((sum, item) => sum + (item.exitTradeAmountUsd ?? 0), 0) || null;
+  const gasFeeUsd = entry.trades.every((item) => item.gasFeeUsd !== null && item.gasFeeUsd !== undefined)
+    ? entry.trades.reduce((sum, item) => sum + (item.gasFeeUsd ?? 0), 0) : null;
   return {
     project: 'crypto',
-    event_id: `gmgn-copy-round-trip:${wallet.walletAddress}:${index}:${trade.buyAt}:${trade.sellAt}:${trade.tokenAddress}`,
+    event_id: `gmgn-copy-entry:${wallet.walletAddress}:${entry.buyTradeId}:${trade.buyAt}:${trade.tokenAddress}`,
     event_time: trade.buyAt,
     entity_id: trade.tokenAddress,
     signal_type: 'gmgn_copy_round_trip',
-    independence_group: wallet.walletAddress,
+    independence_group: `${wallet.walletAddress}:entry:${entry.buyTradeId}`,
     wallet_address: wallet.walletAddress,
     token_address: trade.tokenAddress,
     token_symbol: trade.tokenSymbol,
@@ -338,23 +377,25 @@ const normalizedRow = (database: DatabaseSync, wallet: CopySimulationWalletRepor
       prior_wallet_under_15_seconds_percent: prior.priorWalletUnder15SecondsPercent,
       prior_wallet_paired_trade_count: prior.priorWalletPairedTradeCount,
     },
-    hold_seconds: trade.holdSeconds ?? 0,
-    wallet_return_percent: trade.walletReturnPercent,
+    hold_seconds: Math.max(0, (Date.parse(lastTrade.sellAt!) - Date.parse(trade.buyAt)) / 1000),
+    wallet_return_percent: walletReturnPercent,
     entry_trade_amount_usd: trade.entryTradeAmountUsd,
-    exit_trade_amount_usd: trade.exitTradeAmountUsd,
+    exit_trade_amount_usd: exitTradeAmountUsd,
     edge_kept_percent: trade.edgeKeptPercent ?? null,
     entry_gap_seconds: trade.entryGapSeconds,
     exit_gap_seconds: trade.exitGapSeconds,
-    gas_fee_usd: trade.gasFeeUsd ?? null,
-    outcome_at: trade.sellAt,
+    gas_fee_usd: gasFeeUsd,
+    outcome_at: lastTrade.sellAt!,
     outcome_horizon: `copy-${periodDays}d`,
-    benchmark_return: trade.walletReturnPercent,
-    excess_return: trade.walletReturnPercent === null ? null : trade.simulatedReturnPercent - trade.walletReturnPercent,
-    net_return_after_costs: trade.simulatedReturnPercent,
+    benchmark_return: walletReturnPercent,
+    excess_return: walletReturnPercent === null ? null : simulatedReturnPercent - walletReturnPercent,
+    net_return_after_costs: simulatedReturnPercent,
     mature: true,
     usable: true,
     coverage_rate_percent: wallet.coverageRatePercent ?? 0,
     coverage_status: wallet.coverageStatus === 'fully_covered' ? 'fully_covered' : 'partially_covered',
+    entry_id: String(entry.buyTradeId),
+    exit_count: entry.trades.length,
   };
 };
 
@@ -375,9 +416,8 @@ export const readPatternDiscoveryExport = (
   const walletAddresses = fullyCoveredWalletAddresses(database, selectedPeriod, selectedLimit);
   const simulation = computeCopySimulationReport(database, { walletAddresses, periodDays: selectedPeriod });
   const eligibleWallets = simulation.wallets.filter((wallet) => (wallet.coverageRatePercent ?? 0) >= selectedCoverage);
-  const rows = eligibleWallets.flatMap((wallet) => wallet.trades
-    .filter((trade) => trade.status === 'simulated' && trade.simulatedReturnPercent !== null && Boolean(trade.buyAt) && Boolean(trade.sellAt))
-    .map((trade, index) => normalizedRow(database, wallet, trade, index, selectedPeriod)));
+  const entries = eligibleWallets.flatMap((wallet) => aggregateEntries(wallet.trades).map((entry) => ({ wallet, entry })));
+  const rows = entries.map(({ wallet, entry }) => normalizedRow(database, wallet, entry, selectedPeriod));
 
   return {
     metadata: {
@@ -400,6 +440,10 @@ export const readPatternDiscoveryExport = (
       eligible_wallets_before_threshold: simulation.wallets.length,
       excluded_wallets_below_threshold: simulation.wallets.length - eligibleWallets.length,
       coverage_distribution_percent: simulation.wallets.map((wallet) => wallet.coverageRatePercent ?? 0),
+      aggregation: 'one_row_per_buy_entry_all_exits_usable',
+      independent_entry_count: rows.length,
+      exit_rows_collapsed: entries.reduce((sum, item) => sum + item.entry.trades.length, 0) - rows.length,
+      wallet_balanced_validation: 'The shared engine weights each eligible entry by 1 / entries_per_wallet so every wallet contributes equal total weight; chronological validation remains unchanged.',
       export_generated_at: new Date().toISOString(),
     },
     rows,

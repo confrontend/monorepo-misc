@@ -14,7 +14,9 @@ type LabWallet = {
   liquidity: { low: number | null; medium: number | null; high: number | null } | null;
   risks: string[];
 };
-type LabResponse = { generatedAt: string; periodDays: number; readOnly: true; noProviderFetch: true; source: string; methodology: string[]; wallets: LabWallet[] };
+type LabResponse = { generatedAt: string; periodDays: number; readOnly: true; noProviderFetch: true; source: string; methodology: string[]; weighting?: { mode: 'fixed-fallback' | 'validated-patterns'; weights: { edge: number; consistency: number; robustness: number; copyability: number }; detail: string; supportingThresholds: number[]; supportingWallets: number }; wallets: LabWallet[] };
+type LabSortKey = 'rank' | 'wallet' | 'evidence' | 'edge' | 'consistency' | 'robustness' | 'copyability' | 'overall' | 'facts' | 'scrutiny' | 'liquidity' | 'risk' | 'tags';
+type LabSort = { key: LabSortKey; direction: 'asc' | 'desc' };
 
 const pct = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
 const usd = (value: number | null) => value === null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: value < 10 ? 2 : 0 }).format(value);
@@ -28,6 +30,28 @@ const legacyScoreDetail = (wallet: LabWallet, key: 'edge' | 'consistency' | 'rob
   if (key === 'consistency') return { label: 'Consistency', detail: 'Calculated from the saved weekly and monthly GMGN performance periods.' };
   if (key === 'robustness') return { label: 'Robustness', detail: 'Calculated from saved profit concentration and the return after removing the best token.' };
   return { label: 'Overall', detail: 'Weighted from edge 35%, consistency 25%, robustness 20%, and copyability 20%; missing inputs prevent a complete overall score.' };
+};
+const evidenceOrder: Record<LabWallet['evidence']['level'], number> = { complete: 0, partial: 1, insufficient: 2, missing: 3 };
+const nullableNumber = (value: number | null) => value === null ? Number.POSITIVE_INFINITY : value;
+const hasSortableValue = (wallet: LabWallet, key: LabSortKey) => {
+  if (key === 'rank') return wallet.rank !== null;
+  if (key === 'edge' || key === 'consistency' || key === 'robustness' || key === 'copyability' || key === 'overall') return wallet.scores[key] !== null;
+  if (key === 'facts') return wallet.facts.copyMedianPercent !== null || wallet.facts.copyCapitalUsd !== null;
+  if (key === 'scrutiny') return wallet.scrutiny !== null;
+  if (key === 'liquidity') return wallet.liquidity !== null && (wallet.liquidity.low !== null || wallet.liquidity.medium !== null || wallet.liquidity.high !== null);
+  if (key === 'tags') return Boolean(wallet.tags?.length);
+  return true;
+};
+const compareWallets = (left: LabWallet, right: LabWallet, key: LabSortKey) => {
+  if (key === 'rank') return nullableNumber(left.rank) - nullableNumber(right.rank);
+  if (key === 'wallet') return (left.name?.trim() || left.walletAddress).localeCompare(right.name?.trim() || right.walletAddress);
+  if (key === 'evidence') return evidenceOrder[left.evidence.level] - evidenceOrder[right.evidence.level];
+  if (key === 'edge' || key === 'consistency' || key === 'robustness' || key === 'copyability' || key === 'overall') return nullableNumber(left.scores[key]) - nullableNumber(right.scores[key]);
+  if (key === 'facts') return nullableNumber(left.facts.copyMedianPercent) - nullableNumber(right.facts.copyMedianPercent) || nullableNumber(left.facts.copyCapitalUsd) - nullableNumber(right.facts.copyCapitalUsd);
+  if (key === 'scrutiny') return (right.scrutiny?.pass ?? -1) - (left.scrutiny?.pass ?? -1) || (left.scrutiny?.fail ?? Number.POSITIVE_INFINITY) - (right.scrutiny?.fail ?? Number.POSITIVE_INFINITY);
+  if (key === 'liquidity') return nullableNumber(left.liquidity?.medium ?? null) - nullableNumber(right.liquidity?.medium ?? null);
+  if (key === 'risk') return Number(Boolean(left.riskDetails?.available)) - Number(Boolean(right.riskDetails?.available));
+  return (left.tags ?? []).join(',').localeCompare((right.tags ?? []).join(','));
 };
 const exportDecisionLab = (response: LabResponse) => {
   const payload = { format: 'vantage-crypto-decision-lab-v1', exportedAt: new Date().toISOString(), ...response };
@@ -45,6 +69,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<LabWallet | null>(null);
+  const [sort, setSort] = useState<LabSort>({ key: 'overall', direction: 'desc' });
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const load = () => {
@@ -53,6 +78,15 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
       .then(setResponse).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, [api]);
+  const sortedWallets = response ? [...response.wallets].sort((left, right) => {
+    const leftHasValue = hasSortableValue(left, sort.key);
+    const rightHasValue = hasSortableValue(right, sort.key);
+    if (leftHasValue !== rightHasValue) return leftHasValue ? -1 : 1;
+    const comparison = compareWallets(left, right, sort.key);
+    return (sort.direction === 'asc' ? comparison : -comparison) || (nullableNumber(left.rank) - nullableNumber(right.rank));
+  }) : [];
+  const toggleSort = (key: LabSortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: key === 'overall' ? 'desc' : 'asc' });
+  const sortableHeader = (key: LabSortKey, label: string, title = `Sort by ${label}`) => <button type="button" className="experimental-sort-button" onClick={() => toggleSort(key)} title={title}>{label}<span aria-hidden="true">{sort.key === key ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}</span></button>;
   const importRiskBundle = async (file: File) => {
     setImporting(true); setImportMessage(null);
     try {
@@ -103,21 +137,22 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
     {importMessage && <p className="copytrade-analysis-status">{importMessage}</p>}
     {response && !loading && <>
       <div className="experimental-note"><strong>Experimental only.</strong> Overall scores require all four component scores. A dash means that evidence is missing, not zero. Generated {new Date(response.generatedAt).toLocaleString()}.</div>
+      {response.weighting && <div className="experimental-note"><strong>{response.weighting.mode === 'validated-patterns' ? 'Validated adaptive weights' : 'Fixed fallback weights'}</strong><span> Edge {(response.weighting.weights.edge * 100).toFixed(0)}% · Consistency {(response.weighting.weights.consistency * 100).toFixed(0)}% · Robustness {(response.weighting.weights.robustness * 100).toFixed(0)}% · Copyability {(response.weighting.weights.copyability * 100).toFixed(0)}%.</span><small>{response.weighting.detail}</small></div>}
       <p className="experimental-score-legend"><strong>Score legend:</strong> every score is from 0 to 100. Higher is better. Rows marked <strong>insufficient</strong> are unrankable and are not comparable to scored wallets. Click a row for the calculation details.</p>
-      <DataTable wrapClassName="experimental-table-wrap" tableClassName="experimental-table" rows={response.wallets} getRowKey={(wallet) => wallet.walletAddress} rowProps={(wallet) => ({ className: 'experimental-clickable-row', onClick: () => setSelectedWallet(wallet), title: 'Open score details' })} columns={[
-        { key: 'rank', header: 'Rank', render: (wallet) => wallet.rank === null ? '—' : `#${wallet.rank}` },
-        { key: 'wallet', header: 'Wallet', headerProps: { className: 'experimental-wallet-column' }, cellProps: () => ({ className: 'experimental-wallet-column' }), render: (wallet) => <span title={wallet.walletAddress}><a className="gmgn-wallet-link" href={gmgnUrl(wallet.walletAddress)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}><strong>{wallet.name?.trim() || short(wallet.walletAddress)}</strong>{wallet.name?.trim() && <small>{short(wallet.walletAddress)}</small>}</a></span> },
-        { key: 'evidence', header: 'Evidence', render: (wallet) => <span className={`experimental-evidence ${wallet.evidence.level}`} title={wallet.evidence.detail}>{wallet.evidence.level}</span> },
-        { key: 'edge', header: <>Edge<br />score</>, headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.edge} /> },
-        { key: 'consistency', header: <>Consistency<br />score</>, headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.consistency} /> },
-        { key: 'robustness', header: <>Robustness<br />score</>, headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.robustness} /> },
-        { key: 'copyability', header: <>Copyability<br />score</>, headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.copyability} /> },
-        { key: 'overall', header: <>Overall<br />score</>, headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.overall} /> },
-        { key: 'facts', header: 'Saved facts', render: (wallet) => <span title={wallet.risks.join(' · ') || 'No recorded warning'}>{pct(wallet.facts.copyMedianPercent)} · {usd(wallet.facts.copyCapitalUsd)}<small>{wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered} round trips</small></span> },
-        { key: 'scrutiny', header: 'Scrutiny', render: (wallet) => wallet.scrutiny ? <span title={wallet.scrutiny.checks.map((check) => `${check.label}: ${check.verdict} — ${check.detail}`).join('\n')}>{wallet.scrutiny.pass} pass · {wallet.scrutiny.fail} fail<small>{wallet.scrutiny.insufficient} insufficient</small></span> : '—' },
-        { key: 'liquidity', header: 'Size bands', render: (wallet) => wallet.liquidity ? <span title="Median simulated return by saved Dune entry-size band">L {pct(wallet.liquidity.low)}<small>M {pct(wallet.liquidity.medium)} · H {pct(wallet.liquidity.high)}</small></span> : '—' },
-        { key: 'risk', header: 'GMGN risk', render: (wallet) => wallet.riskDetails?.available ? <span className="experimental-evidence complete" title="Saved GMGN 30-day risk details are available">available</span> : <span className="muted" title="No saved GMGN risk JSON for this wallet">not imported</span> },
-        { key: 'tags', header: 'Tags', render: (wallet) => wallet.tags?.length ? <span className="experimental-tag-list">{wallet.tags.map((tag) => <GmgnTag key={tag} tag={tag} />)}</span> : '—' },
+      <DataTable wrapClassName="experimental-table-wrap" tableClassName="experimental-table" rows={sortedWallets} getRowKey={(wallet) => wallet.walletAddress} rowProps={(wallet) => ({ className: 'experimental-clickable-row', onClick: () => setSelectedWallet(wallet), title: 'Open score details' })} columns={[
+        { key: 'rank', header: sortableHeader('rank', 'Rank'), render: (wallet) => wallet.rank === null ? '—' : `#${wallet.rank}` },
+        { key: 'wallet', header: sortableHeader('wallet', 'Wallet'), headerProps: { className: 'experimental-wallet-column' }, cellProps: () => ({ className: 'experimental-wallet-column' }), render: (wallet) => <span title={wallet.walletAddress}><a className="gmgn-wallet-link" href={gmgnUrl(wallet.walletAddress)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}><strong>{wallet.name?.trim() || short(wallet.walletAddress)}</strong>{wallet.name?.trim() && <small>{short(wallet.walletAddress)}</small>}</a></span> },
+        { key: 'evidence', header: sortableHeader('evidence', 'Evidence'), render: (wallet) => <span className={`experimental-evidence ${wallet.evidence.level}`} title={wallet.evidence.detail}>{wallet.evidence.level}</span> },
+        { key: 'edge', header: sortableHeader('edge', 'Edge score'), headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.edge} /> },
+        { key: 'consistency', header: sortableHeader('consistency', 'Consistency score'), headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.consistency} /> },
+        { key: 'robustness', header: sortableHeader('robustness', 'Robustness score'), headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.robustness} /> },
+        { key: 'copyability', header: sortableHeader('copyability', 'Copyability score'), headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.copyability} /> },
+        { key: 'overall', header: sortableHeader('overall', 'Overall score'), headerProps: { className: 'experimental-score-column' }, cellProps: () => ({ className: 'experimental-score-column' }), render: (wallet) => <ScoreCell value={wallet.scores.overall} /> },
+        { key: 'facts', header: sortableHeader('facts', 'Saved facts'), render: (wallet) => <span title={wallet.risks.join(' · ') || 'No recorded warning'}>{pct(wallet.facts.copyMedianPercent)} · {usd(wallet.facts.copyCapitalUsd)}<small>{wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered} round trips</small></span> },
+        { key: 'scrutiny', header: sortableHeader('scrutiny', 'Scrutiny'), render: (wallet) => wallet.scrutiny ? <span title={wallet.scrutiny.checks.map((check) => `${check.label}: ${check.verdict} — ${check.detail}`).join('\n')}>{wallet.scrutiny.pass} pass · {wallet.scrutiny.fail} fail<small>{wallet.scrutiny.insufficient} insufficient</small></span> : '—' },
+        { key: 'liquidity', header: sortableHeader('liquidity', 'Size bands'), render: (wallet) => wallet.liquidity ? <span title="Median simulated return by saved Dune entry-size band">L {pct(wallet.liquidity.low)}<small>M {pct(wallet.liquidity.medium)} · H {pct(wallet.liquidity.high)}</small></span> : '—' },
+        { key: 'risk', header: sortableHeader('risk', 'GMGN risk'), render: (wallet) => wallet.riskDetails?.available ? <span className="experimental-evidence complete" title="Saved GMGN 30-day risk details are available">available</span> : <span className="muted" title="No saved GMGN risk JSON for this wallet">not imported</span> },
+        { key: 'tags', header: sortableHeader('tags', 'Tags'), render: (wallet) => wallet.tags?.length ? <span className="experimental-tag-list">{wallet.tags.map((tag) => <GmgnTag key={tag} tag={tag} />)}</span> : '—' },
       ]} emptyMessage="No saved wallet evidence is available yet." />
       {selectedWallet && <Modal onClose={() => setSelectedWallet(null)} ariaLabel={`Decision Lab details for ${selectedWallet.name?.trim() || short(selectedWallet.walletAddress)}`} dialogClassName="experimental-detail-modal">
         <div className="copytrade-modal-head"><div><p className="eyebrow">DECISION LAB · SAVED EVIDENCE</p><h3>{selectedWallet.name?.trim() || short(selectedWallet.walletAddress)}</h3><a className="gmgn-wallet-link" href={gmgnUrl(selectedWallet.walletAddress)} target="_blank" rel="noreferrer">View wallet on GMGN ↗</a><small title={selectedWallet.walletAddress}>{selectedWallet.walletAddress}</small></div><button type="button" className="secondary" onClick={() => setSelectedWallet(null)}>Close</button></div>

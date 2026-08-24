@@ -42,17 +42,27 @@ import { computeEliminationReport, estimateDuneRefetchDuration } from '../copytr
 import { computeCandidateScrutinyBatch, MAX_SCRUTINY_WALLETS } from '../copytrade/scrutiny/candidateScrutiny.js';
 import { DEFAULT_FULLY_COVERED_PERIOD_DAYS, readFullyCoveredWallets } from '../copytrade/scrutiny/fullyCovered.js';
 import { DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS, MAX_PATTERN_DISCOVERY_PERIOD_DAYS, patternDiscoveryCacheKey, readPatternDiscoveryCache, readPatternDiscoveryDataFingerprint, readPatternDiscoveryExport, writePatternDiscoveryCache } from '../copytrade/discovery/patternDiscovery.js';
-import { PatternDiscoveryRunnerError, runPatternDiscoveryReport } from '../copytrade/discovery/patternDiscoveryRunner.js';
+import { PATTERN_DISCOVERY_COVERAGE_THRESHOLDS, PatternDiscoveryRunnerError, runPatternDiscoveryReport, runPatternDiscoverySensitivity, type PatternDiscoveryProgress } from '../copytrade/discovery/patternDiscoveryRunner.js';
 import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
-import { computeExperimentalDecisionReport } from '../copytrade/experimentalDecision.js';
+import { computeExperimentalDecisionReport, readExperimentalDecisionCacheVersion } from '../copytrade/experimentalDecision.js';
 import { API_CATALOG } from '../apiCatalog.js';
 
 /** Scrutiny interrogates individually-pinned wallets, not a ranked top-N — so its roster scope
  *  must cover the whole roster (well above its current ~113-wallet size), unlike /winners's
  *  deliberate top-25 cutoff. */
 const SCRUTINY_ROSTER_LIMIT = 500;
+
+let patternDiscoveryProgress: PatternDiscoveryProgress = {
+  status: 'idle', stage: 'complete', message: 'No discovery run is active.',
+  thresholdsTotal: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length, thresholdsCompleted: 0,
+  currentThreshold: null, startedAt: null, completedAt: null,
+};
+
+const setPatternDiscoveryProgress = (update: Partial<PatternDiscoveryProgress>) => {
+  patternDiscoveryProgress = { ...patternDiscoveryProgress, ...update };
+};
 
 import type { DunePollUpdate } from '../copytrade/simulation/copySimulationDune.js';
 import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
@@ -497,10 +507,14 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       }
       return;
     }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/pattern-discovery/status') {
+      respond(200, patternDiscoveryProgress);
+      return;
+    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/pattern-discovery/run/report') {
-      let payload: { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown } = {};
+      let payload: { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown; compareCoverage?: unknown } = {};
       try {
-        payload = (await readJsonBody(request)) as { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown };
+        payload = (await readJsonBody(request)) as { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown; compareCoverage?: unknown };
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
         return;
@@ -508,12 +522,38 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const periodDays = payload.periodDays === undefined ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS : Number(payload.periodDays);
       const minN = payload.minN === undefined ? 10 : Number(payload.minN);
       const minimumCoveragePercent = payload.minimumCoveragePercent === undefined ? 100 : Number(payload.minimumCoveragePercent);
+      const compareCoverage = payload.compareCoverage !== false;
       const abortController = new AbortController();
       request.once('aborted', () => abortController.abort());
+      const startedAt = new Date().toISOString();
+      setPatternDiscoveryProgress({
+        status: 'preparing', stage: 'loading evidence', message: `Preparing the ${periodDays}-day saved evidence for the ${PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length} coverage thresholds.`,
+        thresholdsTotal: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length, thresholdsCompleted: 0,
+        currentThreshold: null, startedAt, completedAt: null,
+      });
       try {
-        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN, minimumCoveragePercent, signal: abortController.signal }));
+        const result = await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN, minimumCoveragePercent, signal: abortController.signal });
+        const sensitivity = compareCoverage
+          ? await runPatternDiscoverySensitivity(database, {
+            projectRoot, periodDays, minN, signal: abortController.signal,
+            onProgress: ({ threshold, index, total, phase }) => setPatternDiscoveryProgress({
+              status: phase === 'complete' && index + 1 === total ? 'complete' : 'running',
+              stage: phase === 'complete' && index + 1 === total ? 'complete' : 'running threshold',
+              message: phase === 'starting' ? `Running shared discovery at ${threshold}% minimum coverage…` : `Finished the ${threshold}% threshold; starting the next threshold…`,
+              thresholdsCompleted: phase === 'complete' ? index + 1 : index,
+              thresholdsTotal: total, currentThreshold: phase === 'complete' && index + 1 === total ? null : threshold,
+              completedAt: phase === 'complete' && index + 1 === total ? new Date().toISOString() : null,
+            }),
+          })
+          : undefined;
+        setPatternDiscoveryProgress({ status: 'complete', stage: 'complete', message: 'Shared discovery finished for every coverage threshold.', thresholdsCompleted: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length, currentThreshold: null, completedAt: new Date().toISOString() });
+        respond(200, { ...result, sensitivity });
       } catch (error) {
-        if (abortController.signal.aborted) return;
+        if (abortController.signal.aborted) {
+          setPatternDiscoveryProgress({ status: 'stopped', stage: 'stopped', message: 'Discovery stopped. Completed threshold results remain cached.', completedAt: new Date().toISOString(), currentThreshold: null });
+          return;
+        }
+        setPatternDiscoveryProgress({ status: 'error', stage: 'error', message: error instanceof Error ? error.message : String(error), completedAt: new Date().toISOString(), currentThreshold: null });
         const statusCode = error instanceof PatternDiscoveryRunnerError ? error.statusCode : 500;
         respond(statusCode, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -952,7 +992,8 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const rosterSnapshotId = Number.isInteger(snapshotRaw) && snapshotRaw > 0 ? snapshotRaw : undefined;
       // This endpoint is intentionally not wired to any fetch runner. It only computes a
       // separately named experiment from saved SQLite evidence and cannot spend provider credits.
-      respond(200, readCachedResearch(`experimental-decision-v4:${limit}:${rosterSnapshotId ?? 'latest'}`, () => computeExperimentalDecisionReport(database, { limit, rosterSnapshotId })));
+      const weightingVersion = readExperimentalDecisionCacheVersion(database);
+      respond(200, readCachedResearch(`experimental-decision-v5:${limit}:${rosterSnapshotId ?? 'latest'}:${weightingVersion}`, () => computeExperimentalDecisionReport(database, { limit, rosterSnapshotId })));
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/scrutiny/refresh-trades') {

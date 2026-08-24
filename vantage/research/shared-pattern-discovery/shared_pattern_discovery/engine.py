@@ -46,6 +46,40 @@ def _groups(rows: Iterable[dict[str, Any]]) -> int:
     return len({row["independence_group"] for row in rows})
 
 
+def _wallet_key(row: dict[str, Any]) -> str:
+    wallet = row.get("wallet_address")
+    if isinstance(wallet, str) and wallet:
+        return wallet
+    group = str(row.get("independence_group", ""))
+    return group.split(":entry:", 1)[0]
+
+
+def _wallet_weights(rows: Iterable[dict[str, Any]]) -> list[float]:
+    materialized = list(rows)
+    counts: dict[str, int] = {}
+    for row in materialized:
+        key = _wallet_key(row)
+        counts[key] = counts.get(key, 0) + 1
+    return [1.0 / counts[_wallet_key(row)] for row in materialized]
+
+
+def _weighted_mean(values: list[float], weights: list[float]) -> float:
+    total = float(sum(weights))
+    return float(sum(value * weight for value, weight in zip(values, weights)) / total) if total else 0.0
+
+
+def _weighted_correlation(xs: list[float], ys: list[float], weights: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys) or len(xs) != len(weights):
+        return None
+    mean_x = _weighted_mean(xs, weights)
+    mean_y = _weighted_mean(ys, weights)
+    covariance = sum(weight * (x - mean_x) * (y - mean_y) for x, y, weight in zip(xs, ys, weights))
+    variance_x = sum(weight * (x - mean_x) ** 2 for x, weight in zip(xs, weights))
+    variance_y = sum(weight * (y - mean_y) ** 2 for y, weight in zip(ys, weights))
+    denominator = math.sqrt(variance_x * variance_y)
+    return float(covariance / denominator) if denominator > 0 else None
+
+
 def _eligible(rows: Iterable[dict[str, Any]], outcome: str) -> list[dict[str, Any]]:
     return [row for row in rows if row["mature"] and row["usable"] and _number(row.get(outcome)) is not None]
 
@@ -102,6 +136,7 @@ def _tree_discovery(rows: list[dict[str, Any]], feature_names: list[str], min_n:
         return [], {}, "not_fitted_insufficient_data", {}
     x_rows: list[list[float]] = []
     y: list[float] = []
+    model_rows: list[dict[str, Any]] = []
     feature_medians = {
         feature: float(np.median([_number(_feature_value(row, feature)) for row in usable if _number(_feature_value(row, feature)) is not None]))
         for feature in feature_names
@@ -114,6 +149,7 @@ def _tree_discovery(rows: list[dict[str, Any]], feature_names: list[str], min_n:
             # are never imputed, and the report retains missingness diagnostics separately.
             x_rows.append([float(value) if value is not None else feature_medians[feature] for feature, value in zip(feature_names, values)])
             y.append(float(row["__outcome"]))
+            model_rows.append(row)
     if len(x_rows) < min_n:
         return [], {}, "not_fitted_insufficient_data", {}
     x = np.asarray(x_rows, dtype=float)
@@ -122,7 +158,7 @@ def _tree_discovery(rows: list[dict[str, Any]], feature_names: list[str], min_n:
         from sklearn.ensemble import RandomForestRegressor  # type: ignore
         from sklearn.inspection import permutation_importance  # type: ignore
         model = RandomForestRegressor(n_estimators=64, max_depth=4, random_state=seed, n_jobs=1)
-        model.fit(x, ya)
+        model.fit(x, ya, sample_weight=np.asarray(_wallet_weights(model_rows), dtype=float))
         importances = {feature: float(value) for feature, value in zip(feature_names, model.feature_importances_) if value > 0}
         perm = permutation_importance(model, x, ya, n_repeats=8, random_state=seed, scoring="neg_mean_squared_error", n_jobs=1)
         permutation = {feature: float(value) for feature, value in zip(feature_names, perm.importances_mean) if math.isfinite(float(value))}
@@ -198,15 +234,18 @@ def _effect_summary(rows: list[dict[str, Any]], condition: dict[str, Any], outco
     selected = [row for row, keep in zip(eligible, masks) if keep]
     values = [float(row[outcome]) for row in selected if _number(row.get(outcome)) is not None]
     all_values = [float(row[outcome]) for row in eligible if _number(row.get(outcome)) is not None]
-    base = float(np.mean(all_values)) if all_values else 0.0
-    effect = float(np.mean(values) - base) if values else 0.0
+    all_weights = _wallet_weights(eligible)
+    selected_weights = [weight for row, weight, keep in zip(eligible, all_weights, masks) if keep]
+    base = _weighted_mean(all_values, all_weights) if all_values else 0.0
+    effect = _weighted_mean(values, selected_weights) - base if values else 0.0
     return {
         "sample_size": len(values),
         "independence_groups": _groups(selected),
-        "mean_return": float(np.mean(values)) if values else None,
+        "mean_return": _weighted_mean(values, selected_weights) if values else None,
         "median_return": float(np.median(values)) if values else None,
         "effect_vs_all": effect,
         "top_3_effect_share": _top_effect_share(values, base),
+        "wallets": len({_wallet_key(row) for row in selected}),
         "bootstrap_median_ci": bootstrap_ci(values),
     }
 
@@ -224,10 +263,10 @@ def _validation_for_pattern(pattern: dict[str, Any], rows: list[dict[str, Any]],
         xs = [_number(_feature_value(row, feature)) for row in eligible]
         ys = [_number(row.get(outcome)) for row in eligible]
         pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
-        result = pearson([x for x, _ in pairs], [y for _, y in pairs])
-        coefficient = result["coefficient"]
+        paired_rows = [row for row in eligible if _number(_feature_value(row, feature)) is not None]
+        coefficient = _weighted_correlation([x for x, _ in pairs], [y for _, y in pairs], _wallet_weights(paired_rows))
         passed = len(pairs) >= min_n and coefficient is not None and float(coefficient) * float(pattern["effect"]) > 0
-        return passed, {"sample_size": len(pairs), "independence_groups": _groups([row for row in eligible if _number(_feature_value(row, feature)) is not None]), "coefficient": coefficient}
+        return passed, {"sample_size": len(pairs), "independence_groups": _groups(paired_rows), "wallets": len({_wallet_key(row) for row in paired_rows}), "coefficient": coefficient, "weighting": "equal wallet total weight"}
     condition = pattern["conditions"][0]
     summary = _effect_summary(rows, condition, outcome)
     discovery_effect = float(pattern.get("effect", pattern.get("discovery_effect", 0.0)))
@@ -328,20 +367,29 @@ def run_discovery(
             if result["coefficient"] is None:
                 continue
             p_value = 1.0 if result["p_value"] is None else float(result["p_value"])
-            pattern = {"source": method, "kind": "correlation", "feature": feature, "conditions": [{"feature": feature, "operator": "correlation", "value": "positive" if result["coefficient"] >= 0 else "negative"}], "effect": float(result["coefficient"]), "p_value": p_value, "discovery_sample_size": len(pairs), "discovery_independence_groups": _groups([row for row in eligible_discovery if _number(_feature_value(row, feature)) is not None])}
+            paired_rows = [row for row in eligible_discovery if _number(_feature_value(row, feature)) is not None]
+            balanced_effect = _weighted_correlation([p[0] for p in pairs], [p[1] for p in pairs], _wallet_weights(paired_rows))
+            if balanced_effect is None:
+                continue
+            pattern = {"source": method, "kind": "correlation", "feature": feature, "conditions": [{"feature": feature, "operator": "correlation", "value": "positive" if balanced_effect >= 0 else "negative"}], "effect": float(balanced_effect), "p_value": p_value, "discovery_sample_size": len(pairs), "discovery_independence_groups": _groups(paired_rows), "discovery_wallets": len({_wallet_key(row) for row in paired_rows}), "weighting": "equal wallet total weight"}
             candidates.append(pattern)
             corrected_entries.append((pattern, p_value))
 
+        paired_rows = [row for row in eligible_discovery if _number(_feature_value(row, feature)) is not None]
+        paired_weights = _wallet_weights(paired_rows)
         edges, labels = quantile_bins(np.asarray([p[0] for p in pairs]), buckets)
+        all_effect_values = [p[1] for p in pairs]
+        all_effect_weights = paired_weights
         for label in sorted(set(labels.tolist())):
-            group_values = np.asarray([p[1] for p, bucket in zip(pairs, labels) if bucket == label], dtype=float)
+            group_values = [p[1] for p, bucket in zip(pairs, labels) if bucket == label]
+            group_weights = [weight for weight, bucket in zip(paired_weights, labels) if bucket == label]
             if len(group_values) == 0:
                 continue
             lower = float(edges[label])
             upper = float(edges[label + 1]) if label + 1 < len(edges) else float(edges[-1])
             condition = {"feature": feature, "lower": lower, "upper": upper}
-            effect = float(np.mean(group_values) - np.mean([p[1] for p in pairs]))
-            pattern = {"source": "quantile_bucket", "kind": "bucket", "feature": feature, "conditions": [condition], "effect": effect, "p_value": _p_value_for_difference(group_values, np.asarray([p[1] for p, b in zip(pairs, labels) if b != label], dtype=float)), "discovery_sample_size": int(len(group_values)), "discovery_independence_groups": _groups([row for row in eligible_discovery if _number(_feature_value(row, feature)) is not None and lower <= float(_feature_value(row, feature)) <= upper])}
+            effect = float(_weighted_mean(group_values, group_weights) - _weighted_mean(all_effect_values, all_effect_weights))
+            pattern = {"source": "quantile_bucket", "kind": "bucket", "feature": feature, "conditions": [condition], "effect": effect, "p_value": _p_value_for_difference(np.asarray(group_values, dtype=float), np.asarray([p[1] for p, b in zip(pairs, labels) if b != label], dtype=float)), "discovery_sample_size": int(len(group_values)), "discovery_independence_groups": _groups([row for row in eligible_discovery if _number(_feature_value(row, feature)) is not None and lower <= float(_feature_value(row, feature)) <= upper]), "discovery_wallets": len({_wallet_key(row) for row, bucket in zip(paired_rows, labels) if bucket == label}), "weighting": "equal wallet total weight"}
             candidates.append(pattern)
             corrected_entries.append((pattern, float(pattern["p_value"])))
 
@@ -431,6 +479,8 @@ def run_discovery(
             "independence_groups": _groups(rows),
             "time_start": rows[0]["event_time"],
             "time_end": rows[-1]["event_time"],
+            "wallets": len({_wallet_key(row) for row in rows}),
+            "weighting": "equal wallet total weight; each row weight is 1 / eligible rows for its wallet",
         },
         "missingness_checks": [_missingness_check(discovery, feature, dataset.outcome) for feature in numeric_features],
         "feature_summaries": feature_summaries,
@@ -451,6 +501,7 @@ def run_discovery(
             "holdout_used_for_validation": False,
             "holdout_used_for_model_fit": False,
             "holdout_used_for_multiple_testing": False,
+            "wallet_aware": True,
         },
         "multiple_testing": {"method": "Benjamini-Hochberg FDR", "alpha": fdr_alpha, "enumerated_comparisons": len(corrected_entries), "tree_search_correction": "not applied; validation survival and untouched holdout are the protection"},
         "model": {"ensemble": tree_kind, "permutation_importance": permutation_importance, "permutation_importance_method": "sklearn.inspection.permutation_importance" if tree_kind.startswith("sklearn") else "deterministic NumPy train-vs-permuted MSE for bootstrap stump ensemble", "feature_importance": importances, "shallow_rule_count": len(tree_rules)},

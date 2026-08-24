@@ -3700,6 +3700,15 @@ td small {
   background: #0d1b15;
   box-shadow: 0 2px 0 rgba(114, 216, 170, 0.28);
 }
+.pattern-discovery-threshold-summary {
+  display: grid;
+  gap: 5px;
+  min-width: min(34rem, 100%);
+  color: #b6cfc2;
+  font-size: 0.8rem;
+}
+.pattern-discovery-threshold-summary strong { color: #72d8aa; }
+.pattern-discovery-threshold-summary small { line-height: 1.5; }
 .bars {
   display: grid;
   gap: 13px;
@@ -5874,13 +5883,16 @@ footer {
   color: #07170f;
   background: #72d8aa;
 }
-.experimental-decision-panel { overflow: hidden; }
+.experimental-decision-panel { overflow: visible; }
 .experimental-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: flex-end; }
 .experimental-note { margin: 0.75rem 0; padding: 0.7rem 0.85rem; border-left: 3px solid #f0c875; background: rgba(240, 200, 117, 0.08); color: #c9dfd0; font-size: 0.82rem; }
 .experimental-score-legend { margin: 0.65rem 0; color: #a8c7b5; font-size: 0.78rem; }
-.experimental-table-wrap { overflow-x: auto; }
+.experimental-table-wrap { overflow-x: auto; overflow-y: visible; position: relative; }
 .experimental-table { min-width: 880px; table-layout: auto; }
 .experimental-table td, .experimental-table th { vertical-align: top; white-space: nowrap; }
+.experimental-sort-button { display: inline-flex; align-items: center; gap: 0.15rem; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.experimental-sort-button:hover, .experimental-sort-button:focus-visible { color: #b9f2d4; }
+.experimental-sort-button span { color: #72d8aa; font-size: 0.8em; }
 .experimental-table th.experimental-score-column, .experimental-table td.experimental-score-column { width: 92px; min-width: 92px; max-width: 92px; white-space: normal; }
 .experimental-table th.experimental-score-column { line-height: 1.15; word-break: normal; overflow-wrap: normal; writing-mode: horizontal-tb; }
 .experimental-table th.experimental-wallet-column, .experimental-table td.experimental-wallet-column { width: 120px; max-width: 120px; }

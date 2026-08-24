@@ -97,9 +97,13 @@ type CopyTradeHistoryRow = { id: number; walletAddress: string; chain: string; t
 type CopyTradeHistoryResponse = { walletAddress: string; chain: string; total: number; rows: CopyTradeHistoryRow[]; coverage: { requestsUsed: number; periodDays: number | null; truncated: number; stopReason: string | null; updatedAt: string; resumeCursor: string | null } | null };
 type CopyTradeHistoryBulkResponse = { histories: CopyTradeHistoryResponse[] };
 type PatternDiscoveryExport = { metadata: { project: 'crypto'; outcome: 'net_return_after_costs'; outcome_horizon: string; period_days: number; coverage_scope: 'outcome_minimum_percent'; minimum_coverage_percent: number; coverage_semantics: string; selection_rule: string; selected_wallet_count: number; exported_rows: number; eligible_wallets_before_threshold: number; excluded_wallets_below_threshold: number; coverage_distribution_percent: number[]; export_generated_at: string }; rows: Array<{ event_id: string; event_time: string; entity_id: string; signal_type: string; wallet_address: string; token_address: string; net_return_after_costs: number; coverage_rate_percent: number; coverage_status: 'fully_covered' | 'partially_covered' }> };
-type PatternDiscoveryReport = { project: 'crypto'; patterns: Array<{ source?: string; kind?: string; feature?: string; conditions?: unknown; effect?: number | null; discovery_sample_size?: number; validationStatus?: string; validation?: { sample_size?: number; effect_vs_all?: number | null; reason?: string }; reason?: string }>; status_counts: Record<string, number>; input_contract?: { feature_allowlist_version?: string; rejected_fields?: string[] }; split: { method?: string; discovery_rows?: number; validation_rows?: number; untouched_holdout_rows?: number; holdout_policy?: string; holdout_used_for_discovery?: boolean; holdout_used_for_validation?: boolean; [key: string]: unknown }; language?: string };
+type PatternDiscoveryReport = { project: 'crypto'; patterns: Array<{ source?: string; kind?: string; feature?: string; conditions?: unknown; effect?: number | null; discovery_sample_size?: number; validationStatus?: string; validation?: { sample_size?: number; effect_vs_all?: number | null; reason?: string }; reason?: string }>; status_counts: Record<string, number>; dataset_summary?: { rows?: number; independence_groups?: number; wallets?: number; [key: string]: unknown }; input_contract?: { feature_allowlist_version?: string; rejected_fields?: string[] }; split: { method?: string; discovery_rows?: number; validation_rows?: number; untouched_holdout_rows?: number; holdout_policy?: string; holdout_used_for_discovery?: boolean; holdout_used_for_validation?: boolean; [key: string]: unknown }; language?: string };
 type PatternDiscoveryExecution = { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string };
-type PatternDiscoveryRunResponse = { report: PatternDiscoveryReport; execution?: PatternDiscoveryExecution };
+type PatternDiscoverySensitivityPoint = { minimumCoveragePercent: number; wallets: number; rows: number; independentEntries: number; validationSurvivors: number; discoveredCandidates: number; rejected: number; insufficientData: number; reportAvailable: boolean; error?: string };
+type PatternDiscoverySensitivity = { thresholds: PatternDiscoverySensitivityPoint[]; weighting: 'equal wallet total weight'; note: string };
+type PatternDiscoveryRunResponse = { report: PatternDiscoveryReport; execution?: PatternDiscoveryExecution; sensitivity?: PatternDiscoverySensitivity };
+type PatternDiscoveryProgress = { status: 'idle' | 'preparing' | 'running' | 'complete' | 'stopped' | 'error'; stage: 'loading evidence' | 'running threshold' | 'complete' | 'stopped' | 'error'; message: string; thresholdsTotal: number; thresholdsCompleted: number; currentThreshold: number | null; startedAt: string | null; completedAt: string | null };
+const PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT = 100;
 
 type ResearchUpdateSummary = {
   completedAt: string; rosterSnapshotId: number | null; rosterWalletCount: number; rosterAdded: number; rosterAlreadyPresent: number;
@@ -960,11 +964,12 @@ function App() {
   const [rosterComparisonOpen, setRosterComparisonOpen] = useState(false);
   const [copyTradeError, setCopyTradeError] = useState<string | null>(null);
   const [patternDiscoveryExport, setPatternDiscoveryExport] = useState<PatternDiscoveryExport | null>(null);
-  const [patternDiscoveryCoveragePercent, setPatternDiscoveryCoveragePercent] = useState(100);
+  const [patternDiscoveryProgress, setPatternDiscoveryProgress] = useState<PatternDiscoveryProgress | null>(null);
   const [patternDiscoveryLoading, setPatternDiscoveryLoading] = useState(false);
   const [patternDiscoveryLoadingDetail, setPatternDiscoveryLoadingDetail] = useState('Preparing the local SQLite read…');
   const [patternDiscoveryError, setPatternDiscoveryError] = useState<string | null>(null);
   const [patternDiscoveryReport, setPatternDiscoveryReport] = useState<PatternDiscoveryReport | null>(null);
+  const [patternDiscoverySensitivity, setPatternDiscoverySensitivity] = useState<PatternDiscoverySensitivity | null>(null);
   const [patternDiscoveryExecution, setPatternDiscoveryExecution] = useState<PatternDiscoveryExecution | null>(null);
   const [patternDiscoveryRunLoading, setPatternDiscoveryRunLoading] = useState(false);
   const [patternDiscoveryStartedAt, setPatternDiscoveryStartedAt] = useState<number | null>(null);
@@ -1188,13 +1193,14 @@ function App() {
     }
   };
 
-  const loadPatternDiscoveryExport = async (periodDays = copyTradePeriodDays, minimumCoveragePercent = patternDiscoveryCoveragePercent): Promise<PatternDiscoveryExport | null> => {
+  const loadPatternDiscoveryExport = async (periodDays = copyTradePeriodDays, minimumCoveragePercent = PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT): Promise<PatternDiscoveryExport | null> => {
     if (!patternDiscoveryAbortController.current) patternDiscoveryAbortController.current = new AbortController();
     if (!patternDiscoveryStartedAt) setPatternDiscoveryStartedAt(Date.now());
     setPatternDiscoveryLoading(true);
-    setPatternDiscoveryLoadingDetail(`Loading saved ${periodDays}-day evidence at the ${minimumCoveragePercent}% coverage threshold…`);
+    setPatternDiscoveryLoadingDetail(`Loading saved ${periodDays}-day evidence for the strict ${minimumCoveragePercent}% report…`);
     setPatternDiscoveryError(null);
     setPatternDiscoveryRunError(null);
+    setPatternDiscoverySensitivity(null);
     setPatternDiscoveryExecution(null);
     setPatternDiscoveryReport(null);
     try {
@@ -1220,20 +1226,21 @@ function App() {
     setPatternDiscoveryRunError(null);
     try {
       let selectedExport = patternDiscoveryExport;
-      if (!selectedExport || selectedExport.metadata.minimum_coverage_percent !== patternDiscoveryCoveragePercent) {
-        selectedExport = await loadPatternDiscoveryExport(copyTradePeriodDays, patternDiscoveryCoveragePercent);
+      if (!selectedExport || selectedExport.metadata.minimum_coverage_percent !== PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT) {
+        selectedExport = await loadPatternDiscoveryExport(copyTradePeriodDays, PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT);
       }
       if (!selectedExport?.metadata.exported_rows) {
-        setPatternDiscoveryRunError(`No events meet the selected ${patternDiscoveryCoveragePercent}% coverage threshold.`);
+        setPatternDiscoveryRunError(`No events meet the strict ${PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT}% coverage threshold.`);
         return;
       }
       if (patternDiscoveryStopRequested.current) return;
       const result = await api<PatternDiscoveryRunResponse>(
         '/api/copytrade/pattern-discovery/run/report',
-        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ periodDays: copyTradePeriodDays, minimumCoveragePercent: patternDiscoveryCoveragePercent, minN: 10 }), signal: patternDiscoveryAbortController.current.signal },
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ periodDays: copyTradePeriodDays, minimumCoveragePercent: PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT, minN: 10, compareCoverage: true }), signal: patternDiscoveryAbortController.current.signal },
       );
       setPatternDiscoveryReport(result.report);
       setPatternDiscoveryExecution(result.execution ?? null);
+      setPatternDiscoverySensitivity(result.sensitivity ?? null);
     } catch (error: unknown) {
       if (!patternDiscoveryStopRequested.current) setPatternDiscoveryRunError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2018,9 +2025,25 @@ function App() {
   }, [activeMenu, copyTradeSubTab, selectedRosterSnapshotId]);
   useEffect(() => {
     if (copyTradeSubTab !== 'pattern-discovery') return;
-    const timer = window.setTimeout(() => void loadPatternDiscoveryExport(copyTradePeriodDays, patternDiscoveryCoveragePercent), 180);
+    const timer = window.setTimeout(() => void loadPatternDiscoveryExport(copyTradePeriodDays, PATTERN_DISCOVERY_PRIMARY_COVERAGE_PERCENT), 180);
     return () => window.clearTimeout(timer);
   }, [copyTradeSubTab, copyTradePeriodDays]);
+  useEffect(() => {
+    if (copyTradeSubTab !== 'pattern-discovery' || (!patternDiscoveryLoading && !patternDiscoveryRunLoading)) return;
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const progress = await api<PatternDiscoveryProgress>('/api/copytrade/pattern-discovery/status');
+        if (!disposed) {
+          setPatternDiscoveryProgress(progress);
+          setPatternDiscoveryLoadingDetail(progress.message);
+        }
+      } catch { /* the main request reports the actionable error */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 500);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [api, copyTradeSubTab, patternDiscoveryLoading, patternDiscoveryRunLoading]);
   useEffect(() => {
     if (copyTradeSubTab !== 'wallet-stats' || !gmgnStatsStatus?.running) return;
     const timer = window.setInterval(async () => {
@@ -4226,13 +4249,13 @@ function App() {
 
     {copyTradeSubTab === 'pattern-discovery' && <section id="copytrade-pattern-discovery" className="menu-section panel copytrade-research-route pattern-discovery-panel">
       <PanelHeading eyebrow="GMGN COPYTRADE · SHARED ENGINE EXPORT" title="Pattern Discovery" tag="POINT-IN-TIME FEATURES" />
-      <p className="compact-info-line"><span>Read-only normalized export. Choose the minimum Dune outcome coverage; 100% remains the safest default.</span></p>
-      <p className="copytrade-outcome-coverage-warning"><strong>Coverage is a trade-off:</strong> lower thresholds include more wallets but may include missing-outcome bias. This setting never fetches GMGN or Dune data.</p>
+      <p className="compact-info-line"><span>Read-only normalized export. One run evaluates every minimum-coverage level from 50% to 100% in 5% steps.</span></p>
+      <p className="copytrade-outcome-coverage-warning"><strong>One consistent run:</strong> every threshold uses the same point-in-time features, wallet-balanced validation, and leakage rules. Lower thresholds include more wallets but may include more missing-outcome bias.</p>
       <p className="muted"><strong>Strict feature gate:</strong> the shared run uses only the explicit event-time <code>features</code> object. Return, hold-duration, delay, fee, outcome, and post-event matching fields are rejected as leakage and are never valid discovery features. The current GMGN export may therefore produce insufficient data rather than a valid pattern.</p>
-      <div className="copytrade-coverage-controls"><label>Selected period (days)<input type="number" min={1} max={90} step={1} value={copyTradePeriodDays} onChange={(event) => setCopyTradePeriodDays(Math.min(90, Math.max(1, Number(event.target.value) || 1)))} /></label><label className="pattern-discovery-threshold">Minimum Dune outcome coverage <output>{patternDiscoveryCoveragePercent}%</output><input type="range" min={50} max={100} step={1} value={patternDiscoveryCoveragePercent} onChange={(event) => setPatternDiscoveryCoveragePercent(Number(event.target.value))} /><progress max={100} value={patternDiscoveryCoveragePercent} aria-label={`Minimum Dune outcome coverage ${patternDiscoveryCoveragePercent}%`} /></label>{patternDiscoveryExport && <button type="button" className="secondary" disabled={patternDiscoveryExport.metadata.minimum_coverage_percent !== patternDiscoveryCoveragePercent} title={patternDiscoveryExport.metadata.minimum_coverage_percent !== patternDiscoveryCoveragePercent ? 'Run shared discovery to load the selected threshold first.' : undefined} onClick={() => saveJson(patternDiscoveryExport, `crypto-pattern-discovery-${patternDiscoveryExport.metadata.period_days}d-${patternDiscoveryExport.metadata.minimum_coverage_percent}pct.json`)}>Download normalized export</button>}{(patternDiscoveryLoading || patternDiscoveryRunLoading) ? <button type="button" className="secondary pattern-discovery-stop" onClick={stopPatternDiscovery}>Stop discovery</button> : <button type="button" className="primary" onClick={() => void runPatternDiscovery()}>Run shared discovery</button>}</div>
+      <div className="copytrade-coverage-controls"><label>Selected period (days)<input type="number" min={1} max={90} step={1} value={copyTradePeriodDays} onChange={(event) => setCopyTradePeriodDays(Math.min(90, Math.max(1, Number(event.target.value) || 1)))} /></label><span className="pattern-discovery-threshold-summary"><strong>Coverage levels</strong><small>50% · 55% · 60% · 65% · 70% · 75% · 80% · 85% · 90% · 95% · 100%</small></span>{patternDiscoveryExport && <button type="button" className="secondary" onClick={() => saveJson(patternDiscoveryExport, `crypto-pattern-discovery-${patternDiscoveryExport.metadata.period_days}d-${patternDiscoveryExport.metadata.minimum_coverage_percent}pct.json`)}>Download strict 100% export</button>}{(patternDiscoveryLoading || patternDiscoveryRunLoading) ? <button type="button" className="secondary pattern-discovery-stop" onClick={stopPatternDiscovery}>Stop discovery</button> : <button type="button" className="primary" onClick={() => void runPatternDiscovery()}>Run shared discovery</button>}</div>
       {patternDiscoveryError && <p className="error-text">{patternDiscoveryError}</p>}
-      {(patternDiscoveryLoading || patternDiscoveryRunLoading) && <div className="copytrade-analysis-status running" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><strong>{patternDiscoveryLoading && patternDiscoveryRunLoading ? 'Preparing and running shared discovery…' : patternDiscoveryLoading ? 'Preparing the normalized export…' : 'Running the shared Python discovery engine…'}</strong><div className="pattern-discovery-progress-meta"><span>{patternDiscoveryLoading ? 'Stage 1–2 of 3 · local evidence preparation' : 'Stage 3 of 3 · isolated rule discovery'}</span><span>{patternDiscoveryElapsedSeconds}s elapsed</span></div><progress className="pattern-discovery-progress" max={3} value={patternDiscoveryLoading ? 1.5 : 2.5} aria-label="Pattern Discovery progress" />{patternDiscoveryLoading ? <><small>{patternDiscoveryLoadingDetail}</small><ol className="copytrade-loading-steps"><li>Read saved {copyTradePeriodDays}-day GMGN history and Dune outcomes from SQLite</li><li>Recompute eligible delayed-copy coverage at {patternDiscoveryCoveragePercent}%</li><li>Build the normalized event export for the selected threshold</li></ol><small>No GMGN or Dune request is made. The server is processing one local request; counts appear when the export stage completes.</small></> : <small>Normalized export is ready. The isolated Python engine is analyzing its point-in-time features; no database or network access is used.</small>}</div></div>}
-      {patternDiscoveryExport && !patternDiscoveryLoading && <><div className="copytrade-table-overview"><span><strong>{patternDiscoveryExport.metadata.coverage_distribution_percent.filter((coverage) => coverage >= patternDiscoveryCoveragePercent).length}</strong> wallets meet {patternDiscoveryCoveragePercent}%+</span><span><strong>{patternDiscoveryExport.metadata.exported_rows}</strong> normalized events{patternDiscoveryExport.metadata.minimum_coverage_percent === patternDiscoveryCoveragePercent ? '' : ' · apply threshold to load rows'}</span><span><strong>{patternDiscoveryExport.metadata.eligible_wallets_before_threshold - patternDiscoveryExport.metadata.coverage_distribution_percent.filter((coverage) => coverage >= patternDiscoveryCoveragePercent).length}</strong> below threshold</span></div><Collapsible className="copytrade-info-panel pattern-discovery-source-data" open={patternDiscoverySourceOpen} onToggle={setPatternDiscoverySourceOpen} summary={`Source data · ${patternDiscoveryExport.metadata.exported_rows} events`}><DataTable
+      {(patternDiscoveryLoading || patternDiscoveryRunLoading) && <div className="copytrade-analysis-status running" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><strong>{patternDiscoveryProgress?.message ?? (patternDiscoveryLoading ? 'Preparing the normalized export…' : 'Running the shared discovery engine…')}</strong><div className="pattern-discovery-progress-meta"><span>{patternDiscoveryProgress ? `${patternDiscoveryProgress.thresholdsCompleted}/${patternDiscoveryProgress.thresholdsTotal} coverage levels complete${patternDiscoveryProgress.currentThreshold === null ? '' : ` · current ${patternDiscoveryProgress.currentThreshold}%`}` : 'Starting local evidence preparation'}</span><span>{patternDiscoveryElapsedSeconds}s elapsed</span></div><progress className="pattern-discovery-progress" max={patternDiscoveryProgress?.thresholdsTotal ?? 11} value={patternDiscoveryProgress?.thresholdsCompleted ?? 0} aria-label="Pattern Discovery coverage-level progress" /><small>{patternDiscoveryLoadingDetail}</small><ol className="copytrade-loading-steps"><li>Read saved {copyTradePeriodDays}-day GMGN history and Dune outcomes from SQLite</li><li>Apply the same point-in-time and wallet-balanced rules at each 5% coverage step</li><li>Run the isolated Python discovery engine and cache each threshold result</li></ol><small>No GMGN or Dune request is made. The server is processing one local request and reports each threshold as it finishes.</small></div></div>}
+      {patternDiscoveryExport && !patternDiscoveryLoading && <><div className="copytrade-table-overview"><span><strong>{patternDiscoveryExport.metadata.selected_wallet_count}</strong> wallets in strict 100% export</span><span><strong>{patternDiscoveryExport.metadata.exported_rows}</strong> normalized events</span><span><strong>{patternDiscoveryExport.metadata.eligible_wallets_before_threshold - patternDiscoveryExport.metadata.selected_wallet_count}</strong> below strict threshold</span></div><Collapsible className="copytrade-info-panel pattern-discovery-source-data" open={patternDiscoverySourceOpen} onToggle={setPatternDiscoverySourceOpen} summary={`Strict 100% source data · ${patternDiscoveryExport.metadata.exported_rows} events`}><DataTable
                 wrapClassName="table-wrap copytrade-table-wrap"
                 tableClassName="copytrade-table fully-covered-table"
                 rows={patternDiscoveryExport.rows.slice(0, 100)}
@@ -4246,12 +4269,30 @@ function App() {
                   { key: 'coverage', header: 'Coverage', render: (row) => `${row.coverage_rate_percent}%` },
                 ]}
               /><p className="muted">{patternDiscoveryExport.metadata.coverage_semantics}</p></Collapsible><Collapsible className="copytrade-info-panel" summary="Configured shared-engine fallback"><p>The browser view only exports JSON. From the Vantage workspace, run the JSON-only adapter and then the isolated Python report command:</p><pre className="pattern-discovery-command">python -m shared_pattern_discovery.exporters.gmgn --project crypto --input &lt;downloaded-export.json&gt; --output runs/crypto/gmgn-pattern-discovery.json{`\n`}python -m shared_pattern_discovery.cli --project crypto --input runs/crypto/gmgn-pattern-discovery.json --output runs/crypto/pattern-discovery-report.json --min-n 10</pre><p className="muted">The shared engine reads this normalized JSON only; it never opens the crypto SQLite database.</p></Collapsible></>}
-      {!patternDiscoveryLoading && patternDiscoveryExport?.metadata.exported_rows === 0 && <p className="muted">No wallets meet the selected {patternDiscoveryCoveragePercent}% coverage threshold for this period.</p>}
+      {!patternDiscoveryLoading && patternDiscoveryExport?.metadata.exported_rows === 0 && <p className="muted">No wallets meet the strict 100% coverage threshold for this period.</p>}
       {!patternDiscoveryLoading && patternDiscoveryExport && !patternDiscoveryReport && !patternDiscoveryRunLoading && !patternDiscoveryRunError && <p className="muted">Normalized export loaded. The shared Python engine has not run yet; click “Run shared discovery” to generate the report.</p>}
       {patternDiscoveryRunError && <p className="error-text">{patternDiscoveryRunError}</p>}
       {patternDiscoveryReport && !patternDiscoveryRunLoading && <div className="copytrade-info-panel pattern-discovery-readable">
         <div className="pattern-discovery-headline"><div><span className="eyebrow">PLAIN-ENGLISH RESULT</span><h3>What did the finder learn?</h3></div><span className="pattern-discovery-status">{(patternDiscoveryReport.status_counts['validation survivor'] ?? 0) > 0 ? 'Evidence repeated on later trades' : 'No reliable rule yet'}</span></div>
         <div className="pattern-discovery-cards"><div><strong>{patternDiscoveryReport.status_counts['validation survivor'] ?? 0}</strong><span>rules that survived a second test</span></div><div><strong>{patternDiscoveryReport.split.discovery_rows ?? 0}</strong><span>older trades used to discover rules</span></div><div><strong>{patternDiscoveryReport.split.validation_rows ?? 0}</strong><span>newer trades used to check them</span></div><div><strong>{patternDiscoveryReport.split.untouched_holdout_rows ?? 0}</strong><span>trades kept untouched</span></div></div>
+        {patternDiscoverySensitivity && <div className="pattern-discovery-sensitivity">
+          <div className="pattern-discovery-results-heading"><div><h4>Coverage sensitivity</h4><p className="muted">The same wallet-balanced engine at every 5% threshold from 50% through 100%. A stronger rule should remain visible as coverage becomes stricter.</p></div><span>50% → 100% · 5% steps</span></div>
+          <DataTable
+            wrapClassName="table-wrap copytrade-table-wrap"
+            tableClassName="copytrade-table pattern-sensitivity-table"
+            rows={patternDiscoverySensitivity.thresholds}
+            getRowKey={(row) => String(row.minimumCoveragePercent)}
+            columns={[
+              { key: 'threshold', header: 'Minimum coverage', render: (row) => `${row.minimumCoveragePercent}%` },
+              { key: 'wallets', header: 'Wallets', render: (row) => row.reportAvailable ? row.wallets.toLocaleString() : '—' },
+              { key: 'entries', header: 'Independent entries', render: (row) => row.reportAvailable ? row.independentEntries.toLocaleString() : '—' },
+              { key: 'rows', header: 'Rows', render: (row) => row.reportAvailable ? row.rows.toLocaleString() : '—' },
+              { key: 'survivors', header: 'Rules repeated', render: (row) => row.reportAvailable ? row.validationSurvivors.toLocaleString() : '—' },
+              { key: 'status', header: 'Status', render: (row) => row.reportAvailable ? 'Available' : row.error ?? 'No report' },
+            ]}
+          />
+          <p className="muted">{patternDiscoverySensitivity.note}</p>
+        </div>}
         <div className="pattern-discovery-flow"><div><b>1</b><span>Look at older trades</span></div><i>→</i><div><b>2</b><span>Find a simple relationship</span></div><i>→</i><div><b>3</b><span>Check it on newer trades</span></div></div>
         <p className="pattern-discovery-explainer"><strong>Read this as:</strong> a behavior that appeared often enough in the selected data to test again.</p>
         {(() => {

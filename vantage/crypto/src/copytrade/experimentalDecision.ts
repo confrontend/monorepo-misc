@@ -5,6 +5,27 @@ import { computeLiquidityImpactReport } from './simulation/copySimulation.js';
 import { computeCandidateScrutinyBatch, type CandidateScrutinyReport } from './scrutiny/candidateScrutiny.js';
 import { readGmgnRiskResults } from './scrutiny/gmgnRisk.js';
 import { hasReliableCopyEvidence } from './scrutiny/copyCandidates.js';
+import {
+  MAX_PATTERN_DISCOVERY_WALLETS,
+  PATTERN_DISCOVERY_ENGINE_VERSION,
+  patternDiscoveryCacheKey,
+  readPatternDiscoveryCache,
+  readPatternDiscoveryDataFingerprint,
+} from './discovery/patternDiscovery.js';
+import { PATTERN_DISCOVERY_COVERAGE_THRESHOLDS } from './discovery/patternDiscoveryRunner.js';
+
+const BASE_DECISION_WEIGHTS = { edge: 0.35, consistency: 0.25, robustness: 0.2, copyability: 0.2 } as const;
+const PROMOTION_THRESHOLDS = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
+const MIN_PROMOTION_WALLETS = 10;
+
+export type ExperimentalDecisionWeights = { edge: number; consistency: number; robustness: number; copyability: number };
+export type ExperimentalDecisionWeighting = {
+  mode: 'fixed-fallback' | 'validated-patterns';
+  weights: ExperimentalDecisionWeights;
+  detail: string;
+  supportingThresholds: number[];
+  supportingWallets: number;
+};
 
 /**
  * A deliberately separate, read-only scoring experiment.
@@ -35,6 +56,7 @@ export type ExperimentalDecisionReport = {
   noProviderFetch: true;
   source: 'saved SQLite evidence';
   methodology: string[];
+  weighting: ExperimentalDecisionWeighting;
   wallets: ExperimentalDecisionWallet[];
 };
 
@@ -42,6 +64,77 @@ const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(va
 const COPY_DELAY_REFERENCE_SECONDS = 15;
 const positiveReturnScore = (value: number | null): number | null => value === null ? null : clamp(50 + value * 1.25);
 const holdScore = (seconds: number | null): number | null => seconds === null ? null : clamp((seconds / COPY_DELAY_REFERENCE_SECONDS) * 25 + (seconds >= COPY_DELAY_REFERENCE_SECONDS ? 50 : 0));
+
+type CachedDiscoveryReport = {
+  patterns?: Array<{ feature?: string; effect?: number | null; validationStatus?: string }>;
+  dataset_summary?: { wallets?: number };
+};
+
+const weightCategoryForFeature = (feature: string): keyof ExperimentalDecisionWeights | null => {
+  if (feature.includes('median_return') || feature.includes('realized_profit')) return 'edge';
+  if (feature.includes('positive_day') || feature.includes('win_rate')) return 'consistency';
+  if (feature.includes('best_token_profit_share') || feature.includes('concentration')) return 'robustness';
+  if (feature.includes('median_hold') || feature.includes('under_15_seconds') || feature.includes('buy_count') || feature.includes('sell_count')) return 'copyability';
+  return null;
+};
+
+/**
+ * Promote discovery into scoring only when it is repeated across coverage levels.
+ * A single run never rewrites the Decision Lab weights.
+ */
+export const readExperimentalDecisionWeighting = (database: DatabaseSync): ExperimentalDecisionWeighting => {
+  const fingerprint = readPatternDiscoveryDataFingerprint(database);
+  const evidence = new Map<keyof ExperimentalDecisionWeights, Set<number>>();
+  let supportingWallets = 0;
+  for (const threshold of PROMOTION_THRESHOLDS) {
+    const report = readPatternDiscoveryCache<CachedDiscoveryReport>(
+      database,
+      patternDiscoveryCacheKey('report', 30, threshold, 10, MAX_PATTERN_DISCOVERY_WALLETS),
+      fingerprint,
+    );
+    if (!report || (report.dataset_summary?.wallets ?? 0) < MIN_PROMOTION_WALLETS) continue;
+    supportingWallets = Math.max(supportingWallets, report.dataset_summary?.wallets ?? 0);
+    for (const pattern of report.patterns ?? []) {
+      if (pattern.validationStatus !== 'validation survivor' || !pattern.feature) continue;
+      const category = weightCategoryForFeature(pattern.feature);
+      if (!category) continue;
+      const thresholds = evidence.get(category) ?? new Set<number>();
+      thresholds.add(threshold);
+      evidence.set(category, thresholds);
+    }
+  }
+  const supportingThresholds = [...new Set([...evidence.values()].flatMap((thresholds) => [...thresholds]))].sort((a, b) => a - b);
+  const promotedCategories = [...evidence.values()].filter((thresholds) => thresholds.size >= 2);
+  if (promotedCategories.length === 0) {
+    return {
+      mode: 'fixed-fallback',
+      weights: { ...BASE_DECISION_WEIGHTS },
+      detail: 'Fixed weights remain active until validated patterns repeat across at least two coverage levels and enough wallets.',
+      supportingThresholds,
+      supportingWallets,
+    };
+  }
+  const signal = (category: keyof ExperimentalDecisionWeights): number => 1 + (evidence.get(category)?.size ?? 0);
+  const raw = (Object.keys(BASE_DECISION_WEIGHTS) as Array<keyof ExperimentalDecisionWeights>).map((category) => [category, signal(category)] as const);
+  const total = raw.reduce((sum, [, value]) => sum + value, 0);
+  const weights = Object.fromEntries(raw.map(([category, value]) => [category, value / total])) as ExperimentalDecisionWeights;
+  return {
+    mode: 'validated-patterns',
+    weights,
+    detail: `Promoted only from validation survivors repeated at ${supportingThresholds.join('%, ')}% coverage; each supporting report had at least ${MIN_PROMOTION_WALLETS} wallets.`,
+    supportingThresholds,
+    supportingWallets,
+  };
+};
+
+export const readExperimentalDecisionCacheVersion = (database: DatabaseSync): string => {
+  const fingerprint = readPatternDiscoveryDataFingerprint(database);
+  const row = database.prepare(
+    `SELECT MAX(updated_at) AS updatedAt FROM copytrade_report_cache
+     WHERE cache_key LIKE ? AND data_fingerprint = ?`,
+  ).get(`${PATTERN_DISCOVERY_ENGINE_VERSION}:report:%`, fingerprint) as { updatedAt?: string | null } | undefined;
+  return `${fingerprint}:${row?.updatedAt ?? 'no-promoted-patterns'}`;
+};
 
 const consistencyScore = (row: CopyTradeRow): number | null => {
   const periods = [...row.weeklyPerformance, ...row.monthlyPerformance].filter((period) => period.medianReturnPercent !== null);
@@ -72,6 +165,7 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
   const screen = computeCopyTradeReport(database, { periodDays: 30, traderLimit: limit, rosterSnapshotId: options.rosterSnapshotId });
   const simulation = computeCopySimulationReport(database, { walletAddresses: screen.rows.map((row) => row.walletAddress), periodDays: 30 });
   const simulationByWallet = new Map(simulation.wallets.map((wallet) => [wallet.walletAddress, wallet]));
+  const weighting = readExperimentalDecisionWeighting(database);
   const liquidity = computeLiquidityImpactReport(simulation);
   const scrutinyByWallet = new Map<string, CandidateScrutinyReport>();
   try {
@@ -93,7 +187,7 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
     const robustness = robustnessScore(row);
     const copyability = sim ? clamp(((sim.coverageRatePercent ?? 0) * 0.6) + (holdScore(row.riskEvidence.medianHoldSeconds) ?? 0) * 0.4) : null;
     const overall = edge !== null && consistency !== null && robustness !== null && copyability !== null && evidence.level === 'complete'
-      ? clamp(edge * 0.35 + consistency * 0.25 + robustness * 0.2 + copyability * 0.2) : null;
+      ? clamp(edge * weighting.weights.edge + consistency * weighting.weights.consistency + robustness * weighting.weights.robustness + copyability * weighting.weights.copyability) : null;
     const positivePeriods = [...row.weeklyPerformance, ...row.monthlyPerformance].filter((period) => period.medianReturnPercent !== null);
     const positivePeriodCount = positivePeriods.filter((period) => (period.medianReturnPercent ?? 0) > 0).length;
     const coverage = sim?.coverageRatePercent ?? null;
@@ -103,7 +197,7 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
       consistency: { label: 'Consistency', detail: positivePeriods.length === 0 ? 'No saved weekly or monthly periods.' : `${positivePeriodCount} of ${positivePeriods.length} saved weekly/monthly periods were positive.` },
       robustness: { label: 'Robustness', detail: row.profitConcentration.bestThreeSharePositiveProfitPercent === null || row.profitConcentration.excludingBestToken.medianReturnPercent === null ? 'Missing profit-concentration inputs.' : `Uses best-three profit share (${row.profitConcentration.bestThreeSharePositiveProfitPercent.toFixed(1)}%) and the median return after removing the best token (${row.profitConcentration.excludingBestToken.medianReturnPercent.toFixed(1)}%).` },
       copyability: { label: 'Copyability', detail: coverage === null || holdSeconds === null ? 'Missing Dune coverage or holding-time input.' : `Combines usable Dune coverage (${coverage.toFixed(1)}%) with median holding time (${(holdSeconds / 3600).toFixed(1)}h) against the 15-second delay reference.` },
-      overall: { label: 'Overall', detail: overall === null ? 'Requires all four component scores and non-missing evidence.' : 'Weighted score: edge 35%, consistency 25%, robustness 20%, copyability 20%.' },
+      overall: { label: 'Overall', detail: overall === null ? 'Requires all four component scores and non-missing evidence.' : `Weighted score: edge ${(weighting.weights.edge * 100).toFixed(0)}%, consistency ${(weighting.weights.consistency * 100).toFixed(0)}%, robustness ${(weighting.weights.robustness * 100).toFixed(0)}%, copyability ${(weighting.weights.copyability * 100).toFixed(0)}%.` },
     };
     const risks: string[] = [];
     if (evidence.level !== 'complete') risks.push(evidence.detail);
@@ -128,7 +222,8 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
   });
   return {
     generatedAt: new Date().toISOString(), periodDays: 30, readOnly: true, noProviderFetch: true, source: 'saved SQLite evidence',
-    methodology: ['30-day saved GMGN report plus saved Dune delayed-copy simulation.', `Overall scores require at least ${RULES.minTrades} GMGN trades, 30 eligible round trips, reliable coverage, and complete cost evidence; thinner samples are unrankable.`, 'Scores are exploratory, capped at 0–100, and missing inputs stay null.', 'This tab does not replace or modify the production decision engine.'],
+    methodology: ['30-day saved GMGN report plus saved Dune delayed-copy simulation.', `Overall scores require at least ${RULES.minTrades} GMGN trades, 30 eligible round trips, reliable coverage, and complete cost evidence; thinner samples are unrankable.`, 'Scores are exploratory, capped at 0–100, and missing inputs stay null.', weighting.detail, 'This tab does not replace or modify the production decision engine.'],
+    weighting,
     wallets,
   };
 };

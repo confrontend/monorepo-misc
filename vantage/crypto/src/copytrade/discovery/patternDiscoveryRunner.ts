@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile);
 const VALIDATION_FRACTION = 0.3;
 const HOLDOUT_FRACTION = 0.2;
 const RUN_TIMEOUT_MS = 120_000;
+export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = Array.from({ length: 11 }, (_, index) => 50 + index * 5);
 
 export type PatternDiscoveryStatus = 'discovered candidate' | 'validation survivor' | 'rejected' | 'insufficient data';
 
@@ -55,6 +56,36 @@ export type PatternDiscoveryReport = {
   };
   language?: string;
   isolation?: Record<string, unknown>;
+};
+
+export type PatternDiscoverySensitivityPoint = {
+  minimumCoveragePercent: number;
+  wallets: number;
+  rows: number;
+  independentEntries: number;
+  validationSurvivors: number;
+  discoveredCandidates: number;
+  rejected: number;
+  insufficientData: number;
+  reportAvailable: boolean;
+  error?: string;
+};
+
+export type PatternDiscoverySensitivity = {
+  thresholds: PatternDiscoverySensitivityPoint[];
+  weighting: 'equal wallet total weight';
+  note: string;
+};
+
+export type PatternDiscoveryProgress = {
+  status: 'idle' | 'preparing' | 'running' | 'complete' | 'stopped' | 'error';
+  stage: 'loading evidence' | 'running threshold' | 'complete' | 'stopped' | 'error';
+  message: string;
+  thresholdsTotal: number;
+  thresholdsCompleted: number;
+  currentThreshold: number | null;
+  startedAt: string | null;
+  completedAt: string | null;
 };
 
 export class PatternDiscoveryRunnerError extends Error {
@@ -230,5 +261,49 @@ export const runPatternDiscoveryReport = async (
   return {
     report,
     execution: { pythonExecutable: executable, inputPath, outputPath, sharedRoot },
+  };
+};
+
+/** Run the same cached engine at the recommended coverage thresholds. Each point uses the
+ * same point-in-time export and wallet-balanced validation; unchanged points are returned
+ * from the database cache instead of invoking Python again. */
+export const runPatternDiscoverySensitivity = async (
+  database: DatabaseSync,
+  options: { projectRoot: string; periodDays?: number; minN?: number; signal?: AbortSignal; onProgress?: (progress: { threshold: number; index: number; total: number; phase: 'starting' | 'complete' }) => void },
+): Promise<PatternDiscoverySensitivity> => {
+  const thresholds = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
+  const points: PatternDiscoverySensitivityPoint[] = [];
+  for (const minimumCoveragePercent of thresholds) {
+    if (options.signal?.aborted) throw new PatternDiscoveryRunnerError('Pattern discovery was cancelled.', 499);
+    options.onProgress?.({ threshold: minimumCoveragePercent, index: points.length, total: thresholds.length, phase: 'starting' });
+    try {
+      const { report } = await runPatternDiscoveryReport(database, { ...options, minimumCoveragePercent });
+      const summary = report.dataset_summary ?? {};
+      const counts = report.status_counts;
+      points.push({
+        minimumCoveragePercent,
+        wallets: Number(summary.wallets ?? 0),
+        rows: Number(summary.rows ?? 0),
+        independentEntries: Number(summary.independence_groups ?? 0),
+        validationSurvivors: Number(counts['validation survivor'] ?? 0),
+        discoveredCandidates: Number(counts['discovered candidate'] ?? 0),
+        rejected: Number(counts.rejected ?? 0),
+        insufficientData: Number(counts['insufficient data'] ?? 0),
+        reportAvailable: true,
+      });
+      options.onProgress?.({ threshold: minimumCoveragePercent, index: points.length, total: thresholds.length, phase: 'complete' });
+    } catch (error) {
+      if (error instanceof PatternDiscoveryRunnerError && error.statusCode === 422) {
+        points.push({ minimumCoveragePercent, wallets: 0, rows: 0, independentEntries: 0, validationSurvivors: 0, discoveredCandidates: 0, rejected: 0, insufficientData: 0, reportAvailable: false, error: error.message });
+        options.onProgress?.({ threshold: minimumCoveragePercent, index: points.length, total: thresholds.length, phase: 'complete' });
+        continue;
+      }
+      throw error;
+    }
+  }
+  return {
+    thresholds: points,
+    weighting: 'equal wallet total weight',
+    note: 'Each wallet contributes equal total weight; multiple exits from one buy are aggregated into one independent entry before discovery.',
   };
 };
