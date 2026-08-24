@@ -471,6 +471,8 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const periodDays = Number(rawPeriodDays);
       const rawLimit = requestUrl.searchParams.get('limit') ?? '500';
       const limit = Number(rawLimit);
+      const rawMinimumCoveragePercent = requestUrl.searchParams.get('minimumCoveragePercent') ?? '100';
+      const minimumCoveragePercent = Number(rawMinimumCoveragePercent);
       if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > MAX_PATTERN_DISCOVERY_PERIOD_DAYS) {
         respond(400, { error: `periodDays must be an integer between 1 and ${MAX_PATTERN_DISCOVERY_PERIOD_DAYS}.` });
         return;
@@ -479,25 +481,30 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         respond(400, { error: 'limit must be an integer between 1 and 500.' });
         return;
       }
+      if (!Number.isInteger(minimumCoveragePercent) || minimumCoveragePercent < 50 || minimumCoveragePercent > 100) {
+        respond(400, { error: 'minimumCoveragePercent must be an integer between 50 and 100.' });
+        return;
+      }
       try {
-        respond(200, readPatternDiscoveryExport(database, periodDays, limit));
+        respond(200, readPatternDiscoveryExport(database, periodDays, limit, minimumCoveragePercent));
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
       }
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/pattern-discovery/run/report') {
-      let payload: { periodDays?: unknown; minN?: unknown } = {};
+      let payload: { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown } = {};
       try {
-        payload = (await readJsonBody(request)) as { periodDays?: unknown; minN?: unknown };
+        payload = (await readJsonBody(request)) as { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown };
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
         return;
       }
       const periodDays = payload.periodDays === undefined ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS : Number(payload.periodDays);
       const minN = payload.minN === undefined ? 10 : Number(payload.minN);
+      const minimumCoveragePercent = payload.minimumCoveragePercent === undefined ? 100 : Number(payload.minimumCoveragePercent);
       try {
-        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN }));
+        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN, minimumCoveragePercent }));
       } catch (error) {
         const statusCode = error instanceof PatternDiscoveryRunnerError ? error.statusCode : 500;
         respond(statusCode, { error: error instanceof Error ? error.message : String(error) });

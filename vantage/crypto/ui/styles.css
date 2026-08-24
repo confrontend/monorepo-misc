@@ -1538,6 +1538,32 @@ h2 {
   gap: 12px;
   margin: 16px 0;
 }
+.pattern-discovery-threshold {
+  min-width: min(26rem, 100%);
+  display: grid;
+  gap: 0.25rem;
+}
+.pattern-discovery-threshold output {
+  color: #72d8aa;
+  font-weight: 700;
+}
+.pattern-discovery-threshold input[type="range"] {
+  width: 100%;
+  accent-color: #72d8aa;
+}
+.pattern-discovery-threshold progress {
+  width: 100%;
+  height: 0.35rem;
+  accent-color: #72d8aa;
+}
+.pattern-discovery-threshold progress::-webkit-progress-bar {
+  background: #18362a;
+  border-radius: 99px;
+}
+.pattern-discovery-threshold progress::-webkit-progress-value {
+  background: #72d8aa;
+  border-radius: 99px;
+}
 .copytrade-coverage-controls label {
   display: grid;
   gap: 5px;

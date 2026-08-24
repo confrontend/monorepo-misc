@@ -51,8 +51,8 @@ export type PatternDiscoveryExportRow = {
   net_return_after_costs: number;
   mature: true;
   usable: true;
-  coverage_rate_percent: 100;
-  coverage_status: 'fully_covered';
+  coverage_rate_percent: number;
+  coverage_status: 'fully_covered' | 'partially_covered';
 };
 
 export type PatternDiscoveryExport = {
@@ -65,14 +65,17 @@ export type PatternDiscoveryExport = {
     outcome: 'net_return_after_costs';
     outcome_horizon: string;
     period_days: number;
-    coverage_scope: 'outcome_exact_100_percent';
+    coverage_scope: 'outcome_minimum_percent';
+    minimum_coverage_percent: number;
     coverage_semantics: string;
     selection_rule: string;
     source_access: 'crypto_adapter_read_only_sqlite';
     shared_engine_database_opened: false;
     selected_wallet_count: number;
     exported_rows: number;
-    excluded_wallets_not_exactly_100_percent: number;
+    eligible_wallets_before_threshold: number;
+    excluded_wallets_below_threshold: number;
+    coverage_distribution_percent: number[];
     export_generated_at: string;
   };
   rows: PatternDiscoveryExportRow[];
@@ -92,6 +95,13 @@ const validateWalletLimit = (limit: number): number => {
     throw new RangeError(`limit must be an integer between 1 and ${MAX_PATTERN_DISCOVERY_WALLETS}.`);
   }
   return limit;
+};
+
+const validateCoveragePercent = (coveragePercent: number): number => {
+  if (!Number.isInteger(coveragePercent) || coveragePercent < 50 || coveragePercent > 100) {
+    throw new RangeError('minimumCoveragePercent must be an integer between 50 and 100.');
+  }
+  return coveragePercent;
 };
 
 type PreEventFeatures = {
@@ -260,27 +270,31 @@ const normalizedRow = (database: DatabaseSync, wallet: CopySimulationWalletRepor
     net_return_after_costs: trade.simulatedReturnPercent,
     mature: true,
     usable: true,
-    coverage_rate_percent: 100,
-    coverage_status: 'fully_covered',
+    coverage_rate_percent: wallet.coverageRatePercent ?? 0,
+    coverage_status: wallet.coverageStatus === 'fully_covered' ? 'fully_covered' : 'partially_covered',
   };
 };
 
 /**
  * Read-only adapter boundary for the shared pattern finder. Wallets enter the population only
  * through persisted local-history coverage markers; returns are never used for selection. The
- * copy-simulation report then applies the separate exact-100%-outcome gate for this period.
+ * copy-simulation report then applies the requested minimum outcome-coverage threshold.
  */
 export const readPatternDiscoveryExport = (
   database: DatabaseSync,
   periodDays = DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
   limit = MAX_PATTERN_DISCOVERY_WALLETS,
+  minimumCoveragePercent = 100,
 ): PatternDiscoveryExport => {
   const selectedPeriod = validatePeriodDays(periodDays);
   const selectedLimit = validateWalletLimit(limit);
+  const selectedCoverage = validateCoveragePercent(minimumCoveragePercent);
   const walletAddresses = fullyCoveredWalletAddresses(database, selectedPeriod, selectedLimit);
   const simulation = computeCopySimulationReport(database, { walletAddresses, periodDays: selectedPeriod });
-  const exactWallets = simulation.wallets.filter((wallet) => wallet.coverageStatus === 'fully_covered' && wallet.coverageRatePercent === 100);
-  const rows = exactWallets.flatMap((wallet) => wallet.trades.map((trade, index) => normalizedRow(database, wallet, trade, index, selectedPeriod)));
+  const eligibleWallets = simulation.wallets.filter((wallet) => (wallet.coverageRatePercent ?? 0) >= selectedCoverage);
+  const rows = eligibleWallets.flatMap((wallet) => wallet.trades
+    .filter((trade) => trade.status === 'simulated' && trade.simulatedReturnPercent !== null && Boolean(trade.buyAt) && Boolean(trade.sellAt))
+    .map((trade, index) => normalizedRow(database, wallet, trade, index, selectedPeriod)));
 
   return {
     metadata: {
@@ -292,14 +306,17 @@ export const readPatternDiscoveryExport = (
       outcome: 'net_return_after_costs',
       outcome_horizon: `copy-${selectedPeriod}d`,
       period_days: selectedPeriod,
-      coverage_scope: 'outcome_exact_100_percent',
-      coverage_semantics: 'Exactly 100% of paired round trips in the selected period have usable copy-simulation outcomes after the configured delay, fees, slippage, and Dune matching. This is outcome coverage, not merely local GMGN history coverage, and is not a profitability claim.',
-      selection_rule: 'Predeclared by local history coverage_complete=1, truncated=0, and requested_period_days; final inclusion requires coverageRatePercent=100 and coverageStatus=fully_covered. No return metric is used for wallet selection.',
+      coverage_scope: 'outcome_minimum_percent',
+      minimum_coverage_percent: selectedCoverage,
+      coverage_semantics: `At least ${selectedCoverage}% of paired round trips in the selected period have usable copy-simulation outcomes after the configured delay, fees, slippage, and Dune matching. This is outcome coverage, not merely local GMGN history coverage, and is not a profitability claim. Lower thresholds may introduce missing-outcome bias.`,
+      selection_rule: `Predeclared by local history coverage_complete=1, truncated=0, and requested_period_days; final inclusion requires coverageRatePercent>=${selectedCoverage}. No return metric is used for wallet selection.`,
       source_access: 'crypto_adapter_read_only_sqlite',
       shared_engine_database_opened: false,
-      selected_wallet_count: exactWallets.length,
+      selected_wallet_count: eligibleWallets.length,
       exported_rows: rows.length,
-      excluded_wallets_not_exactly_100_percent: simulation.wallets.length - exactWallets.length,
+      eligible_wallets_before_threshold: simulation.wallets.length,
+      excluded_wallets_below_threshold: simulation.wallets.length - eligibleWallets.length,
+      coverage_distribution_percent: simulation.wallets.map((wallet) => wallet.coverageRatePercent ?? 0),
       export_generated_at: new Date().toISOString(),
     },
     rows,

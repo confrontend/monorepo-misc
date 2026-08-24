@@ -11,7 +11,7 @@ const setup = (): DatabaseSync => {
   return database;
 };
 
-test('pattern discovery export selects by coverage before outcome rows and rejects non-exact wallets', () => {
+test('pattern discovery export selects by the requested minimum coverage before outcome rows', () => {
   const database = setup();
   try {
     database.prepare(
@@ -22,10 +22,11 @@ test('pattern discovery export selects by coverage before outcome rows and rejec
               ('WRONG_PERIOD', 'sol', 2, 0, 1, 7, 'no_more_data', '2026-08-21T00:02:00.000Z')`,
     ).run();
     const result = readPatternDiscoveryExport(database, 30);
-    assert.equal(result.metadata.coverage_scope, 'outcome_exact_100_percent');
+    assert.equal(result.metadata.coverage_scope, 'outcome_minimum_percent');
+    assert.equal(result.metadata.minimum_coverage_percent, 100);
     assert.equal(result.metadata.shared_engine_database_opened, false);
     assert.equal(result.metadata.selected_wallet_count, 0);
-    assert.equal(result.metadata.excluded_wallets_not_exactly_100_percent, 1);
+    assert.equal(result.metadata.excluded_wallets_below_threshold, 1);
     assert.deepEqual(result.rows, []);
   } finally { database.close(); }
 });

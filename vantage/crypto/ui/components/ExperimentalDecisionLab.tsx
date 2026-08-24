@@ -72,10 +72,26 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
       if (!results.length) throw new Error('No 30-day wallet risk captures were found in this JSON file.');
       const saved = await fetch('/api/copytrade/scrutiny/gmgn-risk/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ results }) });
       if (!saved.ok) throw new Error(`Import failed (${saved.status}).`);
-      const outcome = await saved.json() as { imported?: number; ignored?: number };
+      const outcome = await saved.json() as { imported?: number; ignored?: number; results?: Array<{ walletAddress?: unknown; available?: unknown; metrics?: unknown }> };
       const ignored = (outcome.ignored ?? 0) + ignoredNon30d + ignoredUnavailable;
       setImportMessage(`Imported ${outcome.imported ?? 0} 30-day risk response(s).${ignored ? ` Ignored ${ignored} non-usable or non-30-day entr${ignored === 1 ? 'y' : 'ies'}.` : ''}`);
-      load();
+      // Importing risk JSON only changes the saved GMGN-risk column. Do not recompute the
+      // entire Decision Lab report here; that expensive read is unnecessary because risk
+      // details are descriptive context and do not affect the four scores.
+      const importedByWallet = new Map(
+        (outcome.results ?? [])
+          .filter((result): result is { walletAddress: string; available: boolean; metrics?: unknown } => typeof result.walletAddress === 'string' && typeof result.available === 'boolean')
+          .map((result) => [result.walletAddress, result]),
+      );
+      if (importedByWallet.size > 0) {
+        setResponse((current) => current ? {
+          ...current,
+          wallets: current.wallets.map((wallet) => {
+            const imported = importedByWallet.get(wallet.walletAddress);
+            return imported ? { ...wallet, riskDetails: { available: imported.available, metrics: imported.metrics && typeof imported.metrics === 'object' ? imported.metrics as Record<string, unknown> : null } } : wallet;
+          }),
+        } : current);
+      }
     } catch (reason: unknown) { setImportMessage(reason instanceof Error ? reason.message : 'Could not import the risk JSON.'); }
     finally { setImporting(false); }
   };

@@ -169,13 +169,13 @@ export const parsePatternDiscoveryReport = (raw: string): PatternDiscoveryReport
 
 export const runPatternDiscoveryReport = async (
   database: DatabaseSync,
-  options: { projectRoot: string; periodDays?: number; minN?: number },
+  options: { projectRoot: string; periodDays?: number; minN?: number; minimumCoveragePercent?: number },
 ): Promise<{ report: PatternDiscoveryReport; execution: { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string } }> => {
   const { periodDays, minN } = validatePatternDiscoveryRunInput(options.periodDays, options.minN);
   const sharedRoot = resolvePatternDiscoverySharedRoot(options.projectRoot);
-  const normalized = readPatternDiscoveryExport(database, periodDays);
+  const normalized = readPatternDiscoveryExport(database, periodDays, undefined, options.minimumCoveragePercent ?? 100);
   if (normalized.rows.length === 0) {
-    throw new PatternDiscoveryRunnerError(`No exact-100% outcome-coverage rows exist for the selected ${periodDays}-day period. Refresh or select a period with eligible rows.`, 422);
+    throw new PatternDiscoveryRunnerError(`No outcome-coverage rows meet the selected ${normalized.metadata.minimum_coverage_percent}% threshold for the selected ${periodDays}-day period.`, 422);
   }
   const runRoot = path.join(sharedRoot, 'runs', 'crypto', `pattern-discovery-${periodDays}d-${Date.now()}`);
   mkdirSync(runRoot, { recursive: true });
