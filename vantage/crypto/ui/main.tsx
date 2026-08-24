@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { Modal } from './components/Modal.js';
 import { DataTable } from './components/DataTable.js';
+import { StatusBanner } from './components/StatusBanner.js';
 import { normalizeGmgnProfitStat } from '../src/gmgn/normalize.js';
 import { assessWalletRiskGuardrails } from '../src/copytrade/scrutiny/walletRiskGuardrails.js';
 import { decideThirtyDayVerdict, explainThirtyDayDecision, thirtyDayDecisionPriority } from '../src/copytrade/scrutiny/decisionEngine.js';
@@ -3515,8 +3516,8 @@ function App() {
         <p className="compact-info-line scrutiny-selection-note">Automatically reviewing {scrutinyPinned.length || 'all'} wallets from the 30-day GMGN Wallet Stats table. Click a row for the detailed view.</p>
 
         {scrutinyOutcome && <p className="muted scrutiny-outcome">{scrutinyOutcome}</p>}
-        {scrutinyError && <p className="copytrade-status-warning">{scrutinyError}</p>}
-        {scrutinyResponse && scrutinyResponse.missingWallets.length > 0 && <p className="copytrade-status-warning">No scored data yet for: {scrutinyResponse.missingWallets.map((wallet) => shortAddress(wallet)).join(', ')}. Fetch their trades first.</p>}
+        {scrutinyError && <StatusBanner tone="warning">{scrutinyError}</StatusBanner>}
+        {scrutinyResponse && scrutinyResponse.missingWallets.length > 0 && <StatusBanner tone="warning">No scored data yet for: {scrutinyResponse.missingWallets.map((wallet) => shortAddress(wallet)).join(', ')}. Fetch their trades first.</StatusBanner>}
 
         {scrutinyLoading && <p className="muted scrutiny-loading-note"><span className="loading-spinner" aria-hidden="true" /> Reading saved GMGN and Dune evidence from SQLite — no provider fetch is running.</p>}
         {!scrutinyLoading && scrutinyPinned.length > 0 && (!scrutinyResponse || scrutinyResponse.reports.length === 0) && <p className="muted">No scrutiny data yet for the pinned wallets.</p>}
@@ -3574,7 +3575,7 @@ function App() {
               const metrics = result?.metrics;
               return <div className="scrutiny-gmgn-period" key={period}><h4>30d</h4>
                 {!result && <small className="muted">Open GMGN and import the exported JSON above.</small>}
-                {result && !result.available && <small className="copytrade-status-warning">Unavailable{result.error ? ` — ${result.error}` : ''}</small>}
+                {result && !result.available && <StatusBanner tone="warning" as="small">Unavailable{result.error ? ` — ${result.error}` : ''}</StatusBanner>}
                 {metrics && <div className="scrutiny-gmgn-metrics">
                   <span><b>P&amp;L</b>{formatGmgnRiskValue(metrics.realizedProfit)}</span><span><b>Win rate</b>{formatGmgnRiskRatio(metrics.winRate)}</span>
                   <span><b>Fees</b>{formatGmgnRiskValue(metrics.fees)}</span><span><b>Avg hold</b>{metrics.averageHoldingSeconds === null ? '—' : `${(metrics.averageHoldingSeconds / 3600).toFixed(1)}h`}</span>
@@ -3643,11 +3644,11 @@ function App() {
             was running"), it can stay stuck true while the server has already moved on, hiding
             this banner indefinitely even though the button correctly shows "Resume". */}
         {!rosterFetchStatus?.running && staleDataAgeHours !== null && (
-          <p className="copytrade-status-warning" title="Estimate only, from each wallet's own historical average trade rate over its stored 30-day window — not a live check. A quiet wallet can still trade any minute; a busy one can go silent for days. The one certain number here is how long ago the data was last confirmed current.">
+          <StatusBanner tone="warning" title="Estimate only, from each wallet's own historical average trade rate over its stored 30-day window — not a live check. A quiet wallet can still trade any minute; a busy one can go silent for days. The one certain number here is how long ago the data was last confirmed current.">
             Your GMGN data is <strong>{formatDuration(Math.round(staleDataAgeHours * 3600))} old</strong> (last fetched {formatFetchTime(latestGmgnFetchAt)}).
             {' '}Based on this cohort's historical trading pace, an estimated <strong>~{Math.round(estimatedTradesSinceLastFetch ?? 0).toLocaleString()} trades</strong> may
             {' '}have happened since then that this view does not yet reflect. Skip fetching only if that's a risk you're fine carrying.
-          </p>
+          </StatusBanner>
         )}
         {researchUpdateBusy && <div className="copytrade-live-fetch-status" role="status" aria-live="polite"><div><strong>{researchUpdateStage ?? 'Preparing research…'}</strong><small>Existing GMGN and Dune responses are retained; only missing work is requested.</small></div>{gmgnStatsStatus?.running && <div><b>GMGN summaries</b><span>{gmgnStatsStatus.walletDone} / {gmgnStatsStatus.walletTotal} wallets · {gmgnStatsStatus.requestsMade} requests</span><small>Fetching and parsing wallet statistics</small></div>}{copySimulationRunStatus?.running && <div><b>Dune copy prices</b><span>Query {copySimulationRunStatus.currentBatch || '—'} / {copySimulationRunStatus.batchesTotal || '—'} · {copySimulationRunStatus.targetsProcessed.toLocaleString()} / {copySimulationRunStatus.targetsTotal.toLocaleString()} targets</span><small>{copySimulationRunStatus.storedTargets.toLocaleString()} stored · {copySimulationRunStatus.failedTargets.toLocaleString()} failed · {copySimulationRunStatus.remainingTargets.toLocaleString()} remaining · Dune {copySimulationRunStatus.duneState?.replace('QUERY_STATE_', '').toLowerCase() ?? 'submitting'}</small><small>{copySimulationRunStatus.message}</small></div>}</div>}
         <div className="copytrade-workflow-actions">
@@ -3669,9 +3670,9 @@ function App() {
             {/* Was computed but never rendered — a live-vs-fallback roster refresh looked
                 identical to the user, with the distinction only visible in a transient toast
                 that the next fetch stage immediately overwrote. */}
-            {rosterRefreshError && <p className="copytrade-status-warning" role="alert">{rosterRefreshError}</p>}
-            {!rosterRefreshError && rosterRefreshMessage && <p className={rosterRefreshMessage.startsWith('Live refresh blocked') ? 'copytrade-status-warning' : 'muted'} role="status">{rosterRefreshMessage}</p>}
-            {!rosterFetchStatus?.running && rosterFetchStatus?.message && <p className={rosterFetchStatus.status === 'failed' ? 'copytrade-status-warning' : 'muted'}>{rosterFetchStatus.message}</p>}
+            {rosterRefreshError && <StatusBanner tone="warning" role="alert">{rosterRefreshError}</StatusBanner>}
+            {!rosterRefreshError && rosterRefreshMessage && <StatusBanner tone={rosterRefreshMessage.startsWith('Live refresh blocked') ? 'warning' : 'muted'} role="status">{rosterRefreshMessage}</StatusBanner>}
+            {!rosterFetchStatus?.running && rosterFetchStatus?.message && <StatusBanner tone={rosterFetchStatus.status === 'failed' ? 'warning' : 'muted'}>{rosterFetchStatus.message}</StatusBanner>}
             {visibleWalletScreenSummary && <div className="copytrade-screening-summary">
               <div className="copytrade-screening-summary-facts"><span><strong>{visibleWalletScreenSummary.statsWalletCount}/{visibleWalletScreenSummary.walletCount}</strong> wallets</span><span><strong>{visibleWalletScreenSummary.notFastWallets}</strong> not fast · <strong>{visibleWalletScreenSummary.fastWallets}</strong> fast</span><span><strong>{visibleWalletScreenSummary.totalTrades.toLocaleString()}</strong> trades · {visibleWalletScreenSummary.periodDays}d</span><span>Most active: <strong>{visibleWalletScreenSummary.maxTrades.toLocaleString()}</strong>{visibleWalletScreenSummary.maxTradesWallet ? ` · ${shortAddress(visibleWalletScreenSummary.maxTradesWallet)}` : ''}</span><span><strong>{researchWalletAddresses.length}</strong> selected for Dune</span>{skippedScreeningCount > 0 && <span><strong>{skippedScreeningCount}</strong> excluded{triageExcludedFromDuneCount > 0 && ` (${triageExcludedFromDuneCount} by triage)`}</span>}</div>
               <label className="copytrade-filter-toggle" title={triageHasCurrentInputs ? `Skips the ${eliminationReport?.eliminated.length ?? 0} wallets rejected by the current triage run. Uncheck to include them, or re-check an individual row below.` : 'Run triage after the latest GMGN and Dune fetches before using its exclusions.'}>
@@ -3703,10 +3704,10 @@ function App() {
                 .filter((batch) => batch.status === 'failed' && batch.error)
                 .map((batch) => batch.error as string))];
               return failureMessages.length > 0 ? (
-                <p className="copytrade-status-warning" role="alert">
+                <StatusBanner tone="warning" role="alert">
                   {failureMessages.length === 1 ? 'Dune reported: ' : `Dune reported ${failureMessages.length} distinct errors: `}
                   {failureMessages.join(' · ')}
-                </p>
+                </StatusBanner>
               ) : null;
             })()}
           </div>
@@ -4063,7 +4064,7 @@ function App() {
             .filter((value): value is string => typeof value === 'string' && value.length > 0)
             .some((value) => Date.parse(value) > generatedMs);
           return newerData
-            ? <p className="copytrade-status-warning">Out of date — GMGN or Dune data has been fetched since this triage ran ({formatFetchTime(eliminationReport.generatedAt)}). Run triage again before trusting these verdicts.</p>
+            ? <StatusBanner tone="warning">Out of date — GMGN or Dune data has been fetched since this triage ran ({formatFetchTime(eliminationReport.generatedAt)}). Run triage again before trusting these verdicts.</StatusBanner>
             : <p className="muted">Current result from {formatFetchTime(eliminationReport.generatedAt)} over {eliminationReport.periodDays ?? 30} days of history — computed from SQLite.</p>;
         })()}
         <div className="copytrade-screening-summary-facts">
