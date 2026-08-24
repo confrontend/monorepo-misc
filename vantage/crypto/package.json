@@ -24,9 +24,11 @@
     "start": "npm run build && node --env-file-if-exists=.env dist/src/scripts/server.js"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.102.2",
     "gmgn-cli": "^1.5.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
