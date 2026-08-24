@@ -14,7 +14,6 @@ const captureStatsEl = document.getElementById('capture-stats');
 const investigationStatsEl = document.getElementById('investigation-stats');
 const riskAutoBtn = document.getElementById('riskAuto');
 const exportRiskBtn = document.getElementById('exportRisk');
-const copyCookieBtn = document.getElementById('copyCookie');
 const clearRiskBtn = document.getElementById('clearRisk');
 const riskStatsEl = document.getElementById('risk-stats');
 
@@ -111,23 +110,6 @@ exportRiskBtn.addEventListener('click', async () => {
   anchor.download = `gmgn-risk-30d-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
-});
-
-copyCookieBtn.addEventListener('click', async () => {
-  const headers = await safeSendMessage({ type: 'GET_LAST_RISK_HEADERS' });
-  if (!headers?.cookie) {
-    copyCookieBtn.textContent = 'No risk request captured yet';
-    setTimeout(() => { copyCookieBtn.textContent = 'Copy latest GMGN Cookie header'; }, 1800);
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(headers.cookie);
-    copyCookieBtn.textContent = 'Cookie copied';
-    setTimeout(() => { copyCookieBtn.textContent = 'Copy latest GMGN Cookie header'; }, 1500);
-  } catch {
-    copyCookieBtn.textContent = 'Clipboard unavailable';
-    setTimeout(() => { copyCookieBtn.textContent = 'Copy latest GMGN Cookie header'; }, 1500);
-  }
 });
 
 clearRiskBtn.addEventListener('click', async () => {

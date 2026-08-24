@@ -23,7 +23,6 @@
   const MAX_PAYLOAD_CHARS = 50000;
   let investigationActive = false;
   let riskAutoActive = false;
-  const riskObservedWallets = new Set();
 
   const matchesTarget = (url) => TARGET_PATHS.some((target) => url.includes(target));
 
@@ -63,20 +62,15 @@
     window.postMessage({ source: INVESTIGATION_MARKER, sample: { ...sample, observedAt: new Date().toISOString(), pageUrl: location.href } }, '*');
   };
 
-  const walletFromLocation = () => {
-    const match = location.pathname.match(/^\/sol\/address\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
-    return match ? match[1] : null;
-  };
-
   const isRiskUrl = (url) => /\/pf\/api\/v1\/wallet\/sol\/[1-9A-HJ-NP-Za-km-z]{32,44}\/profit_stat\/30d(?:[/?]|$)/.test(String(url));
 
   const emitRisk = (url, status, bodyText) => {
-    if (!riskAutoActive || !isRiskUrl(url)) return;
+    if (!isRiskUrl(url)) return;
     try {
       const parsed = JSON.parse(bodyText);
       const match = String(url).match(/\/wallet\/sol\/([1-9A-HJ-NP-Za-km-z]{32,44})\/profit_stat\/30d/);
       if (!match) return;
-      riskObservedWallets.add(match[1]);
+      if (!riskAutoActive) return;
       const parsedUrl = new URL(url, location.href);
       window.postMessage({ source: RISK_MARKER, capture: { capturedAt: new Date().toISOString(), walletAddress: match[1], period: '30d', status, url: `${parsedUrl.origin}${parsedUrl.pathname}`, responseBody: parsed } }, '*');
     } catch {
@@ -84,21 +78,10 @@
     }
   };
 
-  const scheduleRiskFetch = () => {
-    const wallet = walletFromLocation();
-    if (!riskAutoActive || !wallet) return;
-    setTimeout(() => {
-      if (!riskAutoActive || riskObservedWallets.has(wallet) || walletFromLocation() !== wallet) return;
-      const endpoint = `/pf/api/v1/wallet/sol/${wallet}/profit_stat/30d`;
-      fetch(endpoint, { credentials: 'include', headers: { accept: 'application/json' } }).catch(() => {});
-    }, 1500);
-  };
-
   window.addEventListener('message', (event) => {
     if (event.source === window && event.data?.source === INVESTIGATION_STATE_MARKER) investigationActive = event.data.active === true;
     if (event.source === window && event.data?.source === RISK_STATE_MARKER) {
       riskAutoActive = event.data.active === true;
-      scheduleRiskFetch();
     }
   });
 
@@ -238,19 +221,4 @@
   PatchedWebSocket.CLOSED = OriginalWebSocket.CLOSED;
   window.WebSocket = PatchedWebSocket;
 
-  const originalPushState = history.pushState;
-  history.pushState = function (...args) {
-    const result = originalPushState.apply(this, args);
-    scheduleRiskFetch();
-    return result;
-  };
-  const originalReplaceState = history.replaceState;
-  history.replaceState = function (...args) {
-    const result = originalReplaceState.apply(this, args);
-    scheduleRiskFetch();
-    return result;
-  };
-  window.addEventListener('popstate', scheduleRiskFetch);
-  window.addEventListener('hashchange', scheduleRiskFetch);
-  scheduleRiskFetch();
 })();

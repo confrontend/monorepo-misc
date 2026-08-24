@@ -11,7 +11,7 @@ const setup = (): DatabaseSync => {
   return database;
 };
 
-test('pattern discovery export selects by coverage before outcome rows and rejects non-exact wallets', () => {
+test('pattern discovery export selects by the requested minimum coverage before outcome rows', () => {
   const database = setup();
   try {
     database.prepare(
@@ -22,10 +22,11 @@ test('pattern discovery export selects by coverage before outcome rows and rejec
               ('WRONG_PERIOD', 'sol', 2, 0, 1, 7, 'no_more_data', '2026-08-21T00:02:00.000Z')`,
     ).run();
     const result = readPatternDiscoveryExport(database, 30);
-    assert.equal(result.metadata.coverage_scope, 'outcome_exact_100_percent');
+    assert.equal(result.metadata.coverage_scope, 'outcome_minimum_percent');
+    assert.equal(result.metadata.minimum_coverage_percent, 100);
     assert.equal(result.metadata.shared_engine_database_opened, false);
     assert.equal(result.metadata.selected_wallet_count, 0);
-    assert.equal(result.metadata.excluded_wallets_not_exactly_100_percent, 1);
+    assert.equal(result.metadata.excluded_wallets_below_threshold, 1);
     assert.deepEqual(result.rows, []);
   } finally { database.close(); }
 });
@@ -52,12 +53,22 @@ test('pattern discovery pre-event features exclude the current and later same-se
     insert.run(2, 'W1', 'TX2', 'sell', 'TOKEN_A', 1_700_000_010, '40', '2026-08-21T00:00:00.000Z', 'D2');
     insert.run(3, 'W1', 'TX3', 'buy', 'TOKEN_B', 1_700_000_100, '100', '2026-08-21T00:00:00.000Z', 'D3');
     insert.run(4, 'W1', 'TX4', 'buy', 'TOKEN_A', 1_700_000_200, '999', '2026-08-21T00:00:00.000Z', 'D4');
+    database.prepare(`UPDATE copytrade_trades SET buy_cost_usd = '25' WHERE id = 2`).run();
 
     const features = readPreEventFeatures(database, 'W1', 'TOKEN_A', new Date(1_700_000_200 * 1000).toISOString(), 4);
-    assert.deepEqual(features, {
-      priorWalletTradeCount: 3,
-      priorTokenTradeCount: 2,
-      priorWalletBuyVolumeUsd: 125,
-    });
+    assert.equal(features.priorWalletTradeCount, 3);
+    assert.equal(features.priorTokenTradeCount, 2);
+    assert.equal(features.priorWalletBuyVolumeUsd, 125);
+    assert.equal(features.priorWalletBuyCount, 2);
+    assert.equal(features.priorWalletSellCount, 1);
+    assert.equal(features.priorWalletSellVolumeUsd, 40);
+    assert.equal(features.priorWalletRealizedProfitUsd, 15);
+    assert.equal(features.priorWalletMedianReturnPercent, 60);
+    assert.equal(features.priorWalletWinRatePercent, 100);
+    assert.equal(features.priorWalletPositiveDayPercent, 100);
+    assert.equal(features.priorWalletBestTokenProfitSharePercent, 100);
+    assert.equal(features.priorWalletMedianHoldSeconds, 10);
+    assert.equal(features.priorWalletUnder15SecondsPercent, 100);
+    assert.equal(features.priorWalletPairedTradeCount, 1);
   } finally { database.close(); }
 });

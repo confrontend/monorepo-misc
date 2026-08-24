@@ -111,6 +111,8 @@ const researchDataFingerprint = (): string => {
       (SELECT COALESCE(MAX(source_snapshot_id), 0) FROM copytrade_wallets) AS walletsMaxSnapshot,
       (SELECT COUNT(*) FROM copytrade_wallet_stats) AS statsCount,
       (SELECT COALESCE(MAX(rowid), 0) FROM copytrade_wallet_stats) AS statsMaxRowid,
+      (SELECT COUNT(*) FROM copytrade_gmgn_risk_stats) AS gmgnRiskCount,
+      (SELECT COALESCE(MAX(fetched_at), '') FROM copytrade_gmgn_risk_stats) AS gmgnRiskMaxFetchedAt,
       (SELECT COUNT(*) FROM copytrade_copy_simulation_runs) AS simulationCount,
       (SELECT COALESCE(MAX(id), 0) FROM copytrade_copy_simulation_runs) AS simulationMaxId
   `).get() as Record<string, unknown>;
@@ -469,6 +471,8 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const periodDays = Number(rawPeriodDays);
       const rawLimit = requestUrl.searchParams.get('limit') ?? '500';
       const limit = Number(rawLimit);
+      const rawMinimumCoveragePercent = requestUrl.searchParams.get('minimumCoveragePercent') ?? '100';
+      const minimumCoveragePercent = Number(rawMinimumCoveragePercent);
       if (!Number.isInteger(periodDays) || periodDays <= 0 || periodDays > MAX_PATTERN_DISCOVERY_PERIOD_DAYS) {
         respond(400, { error: `periodDays must be an integer between 1 and ${MAX_PATTERN_DISCOVERY_PERIOD_DAYS}.` });
         return;
@@ -477,25 +481,30 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         respond(400, { error: 'limit must be an integer between 1 and 500.' });
         return;
       }
+      if (!Number.isInteger(minimumCoveragePercent) || minimumCoveragePercent < 50 || minimumCoveragePercent > 100) {
+        respond(400, { error: 'minimumCoveragePercent must be an integer between 50 and 100.' });
+        return;
+      }
       try {
-        respond(200, readPatternDiscoveryExport(database, periodDays, limit));
+        respond(200, readPatternDiscoveryExport(database, periodDays, limit, minimumCoveragePercent));
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
       }
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/pattern-discovery/run/report') {
-      let payload: { periodDays?: unknown; minN?: unknown } = {};
+      let payload: { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown } = {};
       try {
-        payload = (await readJsonBody(request)) as { periodDays?: unknown; minN?: unknown };
+        payload = (await readJsonBody(request)) as { periodDays?: unknown; minN?: unknown; minimumCoveragePercent?: unknown };
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
         return;
       }
       const periodDays = payload.periodDays === undefined ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS : Number(payload.periodDays);
       const minN = payload.minN === undefined ? 10 : Number(payload.minN);
+      const minimumCoveragePercent = payload.minimumCoveragePercent === undefined ? 100 : Number(payload.minimumCoveragePercent);
       try {
-        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN }));
+        respond(200, await runPatternDiscoveryReport(database, { projectRoot, periodDays, minN, minimumCoveragePercent }));
       } catch (error) {
         const statusCode = error instanceof PatternDiscoveryRunnerError ? error.statusCode : 500;
         respond(statusCode, { error: error instanceof Error ? error.message : String(error) });
@@ -1003,13 +1012,14 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/scrutiny/gmgn-risk/import') {
       const payload = (await readJsonBody(request)) as { results?: unknown };
       const imported = Array.isArray(payload.results) ? payload.results : [];
+      let ignored = 0;
       const savedResults = imported.flatMap((value) => {
         const result = asRecord(value);
         const walletAddress = typeof result.walletAddress === 'string' ? result.walletAddress.trim() : '';
-        if (!walletAddress || result.period !== '30d' || result.available !== true || !('metrics' in result)) return [];
-        return [saveGmgnRiskResult(database, { walletAddress, period: '30d', available: true, metrics: result.metrics })];
+        if (!walletAddress || result.period !== '30d' || result.available !== true || !('metrics' in result)) { ignored += 1; return []; }
+        return [saveGmgnRiskResult(database, { walletAddress, period: '30d', available: true, metrics: normalizeGmgnProfitStat(result.metrics) })];
       });
-      respond(200, { results: savedResults, imported: savedResults.length });
+      respond(200, { results: savedResults, imported: savedResults.length, ignored });
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/scrutiny/gmgn-risk') {

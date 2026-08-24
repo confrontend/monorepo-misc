@@ -1,6 +1,6 @@
 {
   "project": "crypto",
-  "version": "gmgn-v2-pre-event-only",
+  "version": "gmgn-v3-pre-event-only",
   "feature_source": "features",
   "feature_policy": "Only the explicit row.features object is eligible for discovery. Identifiers and point-in-time aggregates calculated strictly before each buy are allowed; outcomes, returns, delays, holding duration, fees, and post-event matching fields are rejected.",
   "allow_list": [
@@ -11,7 +11,18 @@
     {"name": "chain", "justification": "Chain identity is part of the captured source record."},
     {"name": "prior_wallet_trade_count", "justification": "Count of stored wallet buy/sell rows strictly before the current buy event."},
     {"name": "prior_token_trade_count", "justification": "Count of stored token buy/sell rows strictly before the current buy event."},
-    {"name": "prior_wallet_buy_volume_usd", "justification": "Sum of positive recorded buy cost_usd for this wallet strictly before the current buy event."}
+    {"name": "prior_wallet_buy_volume_usd", "justification": "Sum of positive recorded buy cost_usd for this wallet strictly before the current buy event."},
+    {"name": "prior_wallet_buy_count", "justification": "Count of wallet buy rows strictly before the current buy event."},
+    {"name": "prior_wallet_sell_count", "justification": "Count of wallet sell rows strictly before the current buy event."},
+    {"name": "prior_wallet_sell_volume_usd", "justification": "Sum of recorded wallet sell volume strictly before the current buy event."},
+    {"name": "prior_wallet_realized_profit_usd", "justification": "Realized wallet profit accumulated strictly before the current buy event."},
+    {"name": "prior_wallet_median_return_percent", "justification": "Median return of earlier wallet trades strictly before the current buy event."},
+    {"name": "prior_wallet_win_rate_percent", "justification": "Win rate of earlier wallet trades strictly before the current buy event."},
+    {"name": "prior_wallet_positive_day_percent", "justification": "Share of earlier wallet trading days with positive results."},
+    {"name": "prior_wallet_best_token_profit_share_percent", "justification": "Largest earlier token profit as a share of earlier wallet profit."},
+    {"name": "prior_wallet_median_hold_seconds", "justification": "Median holding time of earlier wallet trades strictly before the current buy event."},
+    {"name": "prior_wallet_under_15_seconds_percent", "justification": "Share of earlier wallet trades held under 15 seconds."},
+    {"name": "prior_wallet_paired_trade_count", "justification": "Count of earlier wallet trades with a matched buy/sell pair."}
   ],
   "reject_by_default": [
     "captured_at", "query_market_cap", "query_ath", "query_cur_data", "current_wallet_statistics",

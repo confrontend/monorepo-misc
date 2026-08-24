@@ -9,7 +9,15 @@ from typing import Any
 
 PROJECT = "crypto"
 OUTCOME = "net_return_after_costs"
-PRE_EVENT_FEATURES = {"wallet_address", "token_symbol", "token_address", "chain", "signal_type"}
+PRE_EVENT_FEATURES = {
+    "wallet_address", "token_symbol", "token_address", "chain", "signal_type",
+    "prior_wallet_trade_count", "prior_token_trade_count", "prior_wallet_buy_volume_usd",
+    "prior_wallet_buy_count", "prior_wallet_sell_count", "prior_wallet_sell_volume_usd",
+    "prior_wallet_realized_profit_usd", "prior_wallet_median_return_percent",
+    "prior_wallet_win_rate_percent", "prior_wallet_positive_day_percent",
+    "prior_wallet_best_token_profit_share_percent", "prior_wallet_median_hold_seconds",
+    "prior_wallet_under_15_seconds_percent", "prior_wallet_paired_trade_count",
+}
 
 
 class GmgnExportError(ValueError):
@@ -40,20 +48,26 @@ def normalize_gmgn_export(input_path: str | Path, output_path: str | Path, *, pr
     metadata = dict(payload["metadata"])
     if metadata.get("project") != PROJECT:
         raise GmgnExportError(f"Project isolation violation: input declares {metadata.get('project')!r}, requested {PROJECT!r}")
-    if metadata.get("coverage_scope") != "outcome_exact_100_percent":
-        raise GmgnExportError("GMGN export must declare outcome_exact_100_percent coverage scope")
+    if metadata.get("coverage_scope") != "outcome_minimum_percent":
+        raise GmgnExportError("GMGN export must declare outcome_minimum_percent coverage scope")
+    minimum_coverage = metadata.get("minimum_coverage_percent")
+    if not isinstance(minimum_coverage, (int, float)) or not 50 <= minimum_coverage <= 100:
+        raise GmgnExportError("GMGN export must declare minimum_coverage_percent between 50 and 100")
     rows = payload["rows"]
     for number, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             raise GmgnExportError(f"row {number}: expected an object")
         if row.get("project", PROJECT) != PROJECT:
             raise GmgnExportError(f"row {number}: project crosses the crypto adapter boundary")
-        if row.get("coverage_rate_percent") != 100 or row.get("coverage_status") != "fully_covered":
-            raise GmgnExportError(f"row {number}: outcome coverage must be exactly 100% and fully_covered")
+        coverage_rate = row.get("coverage_rate_percent")
+        if not isinstance(coverage_rate, (int, float)) or coverage_rate < minimum_coverage:
+            raise GmgnExportError(f"row {number}: outcome coverage is below the declared {minimum_coverage}% threshold")
+        if row.get("coverage_status") not in {"fully_covered", "partially_covered"}:
+            raise GmgnExportError(f"row {number}: coverage_status must be fully_covered or partially_covered")
         if row.get("mature") is not True or row.get("usable") is not True:
-            raise GmgnExportError(f"row {number}: exact-coverage export rows must be mature and usable")
+            raise GmgnExportError(f"row {number}: export rows must be mature and usable")
         if row.get(OUTCOME) is None:
-            raise GmgnExportError(f"row {number}: {OUTCOME} must be present for the exact-coverage export")
+            raise GmgnExportError(f"row {number}: {OUTCOME} must be present for the coverage-threshold export")
         features = row.get("features")
         if not isinstance(features, dict):
             raise GmgnExportError(f"row {number}: features must be an explicit pre-event object")
@@ -62,7 +76,7 @@ def normalize_gmgn_export(input_path: str | Path, output_path: str | Path, *, pr
             raise GmgnExportError(f"row {number}: features contains post-event or disallowed fields: {', '.join(unexpected_features)}")
     metadata["project"] = PROJECT
     metadata["outcome"] = OUTCOME
-    metadata["feature_allowlist_version"] = "gmgn-v2-pre-event-only"
+    metadata["feature_allowlist_version"] = "gmgn-v3-pre-event-only"
     metadata["feature_source"] = "features"
     metadata["adapter"] = "shared_pattern_discovery.exporters.gmgn"
     metadata["adapter_input"] = str(source)

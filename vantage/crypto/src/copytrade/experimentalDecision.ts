@@ -1,9 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { computeCopyTradeReport, type CopyTradeRow } from './scrutiny/evaluate.js';
+import { computeCopyTradeReport, RULES, type CopyTradeRow } from './scrutiny/evaluate.js';
 import { computeCopySimulationReport, type CopySimulationWalletReport } from './simulation/copySimulation.js';
 import { computeLiquidityImpactReport } from './simulation/copySimulation.js';
 import { computeCandidateScrutinyBatch, type CandidateScrutinyReport } from './scrutiny/candidateScrutiny.js';
 import { readGmgnRiskResults } from './scrutiny/gmgnRisk.js';
+import { hasReliableCopyEvidence } from './scrutiny/copyCandidates.js';
 
 /**
  * A deliberately separate, read-only scoring experiment.
@@ -17,7 +18,7 @@ export type ExperimentalDecisionWallet = {
   name: string | null;
   rank: number | null;
   tags: string[];
-  evidence: { level: 'complete' | 'partial' | 'missing'; detail: string };
+  evidence: { level: 'complete' | 'partial' | 'insufficient' | 'missing'; detail: string };
   scores: { edge: number | null; consistency: number | null; robustness: number | null; copyability: number | null; overall: number | null };
   scoreDetails: Record<'edge' | 'consistency' | 'robustness' | 'copyability' | 'overall', { label: string; detail: string }>;
   facts: { gmgnMedianPercent: number | null; copyMedianPercent: number | null; copyCapitalUsd: number | null; duneCoveragePercent: number | null; matchedRoundTrips: number; roundTripsConsidered: number; medianHoldSeconds: number | null; under15SecondsPercent: number | null };
@@ -38,8 +39,9 @@ export type ExperimentalDecisionReport = {
 };
 
 const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(value * 10) / 10));
+const COPY_DELAY_REFERENCE_SECONDS = 15;
 const positiveReturnScore = (value: number | null): number | null => value === null ? null : clamp(50 + value * 1.25);
-const holdScore = (seconds: number | null): number | null => seconds === null ? null : clamp((seconds / (15 * 60)) * 25 + (seconds >= 15 * 60 ? 50 : 0));
+const holdScore = (seconds: number | null): number | null => seconds === null ? null : clamp((seconds / COPY_DELAY_REFERENCE_SECONDS) * 25 + (seconds >= COPY_DELAY_REFERENCE_SECONDS ? 50 : 0));
 
 const consistencyScore = (row: CopyTradeRow): number | null => {
   const periods = [...row.weeklyPerformance, ...row.monthlyPerformance].filter((period) => period.medianReturnPercent !== null);
@@ -57,9 +59,11 @@ const robustnessScore = (row: CopyTradeRow): number | null => {
 
 const evidenceFor = (row: CopyTradeRow, simulation: CopySimulationWalletReport | undefined): ExperimentalDecisionWallet['evidence'] => {
   if (!simulation) return { level: 'missing', detail: 'No saved 30-day Dune simulation.' };
+  if (row.trades < RULES.minTrades) return { level: 'insufficient', detail: `Unrankable: only ${row.trades} GMGN trades; at least ${RULES.minTrades} are required for comparison.` };
   if (simulation.roundTripsConsidered === 0) return { level: 'partial', detail: 'Saved simulation has no eligible round trips.' };
+  if (simulation.roundTripsConsidered < 30) return { level: 'insufficient', detail: `Unrankable: only ${simulation.roundTripsConsidered} eligible round trips; at least 30 are required for comparison.` };
   const coverage = simulation.coverageRatePercent ?? 0;
-  if (row.truncated || row.historyFailed || coverage < 90) return { level: 'partial', detail: `${coverage.toFixed(1)}% of eligible round trips have usable delayed-copy evidence.` };
+  if (!hasReliableCopyEvidence(simulation) || row.truncated || row.historyFailed || coverage < 90) return { level: 'partial', detail: `${coverage.toFixed(1)}% of eligible round trips have usable delayed-copy evidence.` };
   return { level: 'complete', detail: `${coverage.toFixed(1)}% of eligible round trips have usable delayed-copy evidence.` };
 };
 
@@ -88,7 +92,7 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
     const consistency = consistencyScore(row);
     const robustness = robustnessScore(row);
     const copyability = sim ? clamp(((sim.coverageRatePercent ?? 0) * 0.6) + (holdScore(row.riskEvidence.medianHoldSeconds) ?? 0) * 0.4) : null;
-    const overall = edge !== null && consistency !== null && robustness !== null && copyability !== null && evidence.level !== 'missing'
+    const overall = edge !== null && consistency !== null && robustness !== null && copyability !== null && evidence.level === 'complete'
       ? clamp(edge * 0.35 + consistency * 0.25 + robustness * 0.2 + copyability * 0.2) : null;
     const positivePeriods = [...row.weeklyPerformance, ...row.monthlyPerformance].filter((period) => period.medianReturnPercent !== null);
     const positivePeriodCount = positivePeriods.filter((period) => (period.medianReturnPercent ?? 0) > 0).length;
@@ -98,7 +102,7 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
       edge: { label: 'Delayed-copy edge', detail: sim?.simulatedMedianReturnPercent === null || sim?.simulatedMedianReturnPercent === undefined ? 'Missing saved delayed-copy median return.' : `Starts at 50 and adjusts with the saved delayed-copy median return (${sim.simulatedMedianReturnPercent.toFixed(1)}%).` },
       consistency: { label: 'Consistency', detail: positivePeriods.length === 0 ? 'No saved weekly or monthly periods.' : `${positivePeriodCount} of ${positivePeriods.length} saved weekly/monthly periods were positive.` },
       robustness: { label: 'Robustness', detail: row.profitConcentration.bestThreeSharePositiveProfitPercent === null || row.profitConcentration.excludingBestToken.medianReturnPercent === null ? 'Missing profit-concentration inputs.' : `Uses best-three profit share (${row.profitConcentration.bestThreeSharePositiveProfitPercent.toFixed(1)}%) and the median return after removing the best token (${row.profitConcentration.excludingBestToken.medianReturnPercent.toFixed(1)}%).` },
-      copyability: { label: 'Copyability', detail: coverage === null || holdSeconds === null ? 'Missing Dune coverage or holding-time input.' : `Combines usable Dune coverage (${coverage.toFixed(1)}%) with median holding time (${(holdSeconds / 3600).toFixed(1)}h) against the 15-minute delay reference.` },
+      copyability: { label: 'Copyability', detail: coverage === null || holdSeconds === null ? 'Missing Dune coverage or holding-time input.' : `Combines usable Dune coverage (${coverage.toFixed(1)}%) with median holding time (${(holdSeconds / 3600).toFixed(1)}h) against the 15-second delay reference.` },
       overall: { label: 'Overall', detail: overall === null ? 'Requires all four component scores and non-missing evidence.' : 'Weighted score: edge 35%, consistency 25%, robustness 20%, copyability 20%.' },
     };
     const risks: string[] = [];
@@ -124,7 +128,7 @@ export const computeExperimentalDecisionReport = (database: DatabaseSync, option
   });
   return {
     generatedAt: new Date().toISOString(), periodDays: 30, readOnly: true, noProviderFetch: true, source: 'saved SQLite evidence',
-    methodology: ['30-day saved GMGN report plus saved Dune delayed-copy simulation.', 'Scores are exploratory, capped at 0–100, and missing inputs stay null.', 'This tab does not replace or modify the production decision engine.'],
+    methodology: ['30-day saved GMGN report plus saved Dune delayed-copy simulation.', `Overall scores require at least ${RULES.minTrades} GMGN trades, 30 eligible round trips, reliable coverage, and complete cost evidence; thinner samples are unrankable.`, 'Scores are exploratory, capped at 0–100, and missing inputs stay null.', 'This tab does not replace or modify the production decision engine.'],
     wallets,
   };
 };
