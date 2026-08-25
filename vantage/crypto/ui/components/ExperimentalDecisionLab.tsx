@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import { GmgnTag } from './GmgnTag.js';
+import { strings } from '../strings.js';
 
 type LabWallet = {
   walletAddress: string;
@@ -38,6 +39,20 @@ type LabWallet = {
   } | null;
   riskDetails?: { available: boolean; metrics: Record<string, unknown> | null };
   liquidity: { low: number | null; medium: number | null; high: number | null } | null;
+  liquidityBands?: Array<{
+    band: 'low' | 'medium' | 'high';
+    minEntryTradeAmountUsd: number;
+    maxEntryTradeAmountUsd: number;
+    tradeCount: number;
+    simulatedCount: number;
+    missedCount: number;
+    missedTradeRatePercent: number | null;
+    winRatePercent: number | null;
+    medianSimulatedReturnPercent: number | null;
+    medianWalletReturnPercent: number | null;
+    medianDelayCostPercentagePoints: number | null;
+    reliable: boolean;
+  }> | null;
   risks: string[];
 };
 type LabResponse = {
@@ -84,6 +99,24 @@ const usd = (value: number | null) =>
 const score = (value: number | null) => (value === null ? '—' : `${Math.round(value)}`);
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 const gmgnUrl = (address: string) => `https://gmgn.ai/sol/address/${encodeURIComponent(address)}`;
+type CopyingRisk = 'unknown' | 'low' | 'watch' | 'high';
+const copyingRisk = (wallet: LabWallet): CopyingRisk => {
+  const bands = wallet.liquidityBands;
+  if (!bands?.length) return 'unknown';
+  const low = bands.find((band) => band.band === 'low');
+  if (!low) return 'unknown';
+  const worstMissedRate = Math.max(...bands.map((band) => band.missedTradeRatePercent ?? 0));
+  if (worstMissedRate >= 50 || bands.some((band) => band.simulatedCount === 0)) return 'high';
+  if (!low.reliable || (low.missedTradeRatePercent ?? 0) >= 20) return 'watch';
+  return 'low';
+};
+const copyingRiskLabel = (wallet: LabWallet) => {
+  const risk = copyingRisk(wallet);
+  if (risk === 'unknown') return strings.decisionLab.copyingRiskUnknown;
+  if (risk === 'watch') return strings.decisionLab.copyingRiskWatch;
+  if (risk === 'high') return strings.decisionLab.copyingRiskHigh;
+  return strings.decisionLab.copyingRiskLow;
+};
 const ScoreCell = ({ value }: { value: number | null }) => (
   <strong
     className={
@@ -151,13 +184,7 @@ const hasSortableValue = (wallet: LabWallet, key: LabSortKey) => {
   if (key === 'facts')
     return wallet.facts.copyMedianPercent !== null || wallet.facts.copyCapitalUsd !== null;
   if (key === 'scrutiny') return wallet.scrutiny !== null;
-  if (key === 'liquidity')
-    return (
-      wallet.liquidity !== null &&
-      (wallet.liquidity.low !== null ||
-        wallet.liquidity.medium !== null ||
-        wallet.liquidity.high !== null)
-    );
+  if (key === 'liquidity') return Boolean(wallet.liquidityBands?.length);
   if (key === 'tags') return Boolean(wallet.tags?.length);
   return true;
 };
@@ -191,8 +218,8 @@ const compareWallets = (left: LabWallet, right: LabWallet, key: LabSortKey) => {
     );
   if (key === 'liquidity')
     return (
-      nullableNumber(left.liquidity?.medium ?? null) -
-      nullableNumber(right.liquidity?.medium ?? null)
+      ['unknown', 'high', 'watch', 'low'].indexOf(copyingRisk(left)) -
+      ['unknown', 'high', 'watch', 'low'].indexOf(copyingRisk(right))
     );
   if (key === 'risk')
     return (
@@ -568,14 +595,21 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
               },
               {
                 key: 'liquidity',
-                header: sortableHeader('liquidity', 'Size bands'),
+                header: sortableHeader('liquidity', strings.decisionLab.copyingRisk),
                 render: (wallet) =>
-                  wallet.liquidity ? (
-                    <span title="Median simulated return by saved Dune entry-size band">
-                      L {pct(wallet.liquidity.low)}
-                      <small>
-                        M {pct(wallet.liquidity.medium)} · H {pct(wallet.liquidity.high)}
-                      </small>
+                  wallet.liquidityBands ? (
+                    <span title={strings.decisionLab.copyingRiskTitle}>
+                      <span
+                        className={
+                          copyingRisk(wallet) === 'low'
+                            ? 'change-positive'
+                            : copyingRisk(wallet) === 'unknown'
+                              ? 'muted'
+                              : 'change-negative'
+                        }
+                      >
+                        {copyingRiskLabel(wallet)}
+                      </span>
                     </span>
                   ) : (
                     '—'
@@ -711,11 +745,15 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                     <strong>GMGN risk:</strong>{' '}
                     {selectedWallet.riskDetails?.available ? 'Imported' : 'Not imported'}
                   </p>
-                  {selectedWallet.liquidity && (
+                  {selectedWallet.liquidityBands && (
                     <p>
-                      <strong>Size bands:</strong> Low {pct(selectedWallet.liquidity.low)} · Medium{' '}
-                      {pct(selectedWallet.liquidity.medium)} · High{' '}
-                      {pct(selectedWallet.liquidity.high)}
+                      <strong>{strings.decisionLab.bandDetails}:</strong>{' '}
+                      {selectedWallet.liquidityBands
+                        .map(
+                          (band) =>
+                            `${band.band} $${band.minEntryTradeAmountUsd.toFixed(0)}–$${band.maxEntryTradeAmountUsd.toFixed(0)}, ${band.simulatedCount}/${band.tradeCount} copied, ${pct(band.medianSimulatedReturnPercent)} median`,
+                        )
+                        .join(' · ')}
                     </p>
                   )}
                 </section>

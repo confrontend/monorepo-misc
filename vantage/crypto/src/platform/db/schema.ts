@@ -1501,6 +1501,75 @@ const migrations: Migration[] = [
         trade_count INTEGER NOT NULL,
         FOREIGN KEY (run_id) REFERENCES copytrade_copy_simulation_runs(id) ON DELETE CASCADE
       );
+      `),
+  },
+  {
+    description: 'Align Pattern Discovery revisions with actual feature and outcome inputs',
+    up: (database) =>
+      database.exec(`
+      -- Dune run metadata changes do not change the saved match rows that Pattern Discovery
+      -- reads. They previously invalidated every promoted result while a scheduler updated run
+      -- status, which made Decision Lab fall back to neutral weights and zero rule penalties.
+      DROP TRIGGER IF EXISTS pattern_discovery_dune_insert;
+      DROP TRIGGER IF EXISTS pattern_discovery_dune_update;
+      DROP TRIGGER IF EXISTS pattern_discovery_dune_delete;
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_matches_insert
+      AFTER INSERT ON copytrade_copy_simulation_matches BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_matches_update
+      AFTER UPDATE ON copytrade_copy_simulation_matches BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_matches_delete
+      AFTER DELETE ON copytrade_copy_simulation_matches BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_signals_insert
+      AFTER INSERT ON gmgn_signals BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_signals_update
+      AFTER UPDATE ON gmgn_signals BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_signals_delete
+      AFTER DELETE ON gmgn_signals BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_tokens_insert
+      AFTER INSERT ON tokens BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_tokens_update
+      AFTER UPDATE ON tokens BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_tokens_delete
+      AFTER DELETE ON tokens BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
     `),
   },
 ];

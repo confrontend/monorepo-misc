@@ -1,4 +1,13 @@
 export const strings = {
+  decisionLab: {
+    copyingRisk: 'Copying risk',
+    copyingRiskUnknown: 'Not enough data',
+    copyingRiskLow: 'Looks copyable',
+    copyingRiskWatch: 'Watch small trades',
+    copyingRiskHigh: 'Copying risk',
+    copyingRiskTitle: 'Whether trade size appears to threaten successful copying',
+    bandDetails: 'Technical size-band evidence',
+  },
   common: {
     signalTypeLabels: {
       '1': 'General price spike',

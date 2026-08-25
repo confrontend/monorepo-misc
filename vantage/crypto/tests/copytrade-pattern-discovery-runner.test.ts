@@ -6,10 +6,15 @@ import { tmpdir } from 'node:os';
 import {
   buildPatternDiscoveryCommand,
   parsePatternDiscoveryReport,
+  PATTERN_DISCOVERY_COVERAGE_THRESHOLDS,
   patternDiscoveryPythonCandidates,
   resolvePatternDiscoveryPython,
   validatePatternDiscoveryRunInput,
 } from '../src/copytrade/discovery/patternDiscoveryRunner.js';
+
+test('uses the reduced Pattern Discovery coverage grid', () => {
+  assert.deepEqual(PATTERN_DISCOVERY_COVERAGE_THRESHOLDS, [50, 60, 70, 80, 90, 95, 100]);
+});
 
 test('builds an isolated crypto CLI command with chronological holdout settings', () => {
   const command = buildPatternDiscoveryCommand({

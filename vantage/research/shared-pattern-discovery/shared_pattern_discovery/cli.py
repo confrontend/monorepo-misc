@@ -2,12 +2,56 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import threading
+import time
+import uuid
 from pathlib import Path
 
 from .config import ConfigError, load_project_config
 from .engine import run_discovery
 from .validation import DatasetValidationError, load_dataset
+
+
+_PROGRESS_REPLACE_ATTEMPTS = 8
+_PROGRESS_REPLACE_INITIAL_DELAY_SECONDS = 0.01
+
+
+def _write_progress_file(progress_path: Path, update: dict[str, object]) -> bool:
+    """Best-effort atomic heartbeat publication despite transient Windows reader locks."""
+    temporary_progress_path: Path | None = None
+    delay = _PROGRESS_REPLACE_INITIAL_DELAY_SECONDS
+    try:
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_progress_path = progress_path.with_name(
+            f".{progress_path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
+        )
+        temporary_progress_path.write_text(
+            json.dumps(update, ensure_ascii=False), encoding="utf-8"
+        )
+        for attempt in range(_PROGRESS_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temporary_progress_path, progress_path)
+                return True
+            except OSError as exc:
+                transient_windows_lock = isinstance(exc, PermissionError) or getattr(
+                    exc, "winerror", None
+                ) in {5, 32}
+                if not transient_windows_lock:
+                    return False
+                if attempt == _PROGRESS_REPLACE_ATTEMPTS - 1:
+                    return False
+                time.sleep(delay)
+                delay = min(delay * 2, 0.2)
+    except OSError:
+        return False
+    finally:
+        if temporary_progress_path is not None:
+            try:
+                temporary_progress_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,16 +85,18 @@ def main(argv: list[str] | None = None) -> int:
         config = load_project_config(args.project, args.config)
         dataset = load_dataset(input_path, args.project, config, args.outcome)
         progress_path = Path(args.progress_file).resolve() if args.progress_file else None
+        progress_warning_emitted = False
 
         def progress(update: dict[str, object]) -> None:
+            nonlocal progress_warning_emitted
             if progress_path is None:
                 return
-            progress_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_progress_path = progress_path.with_suffix(progress_path.suffix + ".tmp")
-            temporary_progress_path.write_text(
-                json.dumps(update, ensure_ascii=False), encoding="utf-8"
-            )
-            temporary_progress_path.replace(progress_path)
+            if not _write_progress_file(progress_path, update) and not progress_warning_emitted:
+                print(
+                    f"WARNING: progress heartbeat could not be published at {progress_path}; discovery will continue.",
+                    file=sys.stderr,
+                )
+                progress_warning_emitted = True
 
         report = run_discovery(
             dataset,

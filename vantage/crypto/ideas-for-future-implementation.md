@@ -56,3 +56,15 @@ Move all application endpoint strings into one shared constants module and reuse
 
 ### Standardize API calls through one client
 Route every application API request through a shared client that provides consistent progress logging, error handling, retries/timeouts, and persisted database diagnostics.
+
+### Replace Pattern Discovery file IPC with a supervised Python sidecar
+_Recorded 2026-08-24._
+
+Keep the browser connected only to the TypeScript application API, but replace the TypeScript-to-Python CLI/file-system control path with a bundled, long-running Python sidecar and a versioned RPC contract. For the local desktop app, prefer JSON-RPC over stdin/stdout; if the engine later becomes remote or multi-user, expose the same contract through HTTP with streamed progress. Transport requests, progress, cancellation, errors, and results through the API instead of polling `progress.json` and `report.json`. Keep files only as optional immutable audit artifacts.
+
+Retain the CLI solely as a thin developer/research/CI adapter over the same core discovery functions for reproducible standalone runs, debugging, and migration comparison. It must not contain separate discovery logic or serve as a silent production fallback, and it can be removed once the sidecar is proven and standalone use is no longer needed.
+
+### Break up `ui/App.tsx`
+_Recorded 2026-08-24._
+
+Move shared `api()` and formatters into `ui/lib/` to remove circular dependencies; extract Pattern Discovery into `PatternDiscoveryRoute` plus `usePatternDiscovery`; extract Dune/outcome work into `DuneOutcomesRoute` plus `useDuneOutcomes`; extract CopyTrade/Decision Lab into `CopyTradeRoute` plus feature hooks; keep `App.tsx` for navigation, global state, and route composition. Target roughly 1,000 lines instead of 10,000.

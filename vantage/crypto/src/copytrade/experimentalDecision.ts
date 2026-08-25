@@ -27,6 +27,8 @@ const NEUTRAL_DECISION_WEIGHTS = {
   robustness: 0.25,
   copyability: 0.25,
 } as const;
+/** Bump when Decision Lab scoring behavior or its exported report shape changes. */
+export const DECISION_LAB_SCORING_VERSION = 'decision-lab-scoring-v2-delayed-copy-gate';
 const PROMOTION_THRESHOLDS = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
 const MIN_PROMOTION_WALLETS = 10;
 
@@ -86,6 +88,20 @@ export type ExperimentalDecisionWallet = {
   } | null;
   riskDetails: { available: boolean; metrics: Record<string, unknown> | null };
   liquidity: { low: number | null; medium: number | null; high: number | null } | null;
+  liquidityBands: Array<{
+    band: 'low' | 'medium' | 'high';
+    minEntryTradeAmountUsd: number;
+    maxEntryTradeAmountUsd: number;
+    tradeCount: number;
+    simulatedCount: number;
+    missedCount: number;
+    missedTradeRatePercent: number | null;
+    winRatePercent: number | null;
+    medianSimulatedReturnPercent: number | null;
+    medianWalletReturnPercent: number | null;
+    medianDelayCostPercentagePoints: number | null;
+    reliable: boolean;
+  }> | null;
   risks: string[];
 };
 
@@ -104,6 +120,14 @@ const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(va
 const COPY_DELAY_REFERENCE_SECONDS = 15;
 const positiveReturnScore = (value: number | null): number | null =>
   value === null ? null : clamp(50 + value * 1.25);
+/** Final candidacy requires the delayed-copy median itself to be positive. A high score from
+ * other dimensions must not rescue a wallet whose typical copied trade lost money. */
+export const delayedCopyPerformancePassesCandidacyGate = (
+  simulation: Pick<CopySimulationWalletReport, 'simulatedMedianReturnPercent'> | null | undefined,
+): boolean =>
+  simulation?.simulatedMedianReturnPercent !== null &&
+  simulation?.simulatedMedianReturnPercent !== undefined &&
+  simulation.simulatedMedianReturnPercent > 0;
 const holdScore = (seconds: number | null): number | null =>
   seconds === null
     ? null
@@ -111,6 +135,87 @@ const holdScore = (seconds: number | null): number | null =>
         (seconds / COPY_DELAY_REFERENCE_SECONDS) * 25 +
           (seconds >= COPY_DELAY_REFERENCE_SECONDS ? 50 : 0),
       );
+
+const historicalMetricForFeature = (row: CopyTradeRow, feature: string): number | null => {
+  const aggregate = row.gmgnAggregate;
+  const buyCount = aggregate?.buyCount ?? null;
+  const sellCount = aggregate?.sellCount ?? null;
+  switch (feature) {
+    case 'prior_wallet_trade_count':
+      return buyCount !== null && sellCount !== null ? buyCount + sellCount : null;
+    case 'prior_wallet_buy_count':
+      return aggregate?.buyCount ?? null;
+    case 'prior_wallet_sell_count':
+      return aggregate?.sellCount ?? null;
+    case 'prior_wallet_buy_volume_usd':
+      return aggregate?.boughtCost ?? null;
+    case 'prior_wallet_sell_volume_usd':
+      return aggregate?.soldIncome ?? null;
+    case FAST_TRADING_FEATURE:
+      return row.riskEvidence.under15SecondsPercent ?? null;
+    default:
+      return null;
+  }
+};
+
+const percentileRank = (value: number, values: number[]): number | null => {
+  if (values.length < 2) return null;
+  const belowOrEqual = values.filter((candidate) => candidate <= value).length;
+  return (belowOrEqual - 1) / (values.length - 1);
+};
+
+/**
+ * Convert promoted threshold effects directly into score points and use promoted correlations
+ * only as a rank-based fallback when discovery did not produce a stable threshold. This avoids
+ * inventing cutoffs while still making the repeated negative activity findings actionable.
+ */
+export const computeHistoricalHyperactivityPenalty = (
+  row: CopyTradeRow,
+  rows: CopyTradeRow[],
+  rules: ExperimentalDecisionPromotedRules,
+): number => {
+  const thresholdPenalties = rules.hyperactivityThresholds
+    .filter(
+      (rule) => (historicalMetricForFeature(row, rule.feature) ?? -Infinity) >= rule.threshold,
+    )
+    .map((rule) => Math.max(0, -rule.effect));
+  const correlationPenalties = rules.hyperactivityCorrelations.map((rule) => {
+    const metric = historicalMetricForFeature(row, rule.feature);
+    const values = rows
+      .map((candidate) => historicalMetricForFeature(candidate, rule.feature))
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    if (metric === null) return 0;
+    const rank = percentileRank(metric, values);
+    return rank === null ? 0 : 100 * Math.abs(rule.effect) * rank;
+  });
+  return Math.max(0, ...thresholdPenalties, ...correlationPenalties);
+};
+
+/** A promoted negative correlation maps the observed fast-trade percentage to score points. */
+export const computeFastTradingPenalty = (
+  row: CopyTradeRow,
+  rules: ExperimentalDecisionPromotedRules,
+): number => {
+  const fastPercent = row.riskEvidence.under15SecondsPercent ?? null;
+  if (fastPercent === null || rules.fastTradingCorrelations.length === 0) return 0;
+  const strength = Math.max(...rules.fastTradingCorrelations.map((rule) => Math.abs(rule.effect)));
+  return Math.max(0, fastPercent * strength);
+};
+
+export const computeCopyabilityScore = (
+  coveragePercent: number | null,
+  holdSeconds: number | null,
+  fastTradingPenalty = 0,
+  hyperactivityPenalty = 0,
+): number | null => {
+  if (coveragePercent === null || holdSeconds === null) return null;
+  return clamp(
+    coveragePercent * 0.6 +
+      (holdScore(holdSeconds) ?? 0) * 0.4 -
+      fastTradingPenalty -
+      hyperactivityPenalty,
+  );
+};
 
 type CachedDiscoveryReport = {
   patterns?: Array<{
@@ -122,21 +227,123 @@ type CachedDiscoveryReport = {
   dataset_summary?: { wallets?: number };
 };
 
+type CachedPromotedPattern = {
+  feature?: string;
+  effect?: number | null;
+  conditions?: unknown;
+};
+
+type CachedDiscoverySensitivity = {
+  crossCoveragePromotedPatterns?: Array<{
+    pattern?: CachedPromotedPattern;
+    supportingCoveragePercent?: number[];
+  }>;
+};
+
+type PromotedThresholdRule = {
+  feature: string;
+  threshold: number;
+  effect: number;
+};
+
+type PromotedCorrelationRule = {
+  feature: string;
+  effect: number;
+};
+
+export type ExperimentalDecisionPromotedRules = {
+  hyperactivityThresholds: PromotedThresholdRule[];
+  hyperactivityCorrelations: PromotedCorrelationRule[];
+  fastTradingCorrelations: PromotedCorrelationRule[];
+};
+
+const HYPERACTIVITY_FEATURES = new Set([
+  'prior_wallet_trade_count',
+  'prior_wallet_buy_count',
+  'prior_wallet_sell_count',
+  'prior_wallet_buy_volume_usd',
+  'prior_wallet_sell_volume_usd',
+]);
+const FAST_TRADING_FEATURE = 'prior_wallet_under_15_seconds_percent';
+
+const numericCondition = (conditions: unknown): { operator: string; value: number } | null => {
+  if (!Array.isArray(conditions) || conditions.length !== 1) return null;
+  const condition: unknown = conditions[0];
+  if (!condition || typeof condition !== 'object') return null;
+  const candidate = condition as { operator?: unknown; value?: unknown };
+  if (typeof candidate.operator !== 'string' || typeof candidate.value !== 'number') return null;
+  return Number.isFinite(candidate.value)
+    ? { operator: candidate.operator, value: candidate.value }
+    : null;
+};
+
+/**
+ * Read only cross-coverage survivors. Rules are intentionally inert when the cached discovery
+ * result does not contain a genuinely promoted/stable pattern. This keeps a missing discovery
+ * run from silently changing the scoring model.
+ */
+export const readExperimentalDecisionPromotedRules = (
+  database: DatabaseSync,
+  dataFingerprint = readPatternDiscoveryDataFingerprint(database),
+): ExperimentalDecisionPromotedRules => {
+  const sensitivity = readPatternDiscoveryCache<CachedDiscoverySensitivity>(
+    database,
+    patternDiscoveryCacheKey('sensitivity', 30, 50, 10, MAX_PATTERN_DISCOVERY_WALLETS),
+    dataFingerprint,
+  );
+  const hyperactivityThresholds: PromotedThresholdRule[] = [];
+  const hyperactivityCorrelations = new Map<string, PromotedCorrelationRule>();
+  const fastTradingCorrelations = new Map<string, PromotedCorrelationRule>();
+  for (const entry of sensitivity?.crossCoveragePromotedPatterns ?? []) {
+    const pattern = entry.pattern;
+    const feature = pattern?.feature;
+    const effect = pattern?.effect;
+    if (!feature || typeof effect !== 'number' || !Number.isFinite(effect)) continue;
+    const condition = numericCondition(pattern.conditions);
+    if (HYPERACTIVITY_FEATURES.has(feature) && condition?.operator === '>=' && effect < 0) {
+      hyperactivityThresholds.push({ feature, threshold: condition.value, effect });
+      continue;
+    }
+    const raw: unknown = Array.isArray(pattern.conditions) ? pattern.conditions[0] : null;
+    const isNegativeCorrelation =
+      raw &&
+      typeof raw === 'object' &&
+      (raw as { operator?: unknown }).operator === 'correlation' &&
+      (raw as { value?: unknown }).value === 'negative' &&
+      effect < 0;
+    if (!isNegativeCorrelation) continue;
+    if (feature === FAST_TRADING_FEATURE) {
+      const current = fastTradingCorrelations.get(feature);
+      if (!current || Math.abs(effect) > Math.abs(current.effect))
+        fastTradingCorrelations.set(feature, { feature, effect });
+    } else if (HYPERACTIVITY_FEATURES.has(feature)) {
+      const current = hyperactivityCorrelations.get(feature);
+      if (!current || Math.abs(effect) > Math.abs(current.effect))
+        hyperactivityCorrelations.set(feature, { feature, effect });
+    }
+  }
+  return {
+    hyperactivityThresholds,
+    hyperactivityCorrelations: [...hyperactivityCorrelations.values()],
+    fastTradingCorrelations: [...fastTradingCorrelations.values()],
+  };
+};
+
 /**
  * Promote discovery into scoring only when it is repeated across coverage levels.
  * A single run never rewrites the Decision Lab weights.
  */
 export const readExperimentalDecisionWeighting = (
   database: DatabaseSync,
+  dataFingerprint = readPatternDiscoveryDataFingerprint(database),
 ): ExperimentalDecisionWeighting => {
-  const fingerprint = readPatternDiscoveryDataFingerprint(database);
   const evidence = new Map<keyof ExperimentalDecisionWeights, Set<number>>();
   let supportingWallets = 0;
   for (const threshold of PROMOTION_THRESHOLDS) {
     const report = readPatternDiscoveryCache<CachedDiscoveryReport>(
       database,
       patternDiscoveryCacheKey('report', 30, threshold, 10, MAX_PATTERN_DISCOVERY_WALLETS),
-      fingerprint,
+      dataFingerprint,
     );
     if (!report || (report.dataset_summary?.wallets ?? 0) < MIN_PROMOTION_WALLETS) continue;
     supportingWallets = Math.max(supportingWallets, report.dataset_summary?.wallets ?? 0);
@@ -207,11 +414,13 @@ const consistencyScore = (row: CopyTradeRow): number | null => {
   return clamp((positive / periods.length) * 100);
 };
 
-const robustnessScore = (row: CopyTradeRow): number | null => {
-  const share = row.profitConcentration.bestThreeSharePositiveProfitPercent;
+export const robustnessScore = (row: CopyTradeRow): number | null => {
   const withoutBest = row.profitConcentration.excludingBestToken.medianReturnPercent;
-  if (share === null || withoutBest === null) return null;
-  return clamp((100 - share) * 0.65 + (withoutBest >= 0 ? 35 : Math.max(0, 35 + withoutBest)));
+  if (withoutBest === null) return null;
+  // Pattern Discovery found a positive association for concentration in multiple promoted
+  // datasets. Until that result is strong enough to reward concentration, hold it neutral and
+  // score only the performance that remains after removing the best token.
+  return clamp(50 + withoutBest * 1.25);
 };
 
 const evidenceFor = (
@@ -260,7 +469,15 @@ export const computeExperimentalDecisionReport = (
   const simulationByWallet = new Map(
     simulation.wallets.map((wallet) => [wallet.walletAddress, wallet]),
   );
-  const weighting = readExperimentalDecisionWeighting(database);
+  // Capture one evidence revision for both adaptive weights and rule penalties. Reading the
+  // fingerprint separately can observe two different revisions while live ingestion is running,
+  // causing one side to load a completed result while the other silently falls back to neutral.
+  const patternDiscoveryFingerprint = readPatternDiscoveryDataFingerprint(database);
+  const weighting = readExperimentalDecisionWeighting(database, patternDiscoveryFingerprint);
+  const promotedRules = readExperimentalDecisionPromotedRules(
+    database,
+    patternDiscoveryFingerprint,
+  );
   const liquidity = computeLiquidityImpactReport(simulation);
   const scrutinyByWallet = new Map<string, CandidateScrutinyReport>();
   try {
@@ -291,10 +508,18 @@ export const computeExperimentalDecisionReport = (
     const edge = positiveReturnScore(sim?.simulatedMedianReturnPercent ?? null);
     const consistency = consistencyScore(row);
     const robustness = robustnessScore(row);
+    const fastTradingPenalty = computeFastTradingPenalty(row, promotedRules);
+    const hyperactivityPenalty = computeHistoricalHyperactivityPenalty(
+      row,
+      screen.rows,
+      promotedRules,
+    );
     const copyability = sim
-      ? clamp(
-          (sim.coverageRatePercent ?? 0) * 0.6 +
-            (holdScore(row.riskEvidence.medianHoldSeconds) ?? 0) * 0.4,
+      ? computeCopyabilityScore(
+          sim.coverageRatePercent,
+          row.riskEvidence.medianHoldSeconds,
+          fastTradingPenalty,
+          hyperactivityPenalty,
         )
       : null;
     const overall =
@@ -302,7 +527,8 @@ export const computeExperimentalDecisionReport = (
       consistency !== null &&
       robustness !== null &&
       copyability !== null &&
-      evidence.level === 'complete'
+      evidence.level === 'complete' &&
+      delayedCopyPerformancePassesCandidacyGate(sim)
         ? clamp(
             edge * weighting.weights.edge +
               consistency * weighting.weights.consistency +
@@ -337,28 +563,32 @@ export const computeExperimentalDecisionReport = (
       robustness: {
         label: 'Robustness',
         detail:
-          row.profitConcentration.bestThreeSharePositiveProfitPercent === null ||
           row.profitConcentration.excludingBestToken.medianReturnPercent === null
-            ? 'Missing profit-concentration inputs.'
-            : `Uses best-three profit share (${row.profitConcentration.bestThreeSharePositiveProfitPercent.toFixed(1)}%) and the median return after removing the best token (${row.profitConcentration.excludingBestToken.medianReturnPercent.toFixed(1)}%).`,
+            ? 'Missing the median return after removing the best token.'
+            : `Uses the median return after removing the best token (${row.profitConcentration.excludingBestToken.medianReturnPercent.toFixed(1)}%); profit concentration is currently neutral pending stronger evidence.`,
       },
       copyability: {
         label: 'Copyability',
         detail:
           coverage === null || holdSeconds === null
             ? 'Missing Dune coverage or holding-time input.'
-            : `Combines usable Dune coverage (${coverage.toFixed(1)}%) with median holding time (${(holdSeconds / 3600).toFixed(1)}h) against the 15-second delay reference.`,
+            : `Combines usable Dune coverage (${coverage.toFixed(1)}%) and median holding time (${(holdSeconds / 3600).toFixed(1)}h), then subtracts ${fastTradingPenalty.toFixed(1)} fast-trading points and ${hyperactivityPenalty.toFixed(1)} historical-activity points from promoted Pattern Discovery rules.`,
       },
       overall: {
         label: 'Overall',
-        detail:
-          overall === null
+        detail: !delayedCopyPerformancePassesCandidacyGate(sim)
+          ? `Not a final candidate: delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; a positive typical copied result is required.`
+          : overall === null
             ? 'Requires all four component scores and non-missing evidence.'
             : `Weighted score: edge ${(weighting.weights.edge * 100).toFixed(0)}%, consistency ${(weighting.weights.consistency * 100).toFixed(0)}%, robustness ${(weighting.weights.robustness * 100).toFixed(0)}%, copyability ${(weighting.weights.copyability * 100).toFixed(0)}%.`,
       },
     };
     const risks: string[] = [];
     if (evidence.level !== 'complete') risks.push(evidence.detail);
+    if (!delayedCopyPerformancePassesCandidacyGate(sim))
+      risks.push(
+        `Delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; this prevents final candidacy even when other scores are high.`,
+      );
     if (row.truncated) risks.push('GMGN history is truncated.');
     if (row.historyFailed) risks.push('GMGN history fetch failed.');
     if ((row.riskEvidence.under15SecondsPercent ?? 0) > 20)
@@ -366,7 +596,15 @@ export const computeExperimentalDecisionReport = (
         `${row.riskEvidence.under15SecondsPercent?.toFixed(1)}% of paired trades are under 15 seconds.`,
       );
     if (robustness !== null && robustness < 50)
-      risks.push('Profit is concentrated or weak after removing the best token.');
+      risks.push('Performance is weak after removing the best token.');
+    if (fastTradingPenalty > 0)
+      risks.push(
+        `Promoted fast-trading evidence reduced Copyability by ${fastTradingPenalty.toFixed(1)} points.`,
+      );
+    if (hyperactivityPenalty > 0)
+      risks.push(
+        `Promoted historical-activity evidence reduced Copyability by ${hyperactivityPenalty.toFixed(1)} points.`,
+      );
     const scrutiny = scrutinyByWallet.get(row.walletAddress);
     const scrutinyChecks = scrutiny
       ? Object.values(scrutiny.checks).map((check) => ({
@@ -425,6 +663,7 @@ export const computeExperimentalDecisionReport = (
                 ?.medianSimulatedReturnPercent ?? null,
           }
         : null,
+      liquidityBands: walletLiquidity?.bands ?? null,
       risks,
     };
   });
@@ -439,6 +678,12 @@ export const computeExperimentalDecisionReport = (
       `Overall scores require at least ${RULES.minTrades} GMGN trades, 30 eligible round trips, reliable coverage, and complete cost evidence; thinner samples are unrankable.`,
       'Scores are exploratory, capped at 0–100, and missing inputs stay null.',
       weighting.detail,
+      promotedRules.hyperactivityThresholds.length > 0 ||
+      promotedRules.hyperactivityCorrelations.length > 0 ||
+      promotedRules.fastTradingCorrelations.length > 0
+        ? 'Promoted/stable Pattern Discovery rules subtract evidence-calibrated penalties for extreme historical activity and under-15-second trading; missing promoted-rule evidence does not activate new penalties.'
+        : 'No cross-coverage promoted rule profile was available, so no new activity or fast-trading penalties were activated.',
+      'Profit concentration is neutral in Robustness; the score uses performance after removing the best token until stronger evidence supports a reward or penalty.',
       'This tab does not replace or modify the production decision engine.',
     ],
     weighting,

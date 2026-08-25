@@ -65,7 +65,7 @@ export const PatternDiscoveryProgressPanel = ({
         </div>
         <progress
           className="pattern-discovery-progress"
-          max={progress?.thresholdsTotal ?? 11}
+          max={progress?.thresholdsTotal ?? 7}
           value={progress?.thresholdsCompleted ?? 0}
           aria-label="Pattern Discovery coverage-level progress"
         />

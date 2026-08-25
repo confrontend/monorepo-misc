@@ -122,6 +122,7 @@ import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
 import {
+  DECISION_LAB_SCORING_VERSION,
   computeExperimentalDecisionReport,
   readExperimentalDecisionCacheVersion,
 } from '../copytrade/experimentalDecision.js';
@@ -1592,7 +1593,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(
         200,
         readCachedResearch(
-          `experimental-decision-v5:${limit}:${rosterSnapshotId ?? 'latest'}:${weightingVersion}`,
+          `experimental-decision:${DECISION_LAB_SCORING_VERSION}:${limit}:${rosterSnapshotId ?? 'latest'}:${weightingVersion}`,
           () => computeExperimentalDecisionReport(database, { limit, rosterSnapshotId }),
         ),
       );

@@ -21,10 +21,7 @@ const execFileAsync = promisify(execFile);
 const VALIDATION_FRACTION = 0.3;
 const HOLDOUT_FRACTION = 0.2;
 const MIN_PATTERN_PROMOTION_WALLETS = 10;
-export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = Array.from(
-  { length: 11 },
-  (_, index) => 50 + index * 5,
-);
+export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = [50, 60, 70, 80, 90, 95, 100];
 
 export type PatternDiscoveryStatus =
   'discovered candidate' | 'validation survivor' | 'rejected' | 'insufficient data';
@@ -646,7 +643,7 @@ export const runPatternDiscoverySensitivity = async (
   if (cachedSensitivity) {
     options.onEngineProgress?.({
       stage: 'complete',
-      message: 'Loaded the unchanged 11-level discovery result from SQLite.',
+      message: `Loaded the unchanged ${thresholds.length}-level discovery result from SQLite.`,
       thresholdsCompleted: thresholds.length,
       thresholdsTotal: thresholds.length,
       cacheHits: thresholds.length,
@@ -853,7 +850,7 @@ export const runPatternDiscoverySensitivity = async (
   };
   options.onEngineProgress?.({
     stage: 'persisting results',
-    message: 'Saving the complete 11-level discovery result in SQLite.',
+    message: `Saving the complete ${thresholds.length}-level discovery result in SQLite.`,
     thresholdsCompleted: thresholds.length,
     thresholdsTotal: thresholds.length,
     cpuWorkersActive: 0,

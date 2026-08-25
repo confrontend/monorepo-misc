@@ -156,7 +156,7 @@ import type {
   DecisionColumnKey,
 } from './types.js';
 
-const PATTERN_DISCOVERY_COVERAGE_GRID = [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100] as const;
+const PATTERN_DISCOVERY_COVERAGE_GRID = [50, 60, 70, 80, 90, 95, 100] as const;
 
 const normalizeImportedGmgnRisk = (payload: unknown): GmgnRiskMetrics | null =>
   normalizeGmgnProfitStat(payload);

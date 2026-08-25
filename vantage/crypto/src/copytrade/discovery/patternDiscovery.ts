@@ -9,7 +9,7 @@ export const DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS = 30;
 export const MAX_PATTERN_DISCOVERY_PERIOD_DAYS = 90;
 export const MAX_PATTERN_DISCOVERY_WALLETS = 500;
 /** Change this when the normalized export or discovery input contract changes. */
-export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v4-historical-features';
+export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v5-reduced-coverage-grid';
 
 export type PatternDiscoveryExportRow = {
   project: 'crypto';
