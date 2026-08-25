@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { CACHE_VERSIONS, versionedCacheKey } from '../../platform/cache/cacheVersions.js';
 import {
   computeCopySimulationReport,
   type CopySimulationTradeResult,
@@ -8,8 +9,8 @@ import {
 export const DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS = 30;
 export const MAX_PATTERN_DISCOVERY_PERIOD_DAYS = 90;
 export const MAX_PATTERN_DISCOVERY_WALLETS = 500;
-/** Change this when the normalized export or discovery input contract changes. */
-export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v5-reduced-coverage-grid';
+/** @deprecated Use CACHE_VERSIONS.patternDiscovery for new cache consumers. */
+export const PATTERN_DISCOVERY_ENGINE_VERSION = CACHE_VERSIONS.patternDiscovery;
 
 export type PatternDiscoveryExportRow = {
   project: 'crypto';
@@ -135,14 +136,14 @@ export const patternDiscoveryCacheKey = (
   minN?: number,
   limit = MAX_PATTERN_DISCOVERY_WALLETS,
 ): string =>
-  [
-    PATTERN_DISCOVERY_ENGINE_VERSION,
+  versionedCacheKey(
+    'patternDiscovery',
     kind,
     periodDays,
     minimumCoveragePercent,
     minN ?? '',
     limit,
-  ].join(':');
+  );
 
 export const readPatternDiscoveryCache = <T>(
   database: DatabaseSync,

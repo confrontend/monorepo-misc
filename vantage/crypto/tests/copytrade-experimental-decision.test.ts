@@ -7,6 +7,7 @@ import {
   computeFastTradingPenalty,
   computeHistoricalHyperactivityPenalty,
   delayedCopyPerformancePassesCandidacyGate,
+  outOfSampleStabilityPassesCandidacyGate,
   readExperimentalDecisionPromotedRules,
   robustnessScore,
   type ExperimentalDecisionPromotedRules,
@@ -128,6 +129,44 @@ test('negative or missing delayed-copy median cannot pass final candidacy', () =
     delayedCopyPerformancePassesCandidacyGate({ simulatedMedianReturnPercent: 0.1 }),
     true,
   );
+});
+
+test('final candidacy consumes the existing Out-of-sample stability verdict', () => {
+  assert.equal(
+    outOfSampleStabilityPassesCandidacyGate({
+      key: 'outOfSampleStability',
+      label: 'Out-of-sample stability',
+      n: 150,
+      verdict: 'fail',
+      detail: 'Early half median 56.82% vs late half median -23.72%.',
+      metrics: {
+        splitDate: '2026-08-15T00:00:00.000Z',
+        earlyMedianReturnPercent: 56.82,
+        earlyN: 124,
+        lateMedianReturnPercent: -23.72,
+        lateN: 26,
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    outOfSampleStabilityPassesCandidacyGate({
+      key: 'outOfSampleStability',
+      label: 'Out-of-sample stability',
+      n: 241,
+      verdict: 'pass',
+      detail: 'Early half median 30.48% vs late half median 53.75%.',
+      metrics: {
+        splitDate: '2026-08-11T00:00:00.000Z',
+        earlyMedianReturnPercent: 30.48,
+        earlyN: 184,
+        lateMedianReturnPercent: 53.75,
+        lateN: 57,
+      },
+    }),
+    true,
+  );
+  assert.equal(outOfSampleStabilityPassesCandidacyGate(undefined), false);
 });
 
 test('historical hyperactivity applies the promoted threshold effect without inventing a cutoff', () => {

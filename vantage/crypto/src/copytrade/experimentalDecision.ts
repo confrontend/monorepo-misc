@@ -13,13 +13,13 @@ import { readGmgnRiskResults } from './scrutiny/gmgnRisk.js';
 import { hasReliableCopyEvidence } from './scrutiny/copyCandidates.js';
 import {
   MAX_PATTERN_DISCOVERY_WALLETS,
-  PATTERN_DISCOVERY_ENGINE_VERSION,
   patternDiscoveryCacheKey,
   readPatternDiscoveryCache,
   readPatternDiscoveryDataFingerprint,
 } from './discovery/patternDiscovery.js';
 import { PATTERN_DISCOVERY_COVERAGE_THRESHOLDS } from './discovery/patternDiscoveryRunner.js';
 import { weightCategoryForFeature } from './decisionCategories.js';
+import { CACHE_VERSIONS } from '../platform/cache/cacheVersions.js';
 
 const NEUTRAL_DECISION_WEIGHTS = {
   edge: 0.25,
@@ -27,8 +27,11 @@ const NEUTRAL_DECISION_WEIGHTS = {
   robustness: 0.25,
   copyability: 0.25,
 } as const;
-/** Bump when Decision Lab scoring behavior or its exported report shape changes. */
-export const DECISION_LAB_SCORING_VERSION = 'decision-lab-scoring-v2-delayed-copy-gate';
+/** @deprecated Use CACHE_VERSIONS.decisionLab for new cache consumers. */
+export const DECISION_LAB_SCORING_VERSION = CACHE_VERSIONS.decisionLab.replace(
+  'experimental-decision:',
+  '',
+);
 const PROMOTION_THRESHOLDS = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
 const MIN_PROMOTION_WALLETS = 10;
 
@@ -128,6 +131,12 @@ export const delayedCopyPerformancePassesCandidacyGate = (
   simulation?.simulatedMedianReturnPercent !== null &&
   simulation?.simulatedMedianReturnPercent !== undefined &&
   simulation.simulatedMedianReturnPercent > 0;
+
+/** Final candidacy consumes Candidate Scrutiny's existing Out-of-sample stability verdict.
+ * Keep the chronological calculation in one place; Decision Lab must not derive a parallel split. */
+export const outOfSampleStabilityPassesCandidacyGate = (
+  check: CandidateScrutinyReport['checks']['outOfSampleStability'] | null | undefined,
+): boolean => check?.verdict === 'pass';
 const holdScore = (seconds: number | null): number | null =>
   seconds === null
     ? null
@@ -400,7 +409,7 @@ export const readExperimentalDecisionCacheVersion = (database: DatabaseSync): st
       `SELECT MAX(updated_at) AS updatedAt FROM copytrade_report_cache
      WHERE cache_key LIKE ? AND data_fingerprint = ?`,
     )
-    .get(`${PATTERN_DISCOVERY_ENGINE_VERSION}:report:%`, fingerprint) as
+    .get(`${CACHE_VERSIONS.patternDiscovery}:report:%`, fingerprint) as
     { updatedAt?: string | null } | undefined;
   return `${fingerprint}:${row?.updatedAt ?? 'no-promoted-patterns'}`;
 };
@@ -504,6 +513,8 @@ export const computeExperimentalDecisionReport = (
   );
   const wallets = screen.rows.map((row) => {
     const sim = simulationByWallet.get(row.walletAddress);
+    const scrutiny = scrutinyByWallet.get(row.walletAddress);
+    const outOfSampleStability = scrutiny?.checks.outOfSampleStability;
     const evidence = evidenceFor(row, sim);
     const edge = positiveReturnScore(sim?.simulatedMedianReturnPercent ?? null);
     const consistency = consistencyScore(row);
@@ -528,7 +539,8 @@ export const computeExperimentalDecisionReport = (
       robustness !== null &&
       copyability !== null &&
       evidence.level === 'complete' &&
-      delayedCopyPerformancePassesCandidacyGate(sim)
+      delayedCopyPerformancePassesCandidacyGate(sim) &&
+      outOfSampleStabilityPassesCandidacyGate(outOfSampleStability)
         ? clamp(
             edge * weighting.weights.edge +
               consistency * weighting.weights.consistency +
@@ -578,9 +590,11 @@ export const computeExperimentalDecisionReport = (
         label: 'Overall',
         detail: !delayedCopyPerformancePassesCandidacyGate(sim)
           ? `Not a final candidate: delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; a positive typical copied result is required.`
-          : overall === null
-            ? 'Requires all four component scores and non-missing evidence.'
-            : `Weighted score: edge ${(weighting.weights.edge * 100).toFixed(0)}%, consistency ${(weighting.weights.consistency * 100).toFixed(0)}%, robustness ${(weighting.weights.robustness * 100).toFixed(0)}%, copyability ${(weighting.weights.copyability * 100).toFixed(0)}%.`,
+          : !outOfSampleStabilityPassesCandidacyGate(outOfSampleStability)
+            ? `Not a final candidate: the existing Out-of-sample stability check is ${outOfSampleStability?.verdict ?? 'unavailable'} (late-period median ${outOfSampleStability?.metrics.lateMedianReturnPercent?.toFixed(1) ?? 'missing'}%); a passing check is required.`
+            : overall === null
+              ? 'Requires all four component scores and non-missing evidence.'
+              : `Weighted score: edge ${(weighting.weights.edge * 100).toFixed(0)}%, consistency ${(weighting.weights.consistency * 100).toFixed(0)}%, robustness ${(weighting.weights.robustness * 100).toFixed(0)}%, copyability ${(weighting.weights.copyability * 100).toFixed(0)}%.`,
       },
     };
     const risks: string[] = [];
@@ -588,6 +602,10 @@ export const computeExperimentalDecisionReport = (
     if (!delayedCopyPerformancePassesCandidacyGate(sim))
       risks.push(
         `Delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; this prevents final candidacy even when other scores are high.`,
+      );
+    if (!outOfSampleStabilityPassesCandidacyGate(outOfSampleStability))
+      risks.push(
+        `Out-of-sample stability ${outOfSampleStability?.verdict ?? 'unavailable'}: late-period median return is ${outOfSampleStability?.metrics.lateMedianReturnPercent?.toFixed(1) ?? 'missing'}%.`,
       );
     if (row.truncated) risks.push('GMGN history is truncated.');
     if (row.historyFailed) risks.push('GMGN history fetch failed.');
@@ -605,7 +623,6 @@ export const computeExperimentalDecisionReport = (
       risks.push(
         `Promoted historical-activity evidence reduced Copyability by ${hyperactivityPenalty.toFixed(1)} points.`,
       );
-    const scrutiny = scrutinyByWallet.get(row.walletAddress);
     const scrutinyChecks = scrutiny
       ? Object.values(scrutiny.checks).map((check) => ({
           label: check.label,

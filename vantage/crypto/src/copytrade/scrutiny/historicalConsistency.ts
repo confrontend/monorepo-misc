@@ -1,3 +1,4 @@
+import type { DatabaseSync } from 'node:sqlite';
 import {
   computeProfitConcentration,
   performanceByPeriod,
@@ -310,4 +311,25 @@ export const computeHistoricalConsistency = (
     counts,
     rows,
   };
+};
+
+/** Read the same point-in-time trade history used by the historical-consistency report. */
+export const readHistoricalConsistencyForWallets = (
+  database: DatabaseSync,
+  walletAddresses: string[],
+  now: Date = new Date(),
+): HistoricalConsistencyReport => {
+  if (walletAddresses.length === 0) return computeHistoricalConsistency([], now);
+  const placeholders = walletAddresses.map(() => '?').join(', ');
+  const rows = database
+    .prepare(
+      `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
+              event_type AS eventType, token_address AS tokenAddress,
+              token_symbol AS tokenSymbol, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
+       FROM copytrade_trades
+       WHERE chain = 'sol' AND wallet_address IN (${placeholders})
+       ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
+    )
+    .all(...walletAddresses) as unknown as HistoricalConsistencyTrade[];
+  return computeHistoricalConsistency(rows, now);
 };

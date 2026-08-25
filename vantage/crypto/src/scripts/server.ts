@@ -51,7 +51,10 @@ import {
   readCopyTradeSummary,
   saveCopyTradeSnapshot,
 } from '../copytrade/scrutiny/evaluate.js';
-import { computeHistoricalConsistency } from '../copytrade/scrutiny/historicalConsistency.js';
+import {
+  computeHistoricalConsistency,
+  readHistoricalConsistencyForWallets,
+} from '../copytrade/scrutiny/historicalConsistency.js';
 import {
   computeCopyCandidates,
   computeHighUpsideEligibleCandidates,
@@ -122,10 +125,10 @@ import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
 import {
-  DECISION_LAB_SCORING_VERSION,
   computeExperimentalDecisionReport,
   readExperimentalDecisionCacheVersion,
 } from '../copytrade/experimentalDecision.js';
+import { versionedCacheKey } from '../platform/cache/cacheVersions.js';
 import { API_CATALOG } from '../apiCatalog.js';
 
 /** Scrutiny interrogates individually-pinned wallets, not a ranked top-N — so its roster scope
@@ -257,11 +260,10 @@ const readCachedResearch = <T>(key: string, compute: () => T): T => {
 // was correctly computed by fresh calls but kept invisible to a browser tab that had already
 // triggered a cache write, and no server restart or browser action fixed it — only this bump
 // does. Same pattern this file already uses for the wallet-stats results cache (`results-v3`).
-const COPY_SIMULATION_CACHE_VERSION = 2;
 const copySimulationCacheKey = (walletAddresses: string[], periodDays?: number): string => {
   const scope = [...new Set(walletAddresses)].sort().join(',');
   const scopeHash = createHash('sha256').update(scope, 'utf8').digest('hex').slice(0, 24);
-  return `copy-simulation-v${COPY_SIMULATION_CACHE_VERSION}:${periodDays ?? 'all'}:${scopeHash}`;
+  return versionedCacheKey('copySimulation', periodDays ?? 'all', scopeHash);
 };
 
 /** `batches` records every batch this run attempted and how it ended, so "it stopped" can always
@@ -400,20 +402,7 @@ const readHistoricalConsistencyForRoster = (
 } => {
   const roster = listRosterWallets(database, { chain: 'sol', limit, snapshotId: rosterSnapshotId });
   const wallets = roster.map((wallet) => wallet.walletAddress);
-  if (wallets.length === 0)
-    return { roster, computed: computeHistoricalConsistency([], new Date()) };
-  const placeholders = wallets.map(() => '?').join(', ');
-  const rows = database
-    .prepare(
-      `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
-            event_type AS eventType, token_address AS tokenAddress,
-            token_symbol AS tokenSymbol, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
-     FROM copytrade_trades
-     WHERE chain = ? AND wallet_address IN (${placeholders})
-     ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
-    )
-    .all('sol', ...wallets) as unknown as Parameters<typeof computeHistoricalConsistency>[0];
-  return { roster, computed: computeHistoricalConsistency(rows, new Date()) };
+  return { roster, computed: readHistoricalConsistencyForWallets(database, wallets) };
 };
 
 /**
@@ -1593,7 +1582,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(
         200,
         readCachedResearch(
-          `experimental-decision:${DECISION_LAB_SCORING_VERSION}:${limit}:${rosterSnapshotId ?? 'latest'}:${weightingVersion}`,
+          versionedCacheKey('decisionLab', limit, rosterSnapshotId ?? 'latest', weightingVersion),
           () => computeExperimentalDecisionReport(database, { limit, rosterSnapshotId }),
         ),
       );
