@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import type { HTMLAttributes, Key, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
 
 type DataTableColumn<Row> = {
@@ -5,6 +6,7 @@ type DataTableColumn<Row> = {
   header: ReactNode;
   headerProps?: ThHTMLAttributes<HTMLTableCellElement>;
   render: (row: Row, index: number) => ReactNode;
+  label?: string;
   cellProps?: (row: Row, index: number) => TdHTMLAttributes<HTMLTableCellElement> | undefined;
   /** Column stays in the `columns` array (so a caller's own visibility-picker state can name
    *  every column) but is skipped when hidden -- both header and body cells, and the empty-state
@@ -27,7 +29,15 @@ type DataTableProps<Row> = {
   emptyMessage?: ReactNode;
   wrapClassName?: string;
   tableClassName?: string;
+  enableColumnHiding?: boolean;
+  columnVisibilityStorageKey?: string;
 };
+
+const defaultColumnLabel = (key: string): string =>
+  key
+    .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
+    .replaceAll('_', ' ')
+    .replace(/^./, (char) => char.toUpperCase());
 
 export function DataTable<Row>({
   columns,
@@ -37,10 +47,67 @@ export function DataTable<Row>({
   emptyMessage,
   wrapClassName = 'table-wrap',
   tableClassName,
+  enableColumnHiding = false,
+  columnVisibilityStorageKey,
 }: DataTableProps<Row>) {
-  const visibleColumns = columns.filter((column) => !column.hidden);
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!enableColumnHiding || !columnVisibilityStorageKey) return;
+    try {
+      const saved = window.localStorage.getItem(columnVisibilityStorageKey);
+      if (saved) setHiddenColumnKeys(JSON.parse(saved) as string[]);
+    } catch {
+      // Local storage is an optional convenience; table rendering must still work without it.
+    }
+  }, [columnVisibilityStorageKey, enableColumnHiding]);
+
+  useEffect(() => {
+    if (!enableColumnHiding || !columnVisibilityStorageKey) return;
+    try {
+      window.localStorage.setItem(columnVisibilityStorageKey, JSON.stringify(hiddenColumnKeys));
+    } catch {
+      // Ignore unavailable or full local storage.
+    }
+  }, [columnVisibilityStorageKey, enableColumnHiding, hiddenColumnKeys]);
+
+  const visibleColumns = useMemo(
+    () => columns.filter((column) => !column.hidden && !hiddenColumnKeys.includes(column.key)),
+    [columns, hiddenColumnKeys],
+  );
+  const hideableColumns = columns.filter((column) => !column.hidden);
+  const resetColumns = () => setHiddenColumnKeys([]);
+  const toggleColumn = (key: string) => {
+    setHiddenColumnKeys((current) =>
+      current.includes(key) ? current.filter((value) => value !== key) : [...current, key],
+    );
+  };
   return (
     <div className={`${wrapClassName} data-table-wrap`}>
+      {enableColumnHiding && (
+        <details className="data-table-column-picker">
+          <summary>Columns</summary>
+          <div className="data-table-column-picker-menu">
+            {hideableColumns.map((column) => {
+              const isVisible = !hiddenColumnKeys.includes(column.key);
+              return (
+                <label key={column.key}>
+                  <input
+                    type="checkbox"
+                    checked={isVisible}
+                    disabled={isVisible && visibleColumns.length <= 1}
+                    onChange={() => toggleColumn(column.key)}
+                  />
+                  {column.label ?? defaultColumnLabel(column.key)}
+                </label>
+              );
+            })}
+            <button type="button" className="secondary" onClick={resetColumns}>
+              Reset columns
+            </button>
+          </div>
+        </details>
+      )}
       <table className={tableClassName}>
         <thead>
           <tr>

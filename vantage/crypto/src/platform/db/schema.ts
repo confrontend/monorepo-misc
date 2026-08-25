@@ -1358,6 +1358,151 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    description: 'Track cheap Pattern Discovery evidence revisions',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS pattern_discovery_data_revision (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        revision INTEGER NOT NULL DEFAULT 0,
+        dirty INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO pattern_discovery_data_revision
+        (singleton_id, revision, dirty, updated_at)
+      VALUES (1, 0, 1, CURRENT_TIMESTAMP);
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_wallets_insert
+      AFTER INSERT ON copytrade_wallets BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_wallets_update
+      AFTER UPDATE ON copytrade_wallets BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_wallets_delete
+      AFTER DELETE ON copytrade_wallets BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_coverage_insert
+      AFTER INSERT ON copytrade_wallet_coverage BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_coverage_update
+      AFTER UPDATE ON copytrade_wallet_coverage BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_coverage_delete
+      AFTER DELETE ON copytrade_wallet_coverage BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_trades_insert
+      AFTER INSERT ON copytrade_trades BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_trades_update
+      AFTER UPDATE ON copytrade_trades BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_trades_delete
+      AFTER DELETE ON copytrade_trades BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_dune_insert
+      AFTER INSERT ON copytrade_copy_simulation_runs BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_dune_update
+      AFTER UPDATE ON copytrade_copy_simulation_runs BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pattern_discovery_dune_delete
+      AFTER DELETE ON copytrade_copy_simulation_runs BEGIN
+        UPDATE pattern_discovery_data_revision
+        SET dirty = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE singleton_id = 1 AND dirty = 0;
+      END;
+
+      -- These exports are derived and very large. The new engine builds the grid once and only
+      -- caches compact reports, so retaining old per-threshold exports wastes hundreds of MB.
+      DELETE FROM copytrade_report_cache
+      WHERE cache_key LIKE 'crypto-pattern-discovery-v2-entry-wallet-balanced:export:%';
+    `),
+  },
+  {
+    description: 'Persist Pattern Discovery worker runs and progress',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_pattern_discovery_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        period_days INTEGER NOT NULL,
+        minimum_n INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        progress_json TEXT NOT NULL,
+        worker_pid INTEGER,
+        started_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL,
+        completed_at TEXT,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_pattern_discovery_runs_latest
+      ON copytrade_pattern_discovery_runs(id DESC);
+    `),
+  },
+  {
+    description: 'Index saved Dune copy matches by trade leg',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_copy_simulation_matches (
+        run_id INTEGER NOT NULL,
+        trade_id INTEGER NOT NULL,
+        matched_trade_at TEXT,
+        matched_price_usd REAL,
+        matched_tx_id TEXT,
+        matched_trade_amount_usd REAL,
+        status TEXT NOT NULL,
+        match_source TEXT NOT NULL,
+        completed_at TEXT,
+        PRIMARY KEY (run_id, trade_id),
+        FOREIGN KEY (run_id) REFERENCES copytrade_copy_simulation_runs(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_simulation_matches_trade
+      ON copytrade_copy_simulation_matches(trade_id, run_id);
+      CREATE INDEX IF NOT EXISTS idx_copytrade_simulation_matches_run
+      ON copytrade_copy_simulation_matches(run_id);
+      CREATE TABLE IF NOT EXISTS copytrade_copy_simulation_match_index_runs (
+        run_id INTEGER PRIMARY KEY,
+        indexed_at TEXT NOT NULL,
+        trade_count INTEGER NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES copytrade_copy_simulation_runs(id) ON DELETE CASCADE
+      );
+    `),
+  },
 ];
 
 export const latestSchemaVersion = migrations.length;

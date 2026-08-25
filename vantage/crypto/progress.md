@@ -3453,3 +3453,195 @@ TODO
 - Tests: Read-only runtime/API/database inspection; no source code changed.
 - Errors/unresolved: Graphify query remained unavailable because the local uv cache fails with OS error 183.
 - Next: Compute the evidence fingerprint once per shared run or outside the request thread, then persist independently queryable progress for each coverage level.
+
+# 2026-08-24 - Moved future implementation ideas into crypto project
+
+- Agent/model: Codex GPT-5
+- Step: Recorded the endpoint constants and standardized API client ideas in `crypto/ideas-for-future-implementation.md`.
+- Files inspected: `CONVENTIONS.md`, `crypto/AGENTS.md`, `crypto/CLAUDE.md`, `crypto/ideas-for-future-implementation.md`.
+- Decision: Keep project-specific ideas in the crypto project and remove the duplicate Vantage-level ideas file.
+- Tests: Not run; documentation-only change.
+- Errors/unresolved: None.
+- Next: Implement either idea only when separately requested.
+
+# 2026-08-24 15:10 - Removed repeated full-database Pattern Discovery scans
+
+- Agent/model: Codex GPT-5.
+- Root cause: Pattern Discovery repeatedly scanned and serialized the large trade and raw Dune-result tables to build cache fingerprints, repeated copy-simulation work for each coverage threshold, and performed the synchronous work on the API event loop. This blocked `/status`, produced contradictory stale UI states, and made the 3.35 GB database appear to be rehashed during ordinary runs.
+- Changes: Added a trigger-maintained constant-size Pattern Discovery data revision; build point-in-time evidence once for the full 11-level grid; run coverage levels in bounded parallel worker processes; persist run status, heartbeat, event history, worker allocation, and threshold results; isolate the coordinator from heavy work; and retain explicit cancellation with forced worker termination after a grace period.
+- Dune evidence fix: Added a normalized per-trade-leg match index. Legacy `raw_result` JSON is parsed once per completed Dune run, then all reports query only compact indexed legs scoped to the requested wallets. New Dune runs are indexed lazily once. This removes the remaining global raw-result scan from copy-simulation reports.
+- UI: Pattern Discovery reconnects to the persisted backend run after refresh and displays stage, backend heartbeat, workers, CPU threads, active coverage levels, wallet/entry counts, features, candidates, survivors, promoted patterns, cache hits, process ID, and a recent backend event log.
+- Resource decision: The statistical engine is NumPy/CPU and SQLite-I/O based, so GPU execution was not added. Coverage thresholds now use bounded CPU parallelism and per-worker native thread allocation without oversubscribing memory or SQLite.
+- Tests: `npm run build` passed; full Node suite passed 308/308; `npm run arch:check` passed with 102 modules and 280 dependencies; `git diff --check` passed.
+- Errors/unresolved: The live API was not running during final verification, so browser-level runtime verification still requires restarting the development server. The first report after upgrade may spend time indexing legacy Dune JSON once; subsequent reports reuse the compact index.
+- Next: Start the development server, run Pattern Discovery once to complete the one-time legacy Dune index, and verify that heartbeat/event-log updates remain live throughout the run.
+
+# 2026-08-24 — Project onboarding review
+
+- Step: Read the project instructions, README, brownfield baseline, research contracts, future-ideas list, documentation index, Graphify report, and latest progress entries.
+- Files inspected: `CONVENTIONS.md`, `crypto/CLAUDE.md`, `crypto/AGENTS.md`, `crypto/README.md`, `crypto/docs/BROWNFIELD_SYSTEM_BASELINE.md`, `crypto/research/research-question*.md`, `crypto/ideas-for-future-implementation.md`, `crypto/graphify-out/GRAPH_REPORT.md`, `crypto/progress.md`, and `crypto/package.json`.
+- Decision: Treat current TypeScript/SQLite/React code and migrations as authoritative; treat research notes and historical progress as context unless confirmed in code. Use Graphify first for future architecture questions.
+- Test result: Not run; documentation-only onboarding.
+- Errors/unresolved: Graphify CLI query was blocked by local UV cache OS error 183; existing generated Graphify report was available. Python test provisioning remains unavailable in some runtimes.
+- Next: For implementation work, read the brownfield baseline first, preserve shared decision logic and provenance rules, centralize UI strings, and run build/tests plus `npm run arch:check` for structural changes.
+
+# 2026-08-24 — Development tooling and AI skills review
+
+- Step: Reviewed `package.json`, `.mcp.json`, `.dependency-cruiser.cjs`, `skills-lock.json`, `CLAUDE.md`, and the project skill manifests.
+- Decision: Classify Graphify, Context7, Serena, and Spec Kit as AI/developer-assistance architecture; classify the seven GMGN skills as domain-operation skills. Keep live trading and token creation disabled for coding agents.
+- Test result: Not run; documentation-only review.
+- Errors/unresolved: Serena and Graphify may depend on local UV availability; the prior Graphify query hit UV cache error 183.
+- Next: Use Graphify for architecture navigation, Serena for symbol-aware refactoring when available, Context7 for current library/API docs, and Spec Kit for larger spec-driven changes.
+
+# 2026-08-24 — Spec Kit usage review
+
+- Step: Inspected `.specify/` configuration, workflow, constitution, retrospective specs, and project references.
+- Decision: Spec Kit is installed and configured with the generic integration, but is currently used as a guarded workflow/scaffolding rather than as an active feature backlog. Existing specs document brownfield baselines; future Pattern Discovery changes should begin with a reviewed Spec Kit proposal.
+- Test result: Not run; documentation-only review.
+- Errors/unresolved: The constitution remains the generated placeholder template and has not been customized into project-specific governance.
+- Next: For a substantial future change, run the specify → review → plan → review → tasks → implement cycle and keep retrospective baseline specs separate from new feature specs.
+
+# 2026-08-24 — Spec Kit improvement recommendation
+
+- Step: Assessed how to make Spec Kit more useful for the crypto project.
+- Decision: Use it selectively as a requirements, invariants, architecture, and verification gate for cross-layer or evidence-sensitive work; do not require it for routine fixes.
+- Test result: Not run; advisory/documentation task.
+- Errors/unresolved: Project constitution still needs real crypto-specific principles before it can serve as a reliable gate.
+- Next: Customize the constitution and pilot the full workflow on the next Pattern Discovery or decision-rule change.
+
+# 2026-08-24 — Made Spec Kit workflow automatic in agent instructions
+
+- Step: Updated `crypto/CLAUDE.md` and `crypto/AGENTS.md`.
+- Decision: Require specify → review → plan → review → tasks → implement for cross-layer, architectural, evidence-sensitive, persistence, provider, API-contract, and Pattern Discovery changes; allow documented skips for isolated local fixes.
+- Test result: `git diff --check` passed.
+- Errors/unresolved: Git reported normal LF/CRLF working-copy warnings; no content errors.
+- Next: Apply the mandatory workflow to the next qualifying feature and keep the generated artifacts synchronized during implementation.
+
+# 2026-08-24 17:15 -07:00 — Corrected Pattern Discovery result reporting
+
+- Step completed: Separated the full 50–100% coverage-grid summary from the strict 100% report so a zero at 100% is no longer presented as overall discovery failure.
+- Files inspected or changed: `ui/main.tsx`, `ui/components/PatternDiscoveryRunSummary.tsx`, `ui/strings.ts`, `src/copytrade/experimentalDecision.ts`, `src/copytrade/discovery/patternDiscoveryRunner.ts`.
+- Decision made and reason: Kept this as an isolated UI reporting fix with no API, scoring, discovery, or persistence change; Spec Kit was not required. Renamed per-level promotion to local eligibility and explained that Decision Lab requires repetition across levels.
+- Agent name and model: Codex, GPT-5.
+- Test result: `npm run build:ui` passed; targeted ESLint passed; `npm run arch:check` passed with 0 violations.
+- Errors or unresolved items: Graphify query was blocked by the existing Windows `uv` cache error 183, so source and the live Decision Lab endpoint were used for verification.
+- Next step: Confirm the revised full-grid and strict-100% sections visually in the running app.
+
+# 2026-08-24 — Added Pattern Discovery per-rule evidence table
+
+- Step completed: Completed Spec Kit feature `specs/001-pattern-rule-evidence` through specification review, plan review, task generation, implementation, and verification.
+- Files inspected or changed: `specs/001-pattern-rule-evidence/*`, `src/copytrade/decisionCategories.ts`, `src/copytrade/experimentalDecision.ts`, `ui/components/PatternDiscoveryRuleEvidence.tsx`, `ui/components/PatternDiscoveryRuleDialog.tsx`, `ui/main.tsx`, `ui/strings.ts`, `ui/styles.css`.
+- Decision made and reason: Reused the existing feature-to-Decision-Lab category mapping via a dependency-free shared helper so the browser does not import Node-only server modules. The table reads only existing report fields, keeps legacy fields optional, uses — for missing values, and distinguishes validated, stable, and promoted states without inventing a success rate.
+- Agent name and model: Codex, GPT-5.
+- Test result: `npm test` passed (308 tests); `npm run build:ui` passed; `npm run build:server` passed; `npm run arch:check` passed with 0 violations; `git diff --check` passed.
+- Errors or unresolved items: Initial UI build failed because importing `experimentalDecision.ts` pulled Node-only modules into the browser; resolved by extracting the pure shared category helper. Graphify remained unavailable due to Windows `uv` cache error 183.
+- Next step: Review the new evidence table visually in the running app when browser verification is available.
+
+# 2026-08-24 — Final formatting verification
+
+- Step completed: Formatted the new evidence component and reran final UI/architecture checks.
+- Files inspected or changed: `ui/components/PatternDiscoveryRuleEvidence.tsx`, `progress.md`.
+- Decision made and reason: Applied repository Prettier formatting before handoff.
+- Agent name and model: Codex, GPT-5.
+- Test result: Prettier check, `npm run build:ui`, `npm run arch:check`, and `git diff --check` passed.
+- Errors or unresolved items: Only normal Git LF/CRLF warnings remain; no content errors.
+- Next step: Hand off implementation.
+
+# 2026-08-24 — Added responsive header rotation to the shared DataTable component
+
+- Step completed: Added an opt-in `rotateHeaders` prop to `ui/components/DataTable.tsx`. When enabled, it measures the table's rendered width against its scroll container on every render and progressively rotates header labels counterclockwise -- 0° → 45° → 90° -- stopping as soon as the table fits without horizontal scroll, or at 90° if it still doesn't (rotation alone can't shrink it further at that point; it scrolls as it always did). A `ResizeObserver` on the wrapper resets rotation to 0 on any container resize so the headers un-rotate again once there's room, rather than staying rotated forever. First implementation was a static always-45° toggle; upgraded to the responsive escalating version per explicit follow-up request mid-task.
+- Files inspected or changed: `ui/components/DataTable.tsx`, `ui/styles.css`.
+- Decision made and reason: Implemented directly on `main` (not a worktree) per explicit instruction, since this is a small, additive, opt-in prop on an existing shared component with no behavior change for any current caller (nobody passes `rotateHeaders` yet). Kept the rotation levels as two explicit CSS classes (`data-table-rotated-headers-45`/`-90`) with distinct `<th>` heights (130px/150px) sized to the longest header actually seen in this app's tables, rather than computing height dynamically -- simpler, and the measurement-driven rotation logic already handles the "does it fit" question; the height only needs to avoid clipping the rotated text, not solve layout.
+- Test result: `npx tsc -p tsconfig.ui.json --noEmit` shows only pre-existing errors, none from this change (3 unrelated `PatternDiscoveryRuleEvidence.tsx` errors and the standing `historicalConsistency`/`'declining'` error are from concurrent in-progress work on this same file tree, not this change). `npm run build:ui` clean. Verified live against the running dev server: temporarily wired `rotateHeaders` onto the main 30-day decision table (15 columns, several long headers), confirmed via computed styles that the 45° state renders with `transform: rotate(-45deg)` and initially found headers clipping above their `<th>` at the first-chosen 130px height for longer labels like "GMGN ≤15s trades" -- a real bug, fixed by re-measuring the actual rotated label heights and using them to size the `<th>`; confirmed at 90° every header's rotated bounding box fits within a 150px cell with zero clipping. Confirmed the component correctly escalates to 90° when 45° isn't enough. Removed the temporary test wiring afterward -- the capability is added but not applied to any table yet, pending the user choosing where to enable it.
+- Errors or unresolved items: The decision table used for live testing is wide enough (15 columns) that it still needs some horizontal scroll even at full 90° rotation -- expected and documented behavior, not a bug. Its container also has a fixed max-width regardless of browser window size, so the "un-rotate when there's more room" side of the responsive logic could not be demonstrated end-to-end live in this app as it exists today (confirmed correct by code review and the ResizeObserver firing, just not visually re-confirmed shrinking back to 0°). Noticed unrelated stale Vite HMR error toasts ("node:crypto has been externalized") during verification from concurrent work on `roster.ts` elsewhere in this session -- not caused by or related to this change, and the app was rendering correctly underneath the stale overlay; not investigated further as out of scope.
+- Next step: none required for the component itself. If/when a specific table should use this, pass `rotateHeaders` on that `<DataTable>` call site.
+
+# 2026-08-24 — Focused Pattern Discovery evidence on winner rules
+
+- Step completed: Refined the per-rule evidence table to default to a compact winner view and retain the full evidence view on demand.
+- Files inspected or changed: `ui/components/PatternDiscoveryRuleEvidence.tsx`, `ui/components/PatternDiscoveryRuleDialog.tsx`, `ui/strings.ts`, `ui/styles.css`.
+- Decision made and reason: A winner requires positive discovery and validation effects when both are present; legacy reports may use an explicitly surviving validation status only when validation effect is unavailable. Negative and mixed evidence remain visibly distinguished in the full view.
+- Test result: `npm run build` passed; `npm test` passed with 308 tests; `npm run arch:check` passed with 106 modules and 290 dependencies; Prettier and `git diff --check` passed.
+- Errors or unresolved items: None.
+- Next step: Review the compact winner view in the running browser and adjust thresholds or labels only if the actual report semantics require it.
+
+# 2026-08-24 — Restored full Pattern Discovery page export
+
+- Step completed: Added an explicit “Export all page data” JSON action beside the Pattern Discovery controls.
+- Files inspected or changed: `ui/main.tsx`, `ui/strings.ts`, `ui/components/PatternDiscoveryRuleEvidence.tsx`.
+- Decision made and reason: Export the complete loaded page state in one versioned JSON envelope, including 100% source rows when loaded, the full report, sensitivity grid, execution metadata, progress snapshot, period, and coverage grid. Keep the existing 100%-source export as a separate action.
+- Test result: `npm run build`, `npm run arch:check`, Prettier, and `git diff --check` passed.
+- Errors or unresolved items: None; normal Git LF/CRLF warnings only.
+- Next step: Verify the downloaded JSON in the browser and confirm whether a CSV companion is wanted.
+
+# 2026-08-24 — Enabled hide-column controls for Pattern Discovery and Decision Lab
+
+- Step completed: Added reusable column visibility controls to `DataTable` and enabled them on Pattern Discovery sensitivity/source/promoted tables and the Decision Lab table.
+- Decision made and reason: Keep table-specific visibility state in browser local storage, preserve existing forced-hidden columns, prevent hiding the last visible column, and provide a Reset columns action.
+- Test result: `npm test` passed with 308 tests; `npm run build` passed; `npm run arch:check` passed with 107 modules and 293 dependencies; Prettier and `git diff --check` passed.
+- Errors or unresolved items: None; normal Git LF/CRLF warnings only.
+- Next step: Verify the Columns menus and local persistence in the running browser.
+
+# 2026-08-24 — Reviewed Pattern Discovery feature allowlist
+
+- Step completed: Inspected the crypto feature contract, GMGN exporter, shared validation config, and latest report input contract.
+- Decision made and reason: Distinguish the explicit allowlist from the numeric features actually tested by the engine; identifiers are allowed metadata/grouping inputs but are not discovery predictors.
+- Test result: Read-only documentation/code review; no tests run and no source changes.
+- Errors or unresolved items: None.
+- Next step: Any new feature should be added to the explicit pre-event contract, exporter, validation config, and tests together; do not add outcome-derived fields to the allowlist.
+
+# 2026-08-24 — Diagnosed empty Pattern Discovery winner view
+
+- Step completed: Compared the winner-view predicate with saved Pattern Discovery report survivors.
+- Decision made and reason: The compact view intentionally requires positive discovery and validation effects; validated negative correlations remain evidence/risk rules, not winners. An empty winner view does not mean the report found no validated relationships.
+- Test result: Read-only report inspection; no source changes.
+- Errors or unresolved items: The exact current UI report depends on its selected coverage/run; saved reports contain validation survivors with both negative and, in some runs, positive effects.
+- Next step: Consider adding an explicit empty-state breakdown for positive winners, validated negative/risk rules, and rejected candidates.
+
+# 2026-08-24 — Replaced grouped Pattern Discovery rules with promoted-pattern views
+
+- Step completed: Exposed cached reports by coverage, derived unique cross-coverage promoted/stable patterns, and replaced the category-grouped rule presentation with a flat promoted-pattern table.
+- Files inspected or changed: `src/copytrade/discovery/patternDiscoveryRunner.ts`, `src/scripts/server.ts`, `ui/main.tsx`, `ui/components/PatternDiscoveryPromotedPatterns.tsx`, `ui/strings.ts`, `ui/styles.css`.
+- Decision made and reason: Show actual feature names, conditions, discovery/validation effects, stability, and coverage support. Add selectors for cross-coverage, 90%, 95%, and 100% views. Hydrate older sensitivity caches from existing per-threshold report caches without rerunning discovery.
+- Test result: `npm test` passed with 308 tests; `npm run build` passed; `npm run arch:check` passed with 107 modules and 293 dependencies; Prettier and `git diff --check` passed.
+- Errors or unresolved items: None.
+- Next step: Restart/reload the server so the result endpoint returns the enriched cached reports, then verify the promoted-pattern list in the browser.
+
+# 2026-08-24 — Reverted the DataTable header-rotation feature
+
+- Step completed: Fully reverted the `rotateHeaders` prop added earlier today to `ui/components/DataTable.tsx`, per explicit user feedback after live testing on the Pattern Discovery per-rule evidence table: "It's not usable."
+- Files inspected or changed: `ui/components/DataTable.tsx` (checked out cleanly from HEAD -- this file had no other concurrent changes mixed in, confirmed via `git diff --stat` matching exactly the +58/-2 this feature had introduced), `ui/styles.css` (surgically removed only the 6 rotation-related rule blocks I added; left every other concurrent addition from Codex's Pattern Discovery evidence-table work in this same file untouched -- confirmed by reviewing the full diff before editing and grepping for `data-table-rotated-headers`/`data-table-header-label` afterward to verify zero remaining references), `ui/components/PatternDiscoveryRuleEvidence.tsx` (the one call site this had been wired into was already overwritten back to not using it by a concurrent Codex save before this revert, so no action was needed there).
+- Decision made and reason: User feedback after seeing it live said the feature is not usable as implemented, without further detail on why. Reverting fully rather than attempting a fix, since no specific failure was described to diagnose against.
+- Test result: `npm run build:ui` clean after the revert.
+- Errors or unresolved items: None from this revert. The underlying idea (long headers making tables too wide) remains unsolved; not re-attempting without more specific direction on what made this approach unusable.
+- Next step: None planned. If revisited, get concrete feedback first (e.g. a screenshot/description of what looked wrong) before re-implementing.
+
+# 2026-08-24 — Audited excluded Pattern Discovery fields for data availability
+
+- Step completed: Compared the configured reject-by-default fields with the latest normalized 100% coverage export (`pattern-discovery-30d-1787615042516/normalized-export.json`, 76 rows).
+- Finding: 14 rejected fields have populated data in this export: `hold_seconds`, `wallet_return_percent` (63/76), `entry_trade_amount_usd`, `exit_trade_amount_usd`, `edge_kept_percent` (49/76), `entry_gap_seconds`, `exit_gap_seconds`, `gas_fee_usd`, `outcome_at`, `coverage_rate_percent`, `coverage_status`, `benchmark_return` (63/76), `excess_return` (63/76), and `net_return_after_costs`.
+- Finding: `captured_at`, `query_market_cap`, `query_ath`, `query_cur_data`, `current_wallet_statistics`, `post_event_rank`, `later_roster_membership`, `dune_outcome`, and `avg_holding_period` were absent from all 76 normalized rows. This is export-level absence, not proof that no upstream database/provider source contains them.
+- Decision made and reason: Do not add populated outcome, delay, holding-time, fee, coverage, or post-event fields as discovery predictors. The export contract explicitly treats them as labels/metadata; using them as features would create target/leakage risk. A follow-up feature audit should classify any proposed additions by point-in-time availability before changing the allowlist.
+- Test result: Read-only audit only; no source behavior changed and no test run was required.
+- Errors or unresolved items: Upstream availability for fields absent from the normalized export remains unverified.
+- Next step: If desired, implement a separate point-in-time-safe candidate-feature audit against the SQLite/provider source, then add only approved pre-event fields and rerun discovery.
+
+# 2026-08-24 — Added data-backed historical Pattern Discovery features
+
+- Step completed: Expanded the Pattern Discovery export with point-in-time-safe entry context and historical wallet/token behavior features. The new contract is `gmgn-v4-historical-context`.
+- Features added: `entry_trade_amount_usd`, source-observed `token_market_cap_at_entry`, `token_age_seconds_at_entry`, `token_launchpad_platform`, prior token buy/sell counts and volumes, distinct-token count, trades per active day, median prior buy size, prior return volatility, and top-three-token profit concentration.
+- Leakage protection: Historical trade aggregates use the existing strict timestamp/id boundary. GMGN market cap is joined only from a strictly earlier observed signal. Outcomes, exits, fees, coverage, current snapshots, GMGN tags, and true historical liquidity remain outside `features`.
+- Files changed: `src/copytrade/discovery/patternDiscovery.ts`, `tests/copytrade-pattern-discovery.test.ts`, `../research/shared-pattern-discovery/configs/crypto.json`, `../research/shared-pattern-discovery/shared_pattern_discovery/exporters/gmgn.py`, `../research/shared-pattern-discovery/tests/test_gmgn_exporter.py`, and `specs/002-historical-discovery-features/`.
+- Decision made and reason: GMGN tags were not enabled because the current database has zero populated `raw_wallet_labels` rows. True historical pool liquidity was not substituted with the live/current endpoint; entry size is explicitly treated as an activity/liquidity proxy.
+- Test result: `npm test` passed with 308 tests; `npm run build:server` passed; `npm run arch:check` passed with 107 modules and 293 dependencies; targeted Python exporter tests passed (3 tests). The full Python research suite has one pre-existing/unrelated engine-fixture failure: `test_validation_survivor_status_is_emitted_for_stable_signal`.
+- Errors or unresolved items: Full-repository Prettier check reports pre-existing formatting warnings across generated/SpecKit/config files; changed TypeScript/spec/config files were formatted and `git diff --check` passed.
+- Next step: Start a fresh Pattern Discovery run from the UI/API. The engine-version bump invalidates prior discovery caches so the new feature set is used.
+
+# 2026-08-24 — Fixed the DataTable column-visibility dropdown rendering under the sticky header
+
+- Step completed: Fixed a z-index stacking bug reported live on the Decision Lab table's "Columns" picker (a native column-hide/show feature added to `DataTable` concurrently by another session) -- the dropdown menu was rendering underneath the table's sticky header row instead of on top of it.
+- Files inspected or changed: `ui/styles.css`.
+- Decision made and reason: `.data-table-column-picker` (the picker's own `<details>` wrapper) had `z-index: 2`, while `.data-table-wrap > table thead th` (the sticky header cells) had `z-index: 3` -- both in the same stacking context under `.data-table-wrap`, so the header always painted over the picker's dropdown wherever they visually overlapped. Raised the picker to `z-index: 4` so it stacks above the header instead.
+- Test result: `npm run build:ui` clean. Verified live against the running dev server on the exact page from the report (Decision Lab, `#copytrade/experimental-decision`): opened the Columns dropdown, found the header cell that geometrically overlaps the menu, and used `document.elementFromPoint` at a coordinate inside both rects to confirm the topmost hit element is now a checkbox `<input>` inside the dropdown menu, not the header -- before this fix that same check would have hit the `<th>`. No console errors introduced (some stale Vite HMR/500 noise present is from concurrent unrelated work on `roster.ts`, already flagged earlier this session, not from this change).
+- Errors or unresolved items: None.
+- Next step: None required.

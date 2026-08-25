@@ -454,6 +454,8 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
           <DataTable
             wrapClassName="experimental-table-wrap"
             tableClassName="experimental-table"
+            enableColumnHiding
+            columnVisibilityStorageKey="vantage-decision-lab-columns"
             rows={sortedWallets}
             getRowKey={(wallet) => wallet.walletAddress}
             rowProps={(wallet) => ({

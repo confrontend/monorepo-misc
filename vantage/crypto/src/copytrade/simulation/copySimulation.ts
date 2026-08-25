@@ -583,8 +583,11 @@ const planCopySimulationTargets = (
       options.periodDays,
       now,
     );
+  const allTargetIds = new Set(roundTrips.flatMap((trip) => [trip.buyTradeId, trip.sellTradeId]));
   const covered = alreadyCoveredTradeIds(database);
-  const existingMatches = options.retryNoMatch ? readAllCopySimulationMatches(database) : null;
+  const existingMatches = options.retryNoMatch
+    ? readAllCopySimulationMatches(database, allTargetIds)
+    : null;
   const targets: CopySimulationTarget[] = [];
   const seenTradeIds = new Set<number>();
 
@@ -621,7 +624,6 @@ const planCopySimulationTargets = (
     });
   }
 
-  const allTargetIds = new Set(roundTrips.flatMap((trip) => [trip.buyTradeId, trip.sellTradeId]));
   const matchedBefore =
     options.retryNoMatch && existingMatches
       ? roundTrips.filter(
@@ -816,7 +818,9 @@ export const runCopySimulationBatch = async (
       batchesTotal,
     });
   }
-  const afterMatches = options.retryNoMatch ? readAllCopySimulationMatches(database) : null;
+  const afterMatches = options.retryNoMatch
+    ? readAllCopySimulationMatches(database, allTargetIds)
+    : null;
   const matchedAfter =
     options.retryNoMatch && afterMatches
       ? roundTrips.filter(
@@ -1164,6 +1168,12 @@ export const computeCopySimulationReport = (
     slippageBps?: number;
     gasPriorityFeeSolPerTx?: number;
     now?: Date;
+    onMatchIndexProgress?: (progress: {
+      completedRuns: number;
+      totalRuns: number;
+      currentRunId: number | null;
+      indexedTradeLegs: number;
+    }) => void;
   },
 ): CopySimulationReport => {
   const chain = options.chain ?? 'sol';
@@ -1187,7 +1197,20 @@ export const computeCopySimulationReport = (
     options.periodDays,
     now,
   );
-  const matches = readAllCopySimulationMatches(database);
+  const relevantTradeIds = new Set<number>();
+  for (const trip of roundTrips) {
+    relevantTradeIds.add(trip.buyTradeId);
+    relevantTradeIds.add(trip.sellTradeId);
+  }
+  for (const position of openPositions) {
+    relevantTradeIds.add(position.buyTradeId);
+    relevantTradeIds.add(-Math.abs(position.buyTradeId));
+  }
+  const matches = readAllCopySimulationMatches(
+    database,
+    relevantTradeIds,
+    options.onMatchIndexProgress,
+  );
   // This is deliberately the same planner used by the fetch runner. A report trade is one
   // round trip, while the fetch queue contains its separate buy/sell legs and open marks.
   // roundTrips/openPositions are passed in (same wallets/chain/periodDays/now as above) so the

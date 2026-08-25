@@ -12,3 +12,5 @@ gmgn-api-key.txt
 *.sqlite-wal
 *.sqlite-journal
 graphify-out/
+.uv-cache-watch/
+.uv-cache-cli/

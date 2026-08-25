@@ -481,6 +481,42 @@ h2 {
   margin: 7px 0 5px;
   accent-color: #72d8aa;
 }
+.pattern-discovery-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.pattern-discovery-runtime-grid > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #284d3f;
+  border-radius: 7px;
+  background: rgba(5, 26, 19, 0.35);
+  font-size: 0.78rem;
+}
+.pattern-discovery-runtime-grid b {
+  color: #78dbae;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pattern-discovery-event-log {
+  margin-top: 7px;
+  color: #b7d6c6;
+  font-size: 0.76rem;
+}
+.pattern-discovery-event-log ol {
+  max-height: 130px;
+  margin: 6px 0 0;
+  overflow: auto;
+}
+.pattern-discovery-event-log time {
+  color: #78dbae;
+  font-variant-numeric: tabular-nums;
+}
 .copytrade-loading-steps {
   margin: 0.55rem 0 0.35rem;
   padding-left: 1.25rem;
@@ -3698,6 +3734,47 @@ td small {
   color: #b6cfc2;
   font-size: 0.8rem;
 }
+.pattern-discovery-evidence {
+  margin-top: 18px;
+}
+.pattern-discovery-evidence-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+.pattern-discovery-evidence-controls label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.pattern-discovery-evidence-controls input,
+.pattern-discovery-evidence-controls select {
+  min-width: 180px;
+}
+.pattern-rule-evidence-table {
+  min-width: 1500px;
+}
+.pattern-discovery-evidence-row {
+  cursor: pointer;
+}
+.pattern-discovery-evidence-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.table-sort-button {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+.pattern-discovery-evidence-legend {
+  margin-top: 10px;
+}
 .pattern-discovery-threshold-summary strong {
   color: #72d8aa;
 }
@@ -5120,6 +5197,84 @@ footer {
 .pattern-discovery-results-heading p {
   margin: 0.15rem 0 0;
   max-width: 52rem;
+}
+.pattern-discovery-evidence-row-winner td:first-child {
+  box-shadow: inset 3px 0 0 #72d8aa;
+}
+.pattern-discovery-evidence-row-winner {
+  background: rgba(114, 216, 175, 0.08);
+}
+.pattern-discovery-evidence-row-negative {
+  background: rgba(229, 139, 145, 0.06);
+}
+.pattern-discovery-evidence-row-negative td:first-child {
+  box-shadow: inset 3px 0 0 #e58b91;
+}
+.pattern-discovery-evidence-row-mixed td:first-child {
+  box-shadow: inset 3px 0 0 #f0c875;
+}
+.pattern-discovery-promoted-row {
+  cursor: pointer;
+}
+.pattern-discovery-promoted-row:hover,
+.pattern-discovery-promoted-row:focus-visible {
+  background: rgba(114, 216, 175, 0.08);
+  outline: none;
+}
+.data-table-column-picker {
+  position: relative;
+  z-index: 4;
+  width: max-content;
+  margin: 0 0 0.45rem auto;
+  color: #dff8ea;
+}
+.data-table-column-picker > summary {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(114, 216, 175, 0.28);
+  border-radius: 0.35rem;
+  background: rgba(7, 25, 18, 0.32);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 700;
+  list-style: none;
+}
+.data-table-column-picker > summary::-webkit-details-marker {
+  display: none;
+}
+.data-table-column-picker > summary::after {
+  content: ' ▾';
+  color: #8fe4ba;
+}
+.data-table-column-picker[open] > summary::after {
+  content: ' ▴';
+}
+.data-table-column-picker-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  display: grid;
+  min-width: 13rem;
+  gap: 0.35rem;
+  padding: 0.65rem;
+  border: 1px solid rgba(114, 216, 175, 0.3);
+  border-radius: 0.45rem;
+  background: #10251b;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.28);
+}
+.data-table-column-picker-menu label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #cce9d8;
+  font-size: 0.76rem;
+}
+.data-table-column-picker-menu input {
+  accent-color: #72d8aa;
+}
+.data-table-column-picker-menu .secondary {
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.7rem;
 }
 .pattern-discovery-open-hint {
   margin-left: auto;

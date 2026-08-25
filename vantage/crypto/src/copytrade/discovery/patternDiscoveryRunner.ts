@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { availableParallelism, freemem } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { DatabaseSync } from 'node:sqlite';
@@ -11,12 +12,15 @@ import {
   readPatternDiscoveryCache,
   readPatternDiscoveryDataFingerprint,
   readPatternDiscoveryExport,
+  readPatternDiscoveryExportGrid,
+  type PatternDiscoveryExport,
   writePatternDiscoveryCache,
 } from './patternDiscovery.js';
 
 const execFileAsync = promisify(execFile);
 const VALIDATION_FRACTION = 0.3;
 const HOLDOUT_FRACTION = 0.2;
+const MIN_PATTERN_PROMOTION_WALLETS = 10;
 export const PATTERN_DISCOVERY_COVERAGE_THRESHOLDS = Array.from(
   { length: 11 },
   (_, index) => 50 + index * 5,
@@ -82,10 +86,19 @@ export type PatternDiscoverySensitivityPoint = {
   error?: string;
 };
 
+export type PatternDiscoveryCrossCoveragePattern = {
+  pattern: PatternDiscoveryPattern;
+  supportingCoveragePercent: number[];
+};
+
 export type PatternDiscoverySensitivity = {
   thresholds: PatternDiscoverySensitivityPoint[];
   weighting: 'equal wallet total weight';
   note: string;
+  /** Cached reports by coverage level, exposed for transparent result comparison only. */
+  reportsByCoverage?: Record<string, PatternDiscoveryReport>;
+  /** Unique stable validation survivors repeated across at least two coverage reports. */
+  crossCoveragePromotedPatterns?: PatternDiscoveryCrossCoveragePattern[];
   /** The 100% grid member, returned as a projection of the same run for legacy report consumers. */
   report?: PatternDiscoveryReport;
   execution?: {
@@ -124,6 +137,16 @@ export type PatternDiscoveryProgress = {
   historicalStablePatterns?: number;
   promotedPatterns?: number;
   heartbeatAt?: string;
+  activeThresholds?: number[];
+  cpuWorkersActive?: number;
+  cpuWorkersTotal?: number;
+  cpuThreadsPerWorker?: number;
+  walletsCompleted?: number;
+  walletsTotal?: number;
+  cacheHits?: number;
+  runId?: number;
+  workerPid?: number;
+  recentEvents?: Array<{ at: string; message: string }>;
 };
 
 export class PatternDiscoveryRunnerError extends Error {
@@ -327,6 +350,10 @@ export const runPatternDiscoveryReport = async (
     minimumCoveragePercent?: number;
     signal?: AbortSignal;
     onProgress?: (progress: Partial<PatternDiscoveryProgress>) => void;
+    normalizedExport?: PatternDiscoveryExport;
+    dataFingerprint?: string;
+    cacheNormalizedExport?: boolean;
+    pythonThreads?: number;
   },
 ): Promise<{
   report: PatternDiscoveryReport;
@@ -339,7 +366,7 @@ export const runPatternDiscoveryReport = async (
 }> => {
   const { periodDays, minN } = validatePatternDiscoveryRunInput(options.periodDays, options.minN);
   const minimumCoveragePercent = options.minimumCoveragePercent ?? 100;
-  const dataFingerprint = readPatternDiscoveryDataFingerprint(database);
+  const dataFingerprint = options.dataFingerprint ?? readPatternDiscoveryDataFingerprint(database);
   const cachedReport = readPatternDiscoveryCache<PatternDiscoveryReport>(
     database,
     patternDiscoveryCacheKey(
@@ -362,20 +389,27 @@ export const runPatternDiscoveryReport = async (
     undefined,
     MAX_PATTERN_DISCOVERY_WALLETS,
   );
+  const cachedExport = options.normalizedExport
+    ? null
+    : readPatternDiscoveryCache<ReturnType<typeof readPatternDiscoveryExport>>(
+        database,
+        exportCacheKey,
+        dataFingerprint,
+      );
   const normalized =
-    readPatternDiscoveryCache<ReturnType<typeof readPatternDiscoveryExport>>(
-      database,
-      exportCacheKey,
-      dataFingerprint,
-    ) ?? readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
-  options.onProgress?.({
-    stage: 'persisting results',
-    message: `Saving the ${minimumCoveragePercent}% normalized dataset before discovery…`,
-    wallets: Number(normalized.metadata.selected_wallet_count ?? 0),
-    independentEntries: normalized.rows.length,
-    heartbeatAt: new Date().toISOString(),
-  });
-  writePatternDiscoveryCache(database, exportCacheKey, dataFingerprint, normalized);
+    options.normalizedExport ??
+    cachedExport ??
+    readPatternDiscoveryExport(database, periodDays, undefined, minimumCoveragePercent);
+  if (options.cacheNormalizedExport !== false && !cachedExport) {
+    options.onProgress?.({
+      stage: 'persisting results',
+      message: `Saving the ${minimumCoveragePercent}% normalized dataset before discovery…`,
+      wallets: Number(normalized.metadata.selected_wallet_count ?? 0),
+      independentEntries: normalized.rows.length,
+      heartbeatAt: new Date().toISOString(),
+    });
+    writePatternDiscoveryCache(database, exportCacheKey, dataFingerprint, normalized);
+  }
   options.onProgress?.({
     stage: 'building dataset',
     message: `Built the ${minimumCoveragePercent}% dataset: ${normalized.metadata.selected_wallet_count} wallets, ${normalized.rows.length} independent entries.`,
@@ -428,6 +462,13 @@ export const runPatternDiscoveryReport = async (
       maxBuffer: 8 * 1024 * 1024,
       windowsHide: true,
       signal: options.signal,
+      env: {
+        ...process.env,
+        OMP_NUM_THREADS: String(options.pythonThreads ?? 1),
+        OPENBLAS_NUM_THREADS: String(options.pythonThreads ?? 1),
+        MKL_NUM_THREADS: String(options.pythonThreads ?? 1),
+        NUMEXPR_NUM_THREADS: String(options.pythonThreads ?? 1),
+      },
     });
   } catch (error) {
     const detail =
@@ -481,9 +522,96 @@ export const runPatternDiscoveryReport = async (
   };
 };
 
-/** Run the same cached engine at the recommended coverage thresholds. Each point uses the
- * same point-in-time export and wallet-balanced validation; unchanged points are returned
- * from the database cache instead of invoking Python again. */
+const sensitivityPoint = (
+  minimumCoveragePercent: number,
+  report: PatternDiscoveryReport,
+): PatternDiscoverySensitivityPoint => {
+  const summary = report.dataset_summary ?? {};
+  const counts = report.status_counts;
+  const historicalStablePatterns = (report.patterns ?? []).filter(
+    (pattern) => pattern.historical_stability?.status === 'stable',
+  ).length;
+  const promotedPatterns = (report.patterns ?? []).filter(
+    (pattern) =>
+      pattern.validationStatus === 'validation survivor' &&
+      pattern.historical_stability?.status === 'stable',
+  ).length;
+  return {
+    minimumCoveragePercent,
+    wallets: Number(summary.wallets ?? 0),
+    rows: Number(summary.rows ?? 0),
+    independentEntries: Number(summary.independence_groups ?? 0),
+    validationSurvivors: Number(counts['validation survivor'] ?? 0),
+    discoveredCandidates: (report.patterns ?? []).length,
+    promotedPatterns,
+    historicalStablePatterns,
+    rejected: Number(counts.rejected ?? 0),
+    insufficientData: Number(counts['insufficient data'] ?? 0),
+    reportAvailable: true,
+  };
+};
+
+const patternIdentity = (pattern: PatternDiscoveryPattern): string =>
+  JSON.stringify({
+    feature: pattern.feature ?? null,
+    kind: pattern.kind ?? null,
+    conditions: pattern.conditions ?? null,
+  });
+
+export const deriveCrossCoveragePromotedPatterns = (
+  reports: Map<number, PatternDiscoveryReport>,
+): PatternDiscoveryCrossCoveragePattern[] => {
+  const byIdentity = new Map<
+    string,
+    { pattern: PatternDiscoveryPattern; supportingCoveragePercent: number[] }
+  >();
+  for (const [threshold, report] of [...reports.entries()].sort(
+    ([left], [right]) => left - right,
+  )) {
+    if (Number(report.dataset_summary?.wallets ?? 0) < MIN_PATTERN_PROMOTION_WALLETS) continue;
+    const seenInReport = new Set<string>();
+    for (const pattern of report.patterns ?? []) {
+      if (
+        pattern.validationStatus !== 'validation survivor' ||
+        pattern.historical_stability?.status !== 'stable'
+      )
+        continue;
+      const identity = patternIdentity(pattern);
+      if (seenInReport.has(identity)) continue;
+      seenInReport.add(identity);
+      const current = byIdentity.get(identity);
+      if (current) {
+        current.pattern = pattern;
+        current.supportingCoveragePercent.push(threshold);
+      } else {
+        byIdentity.set(identity, {
+          pattern,
+          supportingCoveragePercent: [threshold],
+        });
+      }
+    }
+  }
+  return [...byIdentity.values()]
+    .filter((entry) => entry.supportingCoveragePercent.length >= 2)
+    .sort((left, right) => {
+      const support =
+        right.supportingCoveragePercent.length - left.supportingCoveragePercent.length;
+      return support || String(left.pattern.feature).localeCompare(String(right.pattern.feature));
+    });
+};
+
+const patternDiscoveryWorkerCount = (taskCount: number): number => {
+  const configured = Number(process.env.PATTERN_DISCOVERY_WORKERS);
+  const cpuLimit = Math.max(1, availableParallelism());
+  // A Python process can hold the normalized rows plus candidate/validation arrays. Bound by
+  // available memory so "use every core" never turns into paging or an out-of-memory failure.
+  const memoryLimit = Math.max(1, Math.floor(freemem() / (1024 * 1024 * 1024)));
+  const requested = Number.isInteger(configured) && configured > 0 ? configured : cpuLimit;
+  return Math.max(1, Math.min(taskCount, requested, cpuLimit, memoryLimit));
+};
+
+/** Build all datasets once, then run independent coverage levels with bounded CPU parallelism.
+ * Unchanged reports and the completed grid result are returned from SQLite immediately. */
 export const runPatternDiscoverySensitivity = async (
   database: DatabaseSync,
   options: {
@@ -501,91 +629,239 @@ export const runPatternDiscoverySensitivity = async (
   },
 ): Promise<PatternDiscoverySensitivity> => {
   const thresholds = PATTERN_DISCOVERY_COVERAGE_THRESHOLDS;
-  const points: PatternDiscoverySensitivityPoint[] = [];
+  const { periodDays, minN } = validatePatternDiscoveryRunInput(options.periodDays, options.minN);
+  const dataFingerprint = readPatternDiscoveryDataFingerprint(database);
+  const sensitivityCacheKey = patternDiscoveryCacheKey(
+    'sensitivity',
+    periodDays,
+    50,
+    minN,
+    MAX_PATTERN_DISCOVERY_WALLETS,
+  );
+  const cachedSensitivity = readPatternDiscoveryCache<PatternDiscoverySensitivity>(
+    database,
+    sensitivityCacheKey,
+    dataFingerprint,
+  );
+  if (cachedSensitivity) {
+    options.onEngineProgress?.({
+      stage: 'complete',
+      message: 'Loaded the unchanged 11-level discovery result from SQLite.',
+      thresholdsCompleted: thresholds.length,
+      thresholdsTotal: thresholds.length,
+      cacheHits: thresholds.length,
+      heartbeatAt: new Date().toISOString(),
+    });
+    return cachedSensitivity;
+  }
+
+  const reports = new Map<number, PatternDiscoveryReport>();
+  let cacheHits = 0;
+  for (const threshold of thresholds) {
+    const report = readPatternDiscoveryCache<PatternDiscoveryReport>(
+      database,
+      patternDiscoveryCacheKey(
+        'report',
+        periodDays,
+        threshold,
+        minN,
+        MAX_PATTERN_DISCOVERY_WALLETS,
+      ),
+      dataFingerprint,
+    );
+    if (report) {
+      reports.set(threshold, report);
+      cacheHits += 1;
+    }
+  }
+  const missingThresholds = thresholds.filter((threshold) => !reports.has(threshold));
+  options.onEngineProgress?.({
+    stage: 'loading evidence',
+    message: `${cacheHits} coverage levels cached; preparing shared evidence for ${missingThresholds.length} remaining levels.`,
+    thresholdsCompleted: cacheHits,
+    thresholdsTotal: thresholds.length,
+    cacheHits,
+    heartbeatAt: new Date().toISOString(),
+  });
+
+  const exports =
+    missingThresholds.length === 0
+      ? new Map<number, PatternDiscoveryExport>()
+      : readPatternDiscoveryExportGrid(
+          database,
+          periodDays,
+          MAX_PATTERN_DISCOVERY_WALLETS,
+          missingThresholds,
+          (progress) =>
+            options.onEngineProgress?.({
+              stage: 'building dataset',
+              message: progress.message,
+              thresholdsCompleted: cacheHits,
+              thresholdsTotal: thresholds.length,
+              wallets: progress.walletsTotal,
+              walletsCompleted: progress.walletsCompleted,
+              walletsTotal: progress.walletsTotal,
+              independentEntries: progress.independentEntries,
+              cacheHits,
+              heartbeatAt: new Date().toISOString(),
+            }),
+        );
+
+  const fullCoverageExport = exports.get(100);
+  if (fullCoverageExport) {
+    writePatternDiscoveryCache(
+      database,
+      patternDiscoveryCacheKey('export', periodDays, 100, undefined, MAX_PATTERN_DISCOVERY_WALLETS),
+      dataFingerprint,
+      fullCoverageExport,
+    );
+  }
+
+  const workerTotal = patternDiscoveryWorkerCount(missingThresholds.length || 1);
+  const cpuThreadsPerWorker = Math.max(1, Math.floor(availableParallelism() / workerTotal));
+  const activeThresholds = new Set<number>();
+  let nextTask = 0;
+  let completed = cacheHits;
   let finalReport: PatternDiscoveryReport | undefined;
   let finalExecution:
     | { pythonExecutable: string; inputPath: string; outputPath: string; sharedRoot: string }
     | undefined;
-  for (const minimumCoveragePercent of thresholds) {
-    if (options.signal?.aborted)
-      throw new PatternDiscoveryRunnerError('Pattern discovery was cancelled.', 499);
-    options.onProgress?.({
-      threshold: minimumCoveragePercent,
-      index: points.length,
-      total: thresholds.length,
-      phase: 'starting',
-    });
-    try {
-      const { report, execution } = await runPatternDiscoveryReport(database, {
-        ...options,
-        minimumCoveragePercent,
-        onProgress: options.onEngineProgress,
-      });
-      if (minimumCoveragePercent === thresholds[thresholds.length - 1]) {
-        finalReport = report;
-        finalExecution = execution;
-      }
-      const summary = report.dataset_summary ?? {};
-      const counts = report.status_counts;
-      const historicalStablePatterns = (report.patterns ?? []).filter(
-        (pattern) => pattern.historical_stability?.status === 'stable',
-      ).length;
-      const promotedPatterns = (report.patterns ?? []).filter(
-        (pattern) =>
-          pattern.validationStatus === 'validation survivor' &&
-          pattern.historical_stability?.status === 'stable',
-      ).length;
-      points.push({
-        minimumCoveragePercent,
-        wallets: Number(summary.wallets ?? 0),
-        rows: Number(summary.rows ?? 0),
-        independentEntries: Number(summary.independence_groups ?? 0),
-        validationSurvivors: Number(counts['validation survivor'] ?? 0),
-        discoveredCandidates: (report.patterns ?? []).length,
-        promotedPatterns,
-        historicalStablePatterns,
-        rejected: Number(counts.rejected ?? 0),
-        insufficientData: Number(counts['insufficient data'] ?? 0),
-        reportAvailable: true,
-      });
+  const unavailable = new Map<number, PatternDiscoverySensitivityPoint>();
+  const runWorker = async (): Promise<void> => {
+    while (true) {
+      const taskIndex = nextTask;
+      nextTask += 1;
+      const minimumCoveragePercent = missingThresholds[taskIndex];
+      if (minimumCoveragePercent === undefined) return;
+      if (options.signal?.aborted)
+        throw new PatternDiscoveryRunnerError('Pattern discovery was cancelled.', 499);
+      activeThresholds.add(minimumCoveragePercent);
       options.onProgress?.({
         threshold: minimumCoveragePercent,
-        index: points.length,
+        index: completed,
         total: thresholds.length,
-        phase: 'complete',
+        phase: 'starting',
       });
-    } catch (error) {
-      if (error instanceof PatternDiscoveryRunnerError && error.statusCode === 422) {
-        points.push({
+      options.onEngineProgress?.({
+        stage: 'running threshold',
+        message: `Running coverage levels in parallel: ${[...activeThresholds].sort((a, b) => a - b).join('%, ')}%.`,
+        thresholdsCompleted: completed,
+        thresholdsTotal: thresholds.length,
+        currentThreshold: minimumCoveragePercent,
+        activeThresholds: [...activeThresholds].sort((a, b) => a - b),
+        cpuWorkersActive: activeThresholds.size,
+        cpuWorkersTotal: workerTotal,
+        cpuThreadsPerWorker,
+        cacheHits,
+        heartbeatAt: new Date().toISOString(),
+      });
+      try {
+        const normalized = exports.get(minimumCoveragePercent);
+        if (!normalized)
+          throw new Error(`Missing shared ${minimumCoveragePercent}% normalized dataset.`);
+        const { report, execution } = await runPatternDiscoveryReport(database, {
+          ...options,
+          periodDays,
+          minN,
           minimumCoveragePercent,
-          wallets: 0,
-          rows: 0,
-          independentEntries: 0,
-          validationSurvivors: 0,
-          discoveredCandidates: 0,
-          promotedPatterns: 0,
-          historicalStablePatterns: 0,
-          rejected: 0,
-          insufficientData: 0,
-          reportAvailable: false,
-          error: error.message,
+          normalizedExport: normalized,
+          dataFingerprint,
+          cacheNormalizedExport: false,
+          pythonThreads: cpuThreadsPerWorker,
+          onProgress: (update) =>
+            options.onEngineProgress?.({
+              ...update,
+              currentThreshold: minimumCoveragePercent,
+              activeThresholds: [...activeThresholds].sort((a, b) => a - b),
+              cpuWorkersActive: activeThresholds.size,
+              cpuWorkersTotal: workerTotal,
+              cpuThreadsPerWorker,
+              thresholdsCompleted: completed,
+              thresholdsTotal: thresholds.length,
+              cacheHits,
+            }),
         });
+        reports.set(minimumCoveragePercent, report);
+        if (minimumCoveragePercent === thresholds[thresholds.length - 1]) {
+          finalReport = report;
+          finalExecution = execution;
+        }
+      } catch (error) {
+        if (error instanceof PatternDiscoveryRunnerError && error.statusCode === 422) {
+          unavailable.set(minimumCoveragePercent, {
+            minimumCoveragePercent,
+            wallets: 0,
+            rows: 0,
+            independentEntries: 0,
+            validationSurvivors: 0,
+            discoveredCandidates: 0,
+            promotedPatterns: 0,
+            historicalStablePatterns: 0,
+            rejected: 0,
+            insufficientData: 0,
+            reportAvailable: false,
+            error: error.message,
+          });
+        } else {
+          throw error;
+        }
+      } finally {
+        activeThresholds.delete(minimumCoveragePercent);
+        completed += 1;
         options.onProgress?.({
           threshold: minimumCoveragePercent,
-          index: points.length,
+          index: completed,
           total: thresholds.length,
           phase: 'complete',
         });
-        continue;
+        options.onEngineProgress?.({
+          stage: completed === thresholds.length ? 'promoting' : 'running threshold',
+          message:
+            completed === thresholds.length
+              ? 'All coverage levels finished; finalizing cross-coverage results.'
+              : `${completed}/${thresholds.length} coverage levels complete; ${activeThresholds.size} workers active.`,
+          thresholdsCompleted: completed,
+          thresholdsTotal: thresholds.length,
+          currentThreshold: null,
+          activeThresholds: [...activeThresholds].sort((a, b) => a - b),
+          cpuWorkersActive: activeThresholds.size,
+          cpuWorkersTotal: workerTotal,
+          cpuThreadsPerWorker,
+          cacheHits,
+          heartbeatAt: new Date().toISOString(),
+        });
       }
-      throw error;
     }
-  }
-  return {
+  };
+  await Promise.all(Array.from({ length: workerTotal }, () => runWorker()));
+
+  finalReport ??= reports.get(100);
+  const points = thresholds.map((threshold) => {
+    const report = reports.get(threshold);
+    return report ? sensitivityPoint(threshold, report) : unavailable.get(threshold)!;
+  });
+  const result: PatternDiscoverySensitivity = {
     thresholds: points,
     weighting: 'equal wallet total weight',
     note: 'Each wallet contributes equal total weight; multiple exits from one buy are aggregated into one independent entry before discovery.',
+    reportsByCoverage: Object.fromEntries(
+      [...reports.entries()].map(([threshold, report]) => [String(threshold), report]),
+    ),
+    crossCoveragePromotedPatterns: deriveCrossCoveragePromotedPatterns(reports),
     report: finalReport,
     execution: finalExecution,
   };
+  options.onEngineProgress?.({
+    stage: 'persisting results',
+    message: 'Saving the complete 11-level discovery result in SQLite.',
+    thresholdsCompleted: thresholds.length,
+    thresholdsTotal: thresholds.length,
+    cpuWorkersActive: 0,
+    cpuWorkersTotal: workerTotal,
+    cpuThreadsPerWorker,
+    cacheHits,
+    heartbeatAt: new Date().toISOString(),
+  });
+  writePatternDiscoveryCache(database, sensitivityCacheKey, dataFingerprint, result);
+  return result;
 };

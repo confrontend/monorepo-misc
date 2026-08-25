@@ -21,7 +21,10 @@ export const openDatabase = (databasePath = defaultDatabasePath): DatabaseSync =
   }
 
   const database = new DatabaseSync(databasePath);
-  database.exec('PRAGMA journal_mode = TRUNCATE;');
+  // Pattern Discovery runs in a separate process so the API can continue serving status.
+  // WAL lets that worker read evidence while the API persists small progress/cache updates.
+  if (databasePath !== ':memory:') database.exec('PRAGMA journal_mode = WAL;');
+  database.exec('PRAGMA busy_timeout = 5000;');
   database.exec('PRAGMA synchronous = FULL;');
   applyMigrations(database);
   return database;

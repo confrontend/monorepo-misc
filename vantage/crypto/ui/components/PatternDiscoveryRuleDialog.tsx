@@ -7,12 +7,25 @@ export type PatternDiscoveryRule = {
   conditions?: unknown;
   effect?: number | null;
   p_value?: number | null;
+  q_value?: number | null;
+  discovery_independence_groups?: number;
+  discovery_wallets?: number;
+  weighting?: string;
+  promoted?: boolean;
   discovery_sample_size?: number;
   validationStatus?: string;
+  historical_stability?: {
+    status?: string;
+    blocks?: number;
+    surviving_blocks?: number;
+  };
   validation?: {
     sample_size?: number;
     effect_vs_all?: number | null;
     coefficient?: number | null;
+    independence_groups?: number;
+    wallets?: number;
+    weighting?: string;
     reason?: string;
   };
   reason?: string;
@@ -24,7 +37,7 @@ const FEATURE_LABELS: Record<string, string> = {
   prior_wallet_buy_volume_usd: 'Previous wallet buy volume',
 };
 
-const labelFor = (feature?: string): string =>
+export const labelFor = (feature?: string): string =>
   FEATURE_LABELS[feature ?? ''] ?? feature?.replaceAll('_', ' ') ?? 'Unknown feature';
 
 const formatNumber = (value: number): string => {
@@ -34,7 +47,7 @@ const formatNumber = (value: number): string => {
   return value.toFixed(2);
 };
 
-const conditionText = (conditions: unknown): string => {
+export const conditionText = (conditions: unknown): string => {
   if (!Array.isArray(conditions) || conditions.length === 0) return 'No simple rule was reported.';
   const parts = conditions
     .map((condition) => {

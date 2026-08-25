@@ -15,7 +15,7 @@
     "predev": "prettier --write package.json src ui extension",
     "dev:api": "tsx watch --env-file-if-exists=.env src/scripts/server.ts",
     "dev:ui": "vite --config vite.config.ts --host",
-    "graph:watch": "uvx --from graphifyy --with watchdog graphify watch .",
+    "graph:watch": "uv --cache-dir .uv-cache-watch tool run --from graphifyy --with watchdog graphify watch .",
     "lint": "eslint .",
     "lint:report": "node scripts/eslint-report.mjs",
     "lint:fix": "eslint . --fix --format compact",

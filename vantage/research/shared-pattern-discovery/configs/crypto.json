@@ -1,34 +1,160 @@
 {
   "project": "crypto",
-  "version": "gmgn-v3-pre-event-only",
+  "version": "gmgn-v4-historical-context",
   "feature_source": "features",
-  "feature_policy": "Only the explicit row.features object is eligible for discovery. Identifiers and point-in-time aggregates calculated strictly before each buy are allowed; outcomes, returns, delays, holding duration, fees, and post-event matching fields are rejected.",
+  "feature_policy": "Only the explicit row.features object is eligible for discovery. Identifiers, event-time context, and point-in-time aggregates calculated strictly before each buy are allowed; outcomes, returns, delays, holding duration, fees, coverage, current snapshots, and post-event matching fields are rejected. GMGN tags and true historical liquidity remain unavailable until source coverage exists.",
   "allow_list": [
-    {"name": "wallet_address", "justification": "Wallet identity is the predeclared CopyTrade independence group, not a return-based selection feature."},
-    {"name": "token_symbol", "justification": "Token label is copied from the normalized GMGN round-trip record."},
-    {"name": "signal_type", "justification": "Source-normalized signal type is stored at capture."},
-    {"name": "token_address", "justification": "Token identity is part of the captured source record."},
-    {"name": "chain", "justification": "Chain identity is part of the captured source record."},
-    {"name": "prior_wallet_trade_count", "justification": "Count of stored wallet buy/sell rows strictly before the current buy event."},
-    {"name": "prior_token_trade_count", "justification": "Count of stored token buy/sell rows strictly before the current buy event."},
-    {"name": "prior_wallet_buy_volume_usd", "justification": "Sum of positive recorded buy cost_usd for this wallet strictly before the current buy event."},
-    {"name": "prior_wallet_buy_count", "justification": "Count of wallet buy rows strictly before the current buy event."},
-    {"name": "prior_wallet_sell_count", "justification": "Count of wallet sell rows strictly before the current buy event."},
-    {"name": "prior_wallet_sell_volume_usd", "justification": "Sum of recorded wallet sell volume strictly before the current buy event."},
-    {"name": "prior_wallet_realized_profit_usd", "justification": "Realized wallet profit accumulated strictly before the current buy event."},
-    {"name": "prior_wallet_median_return_percent", "justification": "Median return of earlier wallet trades strictly before the current buy event."},
-    {"name": "prior_wallet_win_rate_percent", "justification": "Win rate of earlier wallet trades strictly before the current buy event."},
-    {"name": "prior_wallet_positive_day_percent", "justification": "Share of earlier wallet trading days with positive results."},
-    {"name": "prior_wallet_best_token_profit_share_percent", "justification": "Largest earlier token profit as a share of earlier wallet profit."},
-    {"name": "prior_wallet_median_hold_seconds", "justification": "Median holding time of earlier wallet trades strictly before the current buy event."},
-    {"name": "prior_wallet_under_15_seconds_percent", "justification": "Share of earlier wallet trades held under 15 seconds."},
-    {"name": "prior_wallet_paired_trade_count", "justification": "Count of earlier wallet trades with a matched buy/sell pair."}
+    {
+      "name": "wallet_address",
+      "justification": "Wallet identity is the predeclared CopyTrade independence group, not a return-based selection feature."
+    },
+    {
+      "name": "token_symbol",
+      "justification": "Token label is copied from the normalized GMGN round-trip record."
+    },
+    {
+      "name": "signal_type",
+      "justification": "Source-normalized signal type is stored at capture."
+    },
+    {
+      "name": "token_address",
+      "justification": "Token identity is part of the captured source record."
+    },
+    {
+      "name": "chain",
+      "justification": "Chain identity is part of the captured source record."
+    },
+    {
+      "name": "prior_wallet_trade_count",
+      "justification": "Count of stored wallet buy/sell rows strictly before the current buy event."
+    },
+    {
+      "name": "prior_token_trade_count",
+      "justification": "Count of stored token buy/sell rows strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_buy_volume_usd",
+      "justification": "Sum of positive recorded buy cost_usd for this wallet strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_buy_count",
+      "justification": "Count of wallet buy rows strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_sell_count",
+      "justification": "Count of wallet sell rows strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_sell_volume_usd",
+      "justification": "Sum of recorded wallet sell volume strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_realized_profit_usd",
+      "justification": "Realized wallet profit accumulated strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_median_return_percent",
+      "justification": "Median return of earlier wallet trades strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_win_rate_percent",
+      "justification": "Win rate of earlier wallet trades strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_positive_day_percent",
+      "justification": "Share of earlier wallet trading days with positive results."
+    },
+    {
+      "name": "prior_wallet_best_token_profit_share_percent",
+      "justification": "Largest earlier token profit as a share of earlier wallet profit."
+    },
+    {
+      "name": "prior_wallet_median_hold_seconds",
+      "justification": "Median holding time of earlier wallet trades strictly before the current buy event."
+    },
+    {
+      "name": "prior_wallet_under_15_seconds_percent",
+      "justification": "Share of earlier wallet trades held under 15 seconds."
+    },
+    {
+      "name": "prior_wallet_paired_trade_count",
+      "justification": "Count of earlier wallet trades with a matched buy/sell pair."
+    },
+    {
+      "name": "prior_wallet_distinct_token_count",
+      "justification": "Number of distinct tokens traded strictly before the current buy."
+    },
+    {
+      "name": "prior_wallet_trades_per_active_day",
+      "justification": "Historical wallet trade count divided by active trading days before the current buy."
+    },
+    {
+      "name": "prior_wallet_median_buy_size_usd",
+      "justification": "Median earlier wallet buy size before the current buy."
+    },
+    {
+      "name": "prior_wallet_return_volatility_percent",
+      "justification": "Standard deviation of earlier realized returns before the current buy."
+    },
+    {
+      "name": "prior_wallet_top3_token_profit_share_percent",
+      "justification": "Share of earlier positive wallet profit concentrated in the top three tokens."
+    },
+    {
+      "name": "prior_token_buy_count",
+      "justification": "Earlier buys of the current token before the current buy."
+    },
+    {
+      "name": "prior_token_sell_count",
+      "justification": "Earlier sells of the current token before the current buy."
+    },
+    {
+      "name": "prior_token_buy_volume_usd",
+      "justification": "Earlier buy volume for the current token before the current buy."
+    },
+    {
+      "name": "prior_token_sell_volume_usd",
+      "justification": "Earlier sell volume for the current token before the current buy."
+    },
+    {
+      "name": "token_market_cap_at_entry",
+      "justification": "Latest source-observed GMGN market cap strictly before the copied buy."
+    },
+    {
+      "name": "token_age_seconds_at_entry",
+      "justification": "Elapsed time from the first historical token trade to the copied buy."
+    },
+    {
+      "name": "token_launchpad_platform",
+      "justification": "Launchpad captured on the source trade at the copied buy event."
+    },
+    {
+      "name": "entry_trade_amount_usd",
+      "justification": "Source trade size observed at the copied buy event; a liquidity/activity proxy, not pool liquidity."
+    }
   ],
   "reject_by_default": [
-    "captured_at", "query_market_cap", "query_ath", "query_cur_data", "current_wallet_statistics",
-    "post_event_rank", "later_roster_membership", "dune_outcome", "avg_holding_period",
-    "hold_seconds", "wallet_return_percent", "entry_trade_amount_usd", "exit_trade_amount_usd",
-    "edge_kept_percent", "entry_gap_seconds", "exit_gap_seconds", "gas_fee_usd", "outcome_at",
-    "coverage_rate_percent", "coverage_status", "benchmark_return", "excess_return", "net_return_after_costs"
+    "captured_at",
+    "query_market_cap",
+    "query_ath",
+    "query_cur_data",
+    "current_wallet_statistics",
+    "post_event_rank",
+    "later_roster_membership",
+    "dune_outcome",
+    "avg_holding_period",
+    "hold_seconds",
+    "wallet_return_percent",
+    "exit_trade_amount_usd",
+    "edge_kept_percent",
+    "entry_gap_seconds",
+    "exit_gap_seconds",
+    "gas_fee_usd",
+    "outcome_at",
+    "coverage_rate_percent",
+    "coverage_status",
+    "benchmark_return",
+    "excess_return",
+    "net_return_after_costs"
   ]
 }

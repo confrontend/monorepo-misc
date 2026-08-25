@@ -468,13 +468,14 @@ export const runCopySimulationDuneBatch = async (
     statusPayload: resultRaw,
   });
   if (!resultResponse.ok) throw new Error(`Dune results HTTP ${resultResponse.status}`);
+  const parsedResult: unknown = JSON.parse(resultRaw);
 
   const { archivePath, sha256 } = archiveJsonWithHash('copy-simulation', 'copy-simulation', runId, {
     runId,
     requestedAt,
     execution: executionRaw,
     query,
-    result: JSON.parse(resultRaw),
+    result: parsedResult,
   });
   const completedAt = new Date().toISOString();
   database
@@ -484,8 +485,7 @@ export const runCopySimulationDuneBatch = async (
     .run(resultRaw, archivePath, sha256, completedAt, runId);
 
   const rows =
-    (JSON.parse(resultRaw) as { result?: { rows?: Array<Record<string, unknown>> } }).result
-      ?.rows ?? [];
+    (parsedResult as { result?: { rows?: Array<Record<string, unknown>> } }).result?.rows ?? [];
   const uniqueMatches = rowsToMatches(uniqueTargets, rows, matchSource);
   const matchByKey = new Map(
     uniqueMatches.map((match) => {
@@ -635,6 +635,7 @@ export const reconcileStuckCopySimulationRuns = async (
       continue;
     }
 
+    const parsedResult: unknown = JSON.parse(resultRaw);
     const { archivePath, sha256 } = archiveJsonWithHash(
       'copy-simulation',
       'copy-simulation',
@@ -646,7 +647,7 @@ export const reconcileStuckCopySimulationRuns = async (
         query: run.querySql,
         reconciledFrom: 'status-poll',
         statusAtReconcile: statusBody,
-        result: JSON.parse(resultRaw),
+        result: parsedResult,
       },
     );
     database
@@ -659,16 +660,31 @@ export const reconcileStuckCopySimulationRuns = async (
   return summary;
 };
 
-/** Reads every completed run's matches, merged by trade id (a trade covered by more than one
- *  run keeps its earliest completed match — append-only history, same convention as
- *  readAllDuneOutcomes). */
-export const readAllCopySimulationMatches = (
+export type CopySimulationMatchIndexProgress = {
+  completedRuns: number;
+  totalRuns: number;
+  currentRunId: number | null;
+  indexedTradeLegs: number;
+};
+
+/**
+ * Converts legacy Dune JSON blobs into compact, indexed trade-leg rows. A legacy run is parsed
+ * once; subsequent reports never need to deserialize its raw_result again. New completed runs
+ * are indexed lazily on the first report that can use them.
+ */
+export const indexMissingCopySimulationMatches = (
   database: DatabaseSync,
-): Map<number, CopySimulationMatch> => {
+  onProgress?: (progress: CopySimulationMatchIndexProgress) => void,
+): number => {
   const runs = database
     .prepare(
-      `SELECT id, trade_refs AS tradeRefs, raw_result AS rawResult, completed_at AS completedAt, match_source AS matchSource
-     FROM copytrade_copy_simulation_runs WHERE status = 'completed' AND raw_result IS NOT NULL ORDER BY id ASC`,
+      `SELECT r.id, r.trade_refs AS tradeRefs, r.raw_result AS rawResult,
+              r.completed_at AS completedAt, r.match_source AS matchSource
+       FROM copytrade_copy_simulation_runs r
+       LEFT JOIN copytrade_copy_simulation_match_index_runs indexed_run
+         ON indexed_run.run_id = r.id
+       WHERE r.status = 'completed' AND r.raw_result IS NOT NULL AND indexed_run.run_id IS NULL
+       ORDER BY r.id ASC`,
     )
     .all() as unknown as Array<{
     id: number;
@@ -677,56 +693,143 @@ export const readAllCopySimulationMatches = (
     completedAt: string | null;
     matchSource: CopySimulationMatchSource | null;
   }>;
-  const merged = new Map<number, CopySimulationMatch>();
-  for (const run of runs) {
-    let ids: number[];
+  if (!runs.length) return 0;
+
+  const insertMatch = database.prepare(
+    `INSERT OR REPLACE INTO copytrade_copy_simulation_matches
+       (run_id, trade_id, matched_trade_at, matched_price_usd, matched_tx_id,
+        matched_trade_amount_usd, status, match_source, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const markIndexed = database.prepare(
+    `INSERT OR REPLACE INTO copytrade_copy_simulation_match_index_runs
+       (run_id, indexed_at, trade_count)
+     VALUES (?, ?, ?)`,
+  );
+  let indexedTradeLegs = 0;
+  onProgress?.({ completedRuns: 0, totalRuns: runs.length, currentRunId: null, indexedTradeLegs });
+
+  for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
+    const run = runs[runIndex];
+    let ids: number[] = [];
+    let rows: Array<Record<string, unknown>> = [];
     try {
       ids = JSON.parse(run.tradeRefs) as number[];
     } catch {
-      continue;
+      ids = [];
     }
-    if (!ids.length) continue;
-    let rows: Array<Record<string, unknown>> = [];
     try {
       rows =
         (JSON.parse(run.rawResult) as { result?: { rows?: Array<Record<string, unknown>> } }).result
           ?.rows ?? [];
     } catch {
-      continue;
+      rows = [];
     }
     const byTradeId = new Map(rows.map((row) => [Number(row.trade_id), row]));
     const source = run.matchSource === 'wide_window' ? 'wide_window' : 'precise';
-    for (const id of ids) {
-      const row = byTradeId.get(id);
-      const matchedTradeAt =
-        row && typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null;
-      const priceUsd = row && typeof row.price_usd === 'number' ? row.price_usd : null;
-      const next: CopySimulationMatch = {
-        tradeId: id,
-        matchedTradeAt,
-        matchedPriceUsd: priceUsd,
-        matchedTxId: row && typeof row.matched_tx_id === 'string' ? row.matched_tx_id : null,
-        gapSeconds: null, // recomputed by the caller against that trade's own delayed target
-        status: matchedTradeAt !== null && priceUsd !== null ? 'matched' : 'no_trade_in_window',
-        // Older archived runs (before this field was added) simply won't have this column —
-        // absent, not zero, exactly like any other pre-migration gap in this project's data.
-        matchedTradeAmountUsd: row && typeof row.amount_usd === 'number' ? row.amount_usd : null,
-        matchSource: source,
-      };
-      const previous = merged.get(id);
-      // A wide-window no-match is terminal for the controlled retry path. Prefer it over an
-      // earlier precise no-match so a later run cannot keep treating the same target as retryable
-      // forever. A precise match still wins over a wide match for provenance quality.
-      const score = (match: CopySimulationMatch): number =>
-        match.status === 'matched'
-          ? match.matchSource === 'precise'
-            ? 0
-            : 1
-          : match.matchSource === 'wide_window'
-            ? 2
-            : 3;
-      if (!previous || score(next) < score(previous)) merged.set(id, next);
+    database.exec('BEGIN IMMEDIATE;');
+    try {
+      for (const tradeId of ids) {
+        const row = byTradeId.get(tradeId);
+        const matchedTradeAt =
+          row && typeof row.matched_trade_at === 'string' ? row.matched_trade_at : null;
+        const priceUsd = row && typeof row.price_usd === 'number' ? row.price_usd : null;
+        insertMatch.run(
+          run.id,
+          tradeId,
+          matchedTradeAt,
+          priceUsd,
+          row && typeof row.matched_tx_id === 'string' ? row.matched_tx_id : null,
+          row && typeof row.amount_usd === 'number' ? row.amount_usd : null,
+          matchedTradeAt !== null && priceUsd !== null ? 'matched' : 'no_trade_in_window',
+          source,
+          run.completedAt,
+        );
+      }
+      markIndexed.run(run.id, new Date().toISOString(), ids.length);
+      database.exec('COMMIT;');
+    } catch (error) {
+      database.exec('ROLLBACK;');
+      throw error;
     }
+    indexedTradeLegs += ids.length;
+    onProgress?.({
+      completedRuns: runIndex + 1,
+      totalRuns: runs.length,
+      currentRunId: run.id,
+      indexedTradeLegs,
+    });
+  }
+  return indexedTradeLegs;
+};
+
+/** Reads indexed completed-run matches, merged by trade id. The optional trade-id scope keeps
+ * report generation proportional to the requested wallets instead of the entire Dune archive. */
+export const readAllCopySimulationMatches = (
+  database: DatabaseSync,
+  tradeIds?: Iterable<number>,
+  onIndexProgress?: (progress: CopySimulationMatchIndexProgress) => void,
+): Map<number, CopySimulationMatch> => {
+  indexMissingCopySimulationMatches(database, onIndexProgress);
+  const requested = tradeIds ? [...new Set(tradeIds)] : null;
+  if (requested?.length === 0) return new Map();
+  type IndexedMatchRow = {
+    runId: number;
+    tradeId: number;
+    matchedTradeAt: string | null;
+    matchedPriceUsd: number | null;
+    matchedTxId: string | null;
+    matchedTradeAmountUsd: number | null;
+    status: 'matched' | 'no_trade_in_window';
+    matchSource: CopySimulationMatchSource;
+  };
+  const select = (where = '') =>
+    `SELECT run_id AS runId, trade_id AS tradeId, matched_trade_at AS matchedTradeAt,
+            matched_price_usd AS matchedPriceUsd, matched_tx_id AS matchedTxId,
+            matched_trade_amount_usd AS matchedTradeAmountUsd, status,
+            match_source AS matchSource
+     FROM copytrade_copy_simulation_matches ${where} ORDER BY run_id ASC`;
+  const rows: IndexedMatchRow[] = [];
+  if (requested) {
+    const chunkSize = 500;
+    for (let offset = 0; offset < requested.length; offset += chunkSize) {
+      const chunk = requested.slice(offset, offset + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      rows.push(
+        ...(database
+          .prepare(select(`WHERE trade_id IN (${placeholders})`))
+          .all(...chunk) as unknown as IndexedMatchRow[]),
+      );
+    }
+    rows.sort((left, right) => left.runId - right.runId);
+  } else {
+    rows.push(...(database.prepare(select()).all() as unknown as IndexedMatchRow[]));
+  }
+  const merged = new Map<number, CopySimulationMatch>();
+  for (const row of rows) {
+    const next: CopySimulationMatch = {
+      tradeId: row.tradeId,
+      matchedTradeAt: row.matchedTradeAt,
+      matchedPriceUsd: row.matchedPriceUsd,
+      matchedTxId: row.matchedTxId,
+      gapSeconds: null, // recomputed by the caller against that trade's own delayed target
+      status: row.status,
+      matchedTradeAmountUsd: row.matchedTradeAmountUsd,
+      matchSource: row.matchSource,
+    };
+    const previous = merged.get(row.tradeId);
+    // A wide-window no-match is terminal for the controlled retry path. Prefer it over an
+    // earlier precise no-match so a later run cannot keep treating the same target as retryable
+    // forever. A precise match still wins over a wide match for provenance quality.
+    const score = (match: CopySimulationMatch): number =>
+      match.status === 'matched'
+        ? match.matchSource === 'precise'
+          ? 0
+          : 1
+        : match.matchSource === 'wide_window'
+          ? 2
+          : 3;
+    if (!previous || score(next) < score(previous)) merged.set(row.tradeId, next);
   }
   return merged;
 };

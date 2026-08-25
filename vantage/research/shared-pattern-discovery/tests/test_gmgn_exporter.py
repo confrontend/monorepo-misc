@@ -34,7 +34,7 @@ class GmgnExporterTests(unittest.TestCase):
             self.assertEqual(result["metadata"]["adapter"], "shared_pattern_discovery.exporters.gmgn")
             self.assertFalse(result["metadata"]["shared_engine_database_opened"])
             self.assertEqual(result["metadata"]["feature_source"], "features")
-            self.assertEqual(result["metadata"]["feature_allowlist_version"], "gmgn-v3-pre-event-only")
+            self.assertEqual(result["metadata"]["feature_allowlist_version"], "gmgn-v4-historical-context")
             self.assertEqual(json.loads(output.read_text())["rows"][0]["event_id"], "e1")
 
     def test_adapter_refuses_cross_project_or_wrong_coverage_scope_input(self):

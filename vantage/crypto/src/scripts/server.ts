@@ -106,19 +106,18 @@ import {
 import {
   DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
   MAX_PATTERN_DISCOVERY_PERIOD_DAYS,
+  MAX_PATTERN_DISCOVERY_WALLETS,
   patternDiscoveryCacheKey,
   readPatternDiscoveryCache,
   readPatternDiscoveryDataFingerprint,
-  readPatternDiscoveryExport,
-  writePatternDiscoveryCache,
 } from '../copytrade/discovery/patternDiscovery.js';
 import {
   PATTERN_DISCOVERY_COVERAGE_THRESHOLDS,
-  PatternDiscoveryRunnerError,
-  runPatternDiscoveryReport,
-  runPatternDiscoverySensitivity,
-  type PatternDiscoveryProgress,
+  deriveCrossCoveragePromotedPatterns,
+  validatePatternDiscoveryRunInput,
+  type PatternDiscoverySensitivity,
 } from '../copytrade/discovery/patternDiscoveryRunner.js';
+import { PatternDiscoveryCoordinator } from '../copytrade/discovery/patternDiscoveryCoordinator.js';
 import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
@@ -132,28 +131,6 @@ import { API_CATALOG } from '../apiCatalog.js';
  *  must cover the whole roster (well above its current ~113-wallet size), unlike /winners's
  *  deliberate top-25 cutoff. */
 const SCRUTINY_ROSTER_LIMIT = 500;
-
-let patternDiscoveryProgress: PatternDiscoveryProgress = {
-  status: 'idle',
-  stage: 'complete',
-  message: 'No discovery run is active.',
-  thresholdsTotal: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length,
-  thresholdsCompleted: 0,
-  currentThreshold: null,
-  startedAt: null,
-  completedAt: null,
-};
-
-// Discovery is deliberately independent of the browser request that started it. A tab
-// refresh or dev-server reconnect must not cancel a long local run; cancellation is explicit
-// through /pattern-discovery/stop. Completed coverage levels are persisted in the report cache,
-// so a stopped run can safely continue on the next Run action.
-let patternDiscoveryAbortController: AbortController | null = null;
-let patternDiscoveryRunInFlight = false;
-
-const setPatternDiscoveryProgress = (update: Partial<PatternDiscoveryProgress>) => {
-  patternDiscoveryProgress = { ...patternDiscoveryProgress, ...update };
-};
 
 import type { DunePollUpdate } from '../copytrade/simulation/copySimulationDune.js';
 import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
@@ -189,6 +166,16 @@ if (interruptedFetches > 0 && process.env.CRYPTO_AUTO_RESUME_INTERRUPTED_FETCHES
   }
 }
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const serverSourcePath = fileURLToPath(import.meta.url);
+const patternDiscoveryWorkerModule = path.join(
+  path.dirname(serverSourcePath),
+  `patternDiscoveryWorker${serverSourcePath.endsWith('.ts') ? '.ts' : '.js'}`,
+);
+const patternDiscoveryCoordinator = new PatternDiscoveryCoordinator(
+  database,
+  patternDiscoveryWorkerModule,
+  projectRoot,
+);
 const uiRoot = path.join(projectRoot, 'dist-ui');
 const port = Number(process.env.CRYPTO_RESEARCH_PORT ?? 4173);
 const maxBodyBytes = 512 * 1024 * 1024;
@@ -731,10 +718,14 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           limit,
         );
         const cached = readPatternDiscoveryCache(database, cacheKey, fingerprint);
-        const value =
-          cached ?? readPatternDiscoveryExport(database, periodDays, limit, minimumCoveragePercent);
-        if (!cached) writePatternDiscoveryCache(database, cacheKey, fingerprint, value);
-        respond(200, value);
+        if (!cached) {
+          respond(404, {
+            error:
+              'No cached export exists for the current evidence. Run shared discovery first; the API server will not rebuild this dataset synchronously.',
+          });
+          return;
+        }
+        respond(200, cached);
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -744,14 +735,87 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       request.method === 'GET' &&
       requestUrl.pathname === '/api/copytrade/pattern-discovery/status'
     ) {
-      respond(200, patternDiscoveryProgress);
+      respond(200, patternDiscoveryCoordinator.status());
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      requestUrl.pathname === '/api/copytrade/pattern-discovery/run/result'
+    ) {
+      try {
+        const { periodDays, minN } = validatePatternDiscoveryRunInput(
+          Number(
+            requestUrl.searchParams.get('periodDays') ?? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
+          ),
+          Number(requestUrl.searchParams.get('minN') ?? 10),
+        );
+        const fingerprint = readPatternDiscoveryDataFingerprint(database);
+        const result = readPatternDiscoveryCache<PatternDiscoverySensitivity>(
+          database,
+          patternDiscoveryCacheKey(
+            'sensitivity',
+            periodDays,
+            PATTERN_DISCOVERY_COVERAGE_THRESHOLDS[0],
+            minN,
+            MAX_PATTERN_DISCOVERY_WALLETS,
+          ),
+          fingerprint,
+        );
+        if (!result) {
+          respond(404, { error: 'No completed discovery result exists for the current evidence.' });
+          return;
+        }
+        // Older sensitivity caches contain only counts. Enrich them from the already-cached
+        // per-threshold reports so the UI can show the actual promoted/stable rules without
+        // rerunning discovery or changing any scoring logic.
+        const reportsByCoverage = result.reportsByCoverage ?? {};
+        for (const threshold of PATTERN_DISCOVERY_COVERAGE_THRESHOLDS) {
+          const key = String(threshold);
+          if (reportsByCoverage[key]) continue;
+          const report = readPatternDiscoveryCache<
+            NonNullable<PatternDiscoverySensitivity['report']>
+          >(
+            database,
+            patternDiscoveryCacheKey(
+              'report',
+              periodDays,
+              threshold,
+              minN,
+              MAX_PATTERN_DISCOVERY_WALLETS,
+            ),
+            fingerprint,
+          );
+          if (report) reportsByCoverage[key] = report;
+        }
+        const hydratedResult: PatternDiscoverySensitivity = {
+          ...result,
+          reportsByCoverage,
+          crossCoveragePromotedPatterns:
+            result.crossCoveragePromotedPatterns ??
+            deriveCrossCoveragePromotedPatterns(
+              new Map(
+                Object.entries(reportsByCoverage).map(([threshold, report]) => [
+                  Number(threshold),
+                  report,
+                ]),
+              ),
+            ),
+        };
+        respond(200, {
+          report: hydratedResult.report,
+          execution: result.execution,
+          sensitivity: hydratedResult,
+        });
+      } catch (error) {
+        respond(400, { error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
     if (
       request.method === 'POST' &&
       requestUrl.pathname === '/api/copytrade/pattern-discovery/run/report'
     ) {
-      if (patternDiscoveryRunInFlight) {
+      if (patternDiscoveryCoordinator.isActive()) {
         respond(409, { error: 'Pattern Discovery is already running.' });
         return;
       }
@@ -768,95 +832,17 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         respond(400, { error: error instanceof Error ? error.message : String(error) });
         return;
       }
-      const periodDays =
-        payload.periodDays === undefined
-          ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS
-          : Number(payload.periodDays);
-      const minN = payload.minN === undefined ? 10 : Number(payload.minN);
-      const abortController = new AbortController();
-      patternDiscoveryAbortController = abortController;
-      patternDiscoveryRunInFlight = true;
-      const startedAt = new Date().toISOString();
-      setPatternDiscoveryProgress({
-        status: 'preparing',
-        stage: 'loading evidence',
-        message: `Preparing one shared discovery run across ${PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.join('%, ')}% coverage.`,
-        thresholdsTotal: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length,
-        thresholdsCompleted: 0,
-        currentThreshold: null,
-        startedAt,
-        completedAt: null,
-      });
       try {
-        const sensitivity = await runPatternDiscoverySensitivity(database, {
-          projectRoot,
-          periodDays,
-          minN,
-          signal: abortController.signal,
-          onProgress: ({ threshold, index, total, phase }) =>
-            setPatternDiscoveryProgress({
-              status: phase === 'complete' && index + 1 === total ? 'complete' : 'running',
-              stage: phase === 'complete' && index + 1 === total ? 'complete' : 'running threshold',
-              message:
-                phase === 'starting'
-                  ? `Coverage ${index + 1} / ${total} — running ${threshold}%…`
-                  : `Coverage ${index + 1} / ${total} — ${threshold}% complete; preparing the next level…`,
-              thresholdsCompleted: phase === 'complete' ? index + 1 : index,
-              thresholdsTotal: total,
-              currentThreshold: phase === 'complete' && index + 1 === total ? null : threshold,
-              completedAt:
-                phase === 'complete' && index + 1 === total ? new Date().toISOString() : null,
-            }),
-          onEngineProgress: (update) =>
-            setPatternDiscoveryProgress({
-              ...update,
-              status: 'running',
-              heartbeatAt: new Date().toISOString(),
-            }),
-        });
-        setPatternDiscoveryProgress({
-          status: 'complete',
-          stage: 'complete',
-          message: 'Shared discovery finished for every coverage threshold.',
-          thresholdsCompleted: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length,
-          currentThreshold: null,
-          completedAt: new Date().toISOString(),
-        });
-        respond(200, {
-          report: sensitivity.report,
-          execution: sensitivity.execution,
-          sensitivity,
-        });
+        const run = patternDiscoveryCoordinator.start(
+          payload.periodDays === undefined
+            ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS
+            : Number(payload.periodDays),
+          payload.minN === undefined ? 10 : Number(payload.minN),
+        );
+        respond(202, { started: true, runId: run.runId, progress: run.progress });
       } catch (error) {
-        if (abortController.signal.aborted) {
-          setPatternDiscoveryProgress({
-            status: 'stopped',
-            stage: 'stopped',
-            message: 'Discovery stopped. Completed threshold results remain cached.',
-            completedAt: new Date().toISOString(),
-            currentThreshold: null,
-          });
-          if (!response.destroyed && !response.writableEnded) {
-            respond(499, {
-              error: 'Discovery stopped. Completed coverage-level results remain cached; run again to resume.',
-            });
-          }
-          return;
-        }
-        setPatternDiscoveryProgress({
-          status: 'error',
-          stage: 'error',
-          message: error instanceof Error ? error.message : String(error),
-          completedAt: new Date().toISOString(),
-          currentThreshold: null,
-        });
-        const statusCode = error instanceof PatternDiscoveryRunnerError ? error.statusCode : 500;
-        if (!response.destroyed && !response.writableEnded) {
-          respond(statusCode, { error: error instanceof Error ? error.message : String(error) });
-        }
-      } finally {
-        patternDiscoveryRunInFlight = false;
-        patternDiscoveryAbortController = null;
+        const statusCode = /already running/i.test(String(error)) ? 409 : 400;
+        respond(statusCode, { error: error instanceof Error ? error.message : String(error) });
       }
       return;
     }
@@ -864,22 +850,15 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       request.method === 'POST' &&
       requestUrl.pathname === '/api/copytrade/pattern-discovery/stop'
     ) {
-      if (!patternDiscoveryRunInFlight || !patternDiscoveryAbortController) {
-        respond(409, { error: 'No Pattern Discovery run is active.' });
-        return;
+      try {
+        patternDiscoveryCoordinator.stop();
+        respond(202, {
+          stopping: true,
+          message: 'Stop requested. Completed coverage-level results remain cached.',
+        });
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
       }
-      patternDiscoveryProgress = {
-        ...patternDiscoveryProgress,
-        status: 'running',
-        stage: 'running engine',
-        message: 'Stopping discovery after the current local operation…',
-        heartbeatAt: new Date().toISOString(),
-      };
-      patternDiscoveryAbortController.abort();
-      respond(202, {
-        stopping: true,
-        message: 'Stop requested. Completed coverage-level results remain cached.',
-      });
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch') {

@@ -19,6 +19,7 @@ import {
   readPatternDiscoveryDataFingerprint,
 } from './discovery/patternDiscovery.js';
 import { PATTERN_DISCOVERY_COVERAGE_THRESHOLDS } from './discovery/patternDiscoveryRunner.js';
+import { weightCategoryForFeature } from './decisionCategories.js';
 
 const NEUTRAL_DECISION_WEIGHTS = {
   edge: 0.25,
@@ -119,21 +120,6 @@ type CachedDiscoveryReport = {
     historical_stability?: { status?: string };
   }>;
   dataset_summary?: { wallets?: number };
-};
-
-const weightCategoryForFeature = (feature: string): keyof ExperimentalDecisionWeights | null => {
-  if (feature.includes('median_return') || feature.includes('realized_profit')) return 'edge';
-  if (feature.includes('positive_day') || feature.includes('win_rate')) return 'consistency';
-  if (feature.includes('best_token_profit_share') || feature.includes('concentration'))
-    return 'robustness';
-  if (
-    feature.includes('median_hold') ||
-    feature.includes('under_15_seconds') ||
-    feature.includes('buy_count') ||
-    feature.includes('sell_count')
-  )
-    return 'copyability';
-  return null;
 };
 
 /**

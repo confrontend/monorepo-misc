@@ -17,6 +17,12 @@ PRE_EVENT_FEATURES = {
     "prior_wallet_win_rate_percent", "prior_wallet_positive_day_percent",
     "prior_wallet_best_token_profit_share_percent", "prior_wallet_median_hold_seconds",
     "prior_wallet_under_15_seconds_percent", "prior_wallet_paired_trade_count",
+    "prior_wallet_distinct_token_count", "prior_wallet_trades_per_active_day",
+    "prior_wallet_median_buy_size_usd", "prior_wallet_return_volatility_percent",
+    "prior_wallet_top3_token_profit_share_percent", "prior_token_buy_count",
+    "prior_token_sell_count", "prior_token_buy_volume_usd", "prior_token_sell_volume_usd",
+    "token_market_cap_at_entry", "token_age_seconds_at_entry", "token_launchpad_platform",
+    "entry_trade_amount_usd",
 }
 
 
@@ -76,7 +82,7 @@ def normalize_gmgn_export(input_path: str | Path, output_path: str | Path, *, pr
             raise GmgnExportError(f"row {number}: features contains post-event or disallowed fields: {', '.join(unexpected_features)}")
     metadata["project"] = PROJECT
     metadata["outcome"] = OUTCOME
-    metadata["feature_allowlist_version"] = "gmgn-v3-pre-event-only"
+    metadata["feature_allowlist_version"] = "gmgn-v4-historical-context"
     metadata["feature_source"] = "features"
     metadata["adapter"] = "shared_pattern_discovery.exporters.gmgn"
     metadata["adapter_input"] = str(source)

@@ -38,6 +38,13 @@ import {
   PatternDiscoveryRuleDialog,
   type PatternDiscoveryRule,
 } from './components/PatternDiscoveryRuleDialog.js';
+import { PatternDiscoveryPromotedPatterns } from './components/PatternDiscoveryPromotedPatterns.js';
+import {
+  PatternDiscoveryProgressPanel,
+  type PatternDiscoveryProgressView,
+} from './components/PatternDiscoveryProgressPanel.js';
+import { PatternDiscoveryRunSummary } from './components/PatternDiscoveryRunSummary.js';
+import { UI_STRINGS } from './strings.js';
 import { buildEvidenceReason, buildUsableCoverageText } from './selectors/decisionSelectors.js';
 import { useRosterStore } from './stores/rosterStore.js';
 
@@ -503,9 +510,23 @@ type PatternDiscoveryReport = {
     feature?: string;
     conditions?: unknown;
     effect?: number | null;
+    p_value?: number | null;
+    q_value?: number | null;
     discovery_sample_size?: number;
+    discovery_independence_groups?: number;
+    discovery_wallets?: number;
+    weighting?: string;
+    promoted?: boolean;
     validationStatus?: string;
-    validation?: { sample_size?: number; effect_vs_all?: number | null; reason?: string };
+    validation?: {
+      sample_size?: number;
+      effect_vs_all?: number | null;
+      coefficient?: number | null;
+      independence_groups?: number;
+      wallets?: number;
+      weighting?: string;
+      reason?: string;
+    };
     historical_stability?: {
       status?: string;
       blocks?: number;
@@ -558,41 +579,23 @@ type PatternDiscoverySensitivity = {
   thresholds: PatternDiscoverySensitivityPoint[];
   weighting: 'equal wallet total weight';
   note: string;
+  reportsByCoverage?: Record<string, PatternDiscoveryReport>;
+  crossCoveragePromotedPatterns?: Array<{
+    pattern: PatternDiscoveryReport['patterns'][number];
+    supportingCoveragePercent: number[];
+  }>;
 };
 type PatternDiscoveryRunResponse = {
   report?: PatternDiscoveryReport;
   execution?: PatternDiscoveryExecution;
   sensitivity?: PatternDiscoverySensitivity;
 };
-type PatternDiscoveryProgress = {
-  status: 'idle' | 'preparing' | 'running' | 'complete' | 'stopped' | 'error';
-  stage:
-    | 'loading evidence'
-    | 'building dataset'
-    | 'running threshold'
-    | 'running engine'
-    | 'validating'
-    | 'promoting'
-    | 'persisting results'
-    | 'complete'
-    | 'stopped'
-    | 'error';
-  message: string;
-  thresholdsTotal: number;
-  thresholdsCompleted: number;
-  currentThreshold: number | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  wallets?: number;
-  independentEntries?: number;
-  featuresCompleted?: number;
-  featuresTotal?: number;
-  candidatePatterns?: number;
-  validationSurvivors?: number;
-  historicalStablePatterns?: number;
-  promotedPatterns?: number;
-  heartbeatAt?: string;
+type PatternDiscoveryStartResponse = {
+  started: true;
+  runId: number;
+  progress: PatternDiscoveryProgress;
 };
+type PatternDiscoveryProgress = PatternDiscoveryProgressView;
 const PATTERN_DISCOVERY_COVERAGE_GRID = [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100] as const;
 
 type ResearchUpdateSummary = {
@@ -2470,13 +2473,12 @@ function App() {
   const [copyTradeError, setCopyTradeError] = useState<string | null>(null);
   const [patternDiscoveryExport, setPatternDiscoveryExport] =
     useState<PatternDiscoveryExport | null>(null);
+  const [patternDiscoveryExportLoading, setPatternDiscoveryExportLoading] = useState(false);
   const [patternDiscoveryProgress, setPatternDiscoveryProgress] =
     useState<PatternDiscoveryProgress | null>(null);
-  const [patternDiscoveryLoading, setPatternDiscoveryLoading] = useState(false);
   const [patternDiscoveryLoadingDetail, setPatternDiscoveryLoadingDetail] = useState(
     'Preparing the local SQLite read…',
   );
-  const [patternDiscoveryError, setPatternDiscoveryError] = useState<string | null>(null);
   const [patternDiscoveryReport, setPatternDiscoveryReport] =
     useState<PatternDiscoveryReport | null>(null);
   const [patternDiscoverySensitivity, setPatternDiscoverySensitivity] =
@@ -2491,13 +2493,14 @@ function App() {
   const patternDiscoveryRunInFlight = useRef(false);
   const patternDiscoveryAbortController = useRef<AbortController | null>(null);
   const patternDiscoveryStopRequested = useRef(false);
+  const lastLoadedPatternDiscoveryCompletionKey = useRef<string | null>(null);
   const [patternDiscoverySourceOpen, setPatternDiscoverySourceOpen] = useState(false);
   const [copyTradeEstimate, setCopyTradeEstimate] = useState<CopyTradeFetchEstimate | null>(null);
   const [copyTradeEstimateLoading, setCopyTradeEstimateLoading] = useState(false);
   const [researchUpdateBusy, setResearchUpdateBusy] = useState(false);
 
   useEffect(() => {
-    if (!patternDiscoveryStartedAt || (!patternDiscoveryLoading && !patternDiscoveryRunLoading)) {
+    if (!patternDiscoveryStartedAt || !patternDiscoveryRunLoading) {
       setPatternDiscoveryElapsedSeconds(0);
       return;
     }
@@ -2508,7 +2511,7 @@ function App() {
     updateElapsed();
     const timer = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(timer);
-  }, [patternDiscoveryStartedAt, patternDiscoveryLoading, patternDiscoveryRunLoading]);
+  }, [patternDiscoveryStartedAt, patternDiscoveryRunLoading]);
   const [researchUpdateStage, setResearchUpdateStage] = useState<string | null>(null);
   const [researchUpdateFailedStage, setResearchUpdateFailedStage] = useState<number | null>(null);
   const [researchUpdateSummary, setResearchUpdateSummary] = useState<ResearchUpdateSummary | null>(
@@ -2781,51 +2784,53 @@ function App() {
     periodDays = copyTradePeriodDays,
     minimumCoveragePercent = 100,
   ): Promise<PatternDiscoveryExport | null> => {
-    if (!patternDiscoveryAbortController.current)
-      patternDiscoveryAbortController.current = new AbortController();
-    if (!patternDiscoveryStartedAt) setPatternDiscoveryStartedAt(Date.now());
-    setPatternDiscoveryLoading(true);
-    setPatternDiscoveryLoadingDetail(
-      `Loading saved ${periodDays}-day evidence for the ${minimumCoveragePercent}% coverage level…`,
-    );
-    setPatternDiscoveryError(null);
-    setPatternDiscoveryRunError(null);
-    setPatternDiscoverySensitivity(null);
-    setPatternDiscoveryExecution(null);
-    setPatternDiscoveryReport(null);
+    setPatternDiscoveryExportLoading(true);
     try {
       const nextExport = await api<PatternDiscoveryExport>(
         `/api/copytrade/pattern-discovery/export?periodDays=${periodDays}&minimumCoveragePercent=${minimumCoveragePercent}`,
-        { signal: patternDiscoveryAbortController.current.signal },
       );
       setPatternDiscoveryExport(nextExport);
       return nextExport;
-    } catch (error: unknown) {
-      if (!patternDiscoveryStopRequested.current)
-        setPatternDiscoveryError(error instanceof Error ? error.message : String(error));
+    } catch {
+      setPatternDiscoveryExport(null);
       return null;
     } finally {
-      setPatternDiscoveryLoading(false);
-      if (!patternDiscoveryRunInFlight.current) setPatternDiscoveryStartedAt(null);
+      setPatternDiscoveryExportLoading(false);
     }
   };
 
+  const exportPatternDiscoveryPage = () => {
+    if (!patternDiscoveryExport && !patternDiscoveryReport && !patternDiscoverySensitivity) return;
+    saveJson(
+      {
+        format: 'vantage-pattern-discovery-page-export-v1',
+        exportedAt: new Date().toISOString(),
+        page: {
+          periodDays: copyTradePeriodDays,
+          coverageGrid: PATTERN_DISCOVERY_COVERAGE_GRID,
+        },
+        sourceData: patternDiscoveryExport,
+        report: patternDiscoveryReport,
+        sensitivity: patternDiscoverySensitivity,
+        execution: patternDiscoveryExecution,
+        progress: patternDiscoveryProgress,
+      },
+      `crypto-pattern-discovery-page-${copyTradePeriodDays}d-${new Date().toISOString().slice(0, 10)}.json`,
+    );
+  };
+
   const runPatternDiscovery = async () => {
-    if (
-      patternDiscoveryRunInFlight.current ||
-      patternDiscoveryRunLoading ||
-      patternDiscoveryLoading
-    )
-      return;
+    if (patternDiscoveryRunInFlight.current || patternDiscoveryRunLoading) return;
     patternDiscoveryRunInFlight.current = true;
     patternDiscoveryStopRequested.current = false;
     patternDiscoveryAbortController.current = new AbortController();
     setPatternDiscoveryStartedAt(Date.now());
     setPatternDiscoveryRunLoading(true);
     setPatternDiscoveryRunError(null);
+    setPatternDiscoveryExport(null);
     try {
       if (patternDiscoveryStopRequested.current) return;
-      const result = await api<PatternDiscoveryRunResponse>(
+      const result = await api<PatternDiscoveryStartResponse>(
         '/api/copytrade/pattern-discovery/run/report',
         {
           method: 'POST',
@@ -2837,13 +2842,11 @@ function App() {
           signal: patternDiscoveryAbortController.current.signal,
         },
       );
-      setPatternDiscoveryReport(result.report ?? null);
-      setPatternDiscoveryExecution(result.execution ?? null);
-      setPatternDiscoverySensitivity(result.sensitivity ?? null);
+      setPatternDiscoveryProgress(result.progress);
+      setPatternDiscoveryLoadingDetail(result.progress.message);
     } catch (error: unknown) {
       if (!patternDiscoveryStopRequested.current)
         setPatternDiscoveryRunError(error instanceof Error ? error.message : String(error));
-    } finally {
       patternDiscoveryRunInFlight.current = false;
       setPatternDiscoveryRunLoading(false);
       setPatternDiscoveryStartedAt(null);
@@ -2851,13 +2854,21 @@ function App() {
     }
   };
 
+  const loadCompletedPatternDiscovery = async (): Promise<void> => {
+    const result = await api<PatternDiscoveryRunResponse>(
+      `/api/copytrade/pattern-discovery/run/result?periodDays=${copyTradePeriodDays}&minN=10`,
+    );
+    setPatternDiscoveryReport(result.report ?? null);
+    setPatternDiscoveryExecution(result.execution ?? null);
+    setPatternDiscoverySensitivity(result.sensitivity ?? null);
+  };
+
   const stopPatternDiscovery = async () => {
     const serverRunActive =
       patternDiscoveryProgress?.status === 'preparing' ||
       patternDiscoveryProgress?.status === 'running';
-    if (!patternDiscoveryLoading && !patternDiscoveryRunLoading && !serverRunActive) return;
+    if (!patternDiscoveryRunLoading && !serverRunActive) return;
     patternDiscoveryStopRequested.current = true;
-    setPatternDiscoveryError(null);
     setPatternDiscoveryRunError('Stopping discovery… completed coverage levels remain saved.');
     try {
       await api('/api/copytrade/pattern-discovery/stop', { method: 'POST' });
@@ -2871,7 +2882,6 @@ function App() {
       // command has been delivered, so a refresh cannot accidentally cancel the server job.
       patternDiscoveryAbortController.current?.abort();
       patternDiscoveryRunInFlight.current = false;
-      setPatternDiscoveryLoading(false);
       setPatternDiscoveryRunLoading(false);
       setPatternDiscoveryStartedAt(null);
       patternDiscoveryAbortController.current = null;
@@ -4065,14 +4075,6 @@ function App() {
   }, [activeMenu, copyTradeSubTab, selectedRosterSnapshotId]);
   useEffect(() => {
     if (copyTradeSubTab !== 'pattern-discovery') return;
-    const timer = window.setTimeout(
-      () => void loadPatternDiscoveryExport(copyTradePeriodDays, 100),
-      180,
-    );
-    return () => window.clearTimeout(timer);
-  }, [copyTradeSubTab, copyTradePeriodDays]);
-  useEffect(() => {
-    if (copyTradeSubTab !== 'pattern-discovery') return;
     let disposed = false;
     let timer: number | undefined;
     let requestInFlight = false;
@@ -4095,14 +4097,43 @@ function App() {
             setPatternDiscoveryRunLoading(true);
             if (progress.startedAt) setPatternDiscoveryStartedAt(Date.parse(progress.startedAt));
           }
-          timer = window.setTimeout(() => void poll(), 1000);
-        } else if (!patternDiscoveryRunInFlight.current) {
+        } else {
+          const completionKey =
+            progress.status === 'complete'
+              ? `${progress.runId ?? 'legacy'}:${progress.completedAt ?? 'unknown'}`
+              : null;
+          if (
+            progress.status === 'complete' &&
+            completionKey !== lastLoadedPatternDiscoveryCompletionKey.current
+          ) {
+            try {
+              // The completed sensitivity result already contains the grid summaries and is
+              // cheap to load from SQLite. The 100% normalized export is only needed when the
+              // user explicitly downloads/opens source data, so do not reload it on every run
+              // completion or page refresh.
+              setPatternDiscoveryLoadingDetail(
+                'Discovery finished. Loading the saved grid result…',
+              );
+              await loadCompletedPatternDiscovery();
+              lastLoadedPatternDiscoveryCompletionKey.current = completionKey;
+            } catch (error: unknown) {
+              if (!disposed)
+                setPatternDiscoveryRunError(error instanceof Error ? error.message : String(error));
+            }
+          } else if (progress.status === 'error') {
+            setPatternDiscoveryRunError(progress.message);
+          }
+          patternDiscoveryRunInFlight.current = false;
           setPatternDiscoveryRunLoading(false);
           setPatternDiscoveryStartedAt(null);
+          patternDiscoveryAbortController.current = null;
         }
+        // The coordinator emits a heartbeat every two seconds. Polling faster than that only
+        // creates a request queue in the browser without providing fresher information.
+        if (!disposed) timer = window.setTimeout(() => void poll(), active ? 2000 : 5000);
       } catch {
         // Retry while this tab is open; the run endpoint reports actionable failures.
-        if (!disposed) timer = window.setTimeout(() => void poll(), 1500);
+        if (!disposed) timer = window.setTimeout(() => void poll(), 3000);
       } finally {
         requestInFlight = false;
       }
@@ -4113,7 +4144,7 @@ function App() {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [api, copyTradeSubTab]);
+  }, [api, copyTradePeriodDays, copyTradeSubTab]);
   useEffect(() => {
     if (copyTradeSubTab !== 'wallet-stats' || !gmgnStatsStatus?.running) return;
     const timer = window.setInterval(async () => {
@@ -10977,7 +11008,7 @@ function App() {
                 {PATTERN_DISCOVERY_COVERAGE_GRID.map((value) => `${value}%`).join(' · ')}
               </small>
             </span>
-            {patternDiscoveryExport && (
+            {patternDiscoveryExport ? (
               <button
                 type="button"
                 className="secondary"
@@ -10990,12 +11021,34 @@ function App() {
               >
                 Download 100% coverage-level export
               </button>
+            ) : (
+              <button
+                type="button"
+                className="secondary"
+                disabled={patternDiscoveryRunLoading || patternDiscoveryExportLoading}
+                onClick={() => void loadPatternDiscoveryExport(copyTradePeriodDays, 100)}
+              >
+                {patternDiscoveryExportLoading
+                  ? 'Loading 100% source data…'
+                  : 'Load 100% source data'}
+              </button>
             )}
-            {patternDiscoveryLoading || patternDiscoveryRunLoading ? (
+            <button
+              type="button"
+              className="secondary"
+              disabled={
+                patternDiscoveryRunLoading ||
+                (!patternDiscoveryExport && !patternDiscoveryReport && !patternDiscoverySensitivity)
+              }
+              onClick={exportPatternDiscoveryPage}
+            >
+              {UI_STRINGS.patternDiscovery.exportPageData}
+            </button>
+            {patternDiscoveryRunLoading ? (
               <button
                 type="button"
                 className="secondary pattern-discovery-stop"
-                onClick={stopPatternDiscovery}
+                onClick={() => void stopPatternDiscovery()}
               >
                 Stop discovery
               </button>
@@ -11005,70 +11058,15 @@ function App() {
               </button>
             )}
           </div>
-          {patternDiscoveryError && <p className="error-text">{patternDiscoveryError}</p>}
-          {(patternDiscoveryLoading || patternDiscoveryRunLoading) && (
-            <div className="copytrade-analysis-status running" role="status" aria-live="polite">
-              <span className="loading-spinner" aria-hidden="true" />
-              <div>
-                <strong>
-                  {patternDiscoveryProgress?.message ??
-                    (patternDiscoveryLoading
-                      ? 'Preparing the normalized export…'
-                      : 'Running the shared discovery engine…')}
-                </strong>
-                <div className="pattern-discovery-progress-meta">
-                  <span>
-                    {patternDiscoveryProgress
-                      ? `${patternDiscoveryProgress.thresholdsCompleted}/${patternDiscoveryProgress.thresholdsTotal} coverage levels complete${patternDiscoveryProgress.currentThreshold === null ? '' : ` · current ${patternDiscoveryProgress.currentThreshold}%`}`
-                      : 'Starting local evidence preparation'}
-                  </span>
-                  {patternDiscoveryProgress && (
-                    <span>
-                      {patternDiscoveryProgress.wallets ?? 0} wallets ·{' '}
-                      {patternDiscoveryProgress.independentEntries ?? 0} independent entries
-                      {patternDiscoveryProgress.featuresTotal
-                        ? ` · features ${patternDiscoveryProgress.featuresCompleted ?? 0}/${patternDiscoveryProgress.featuresTotal}`
-                        : ''}
-                      {patternDiscoveryProgress.candidatePatterns !== undefined
-                        ? ` · ${patternDiscoveryProgress.candidatePatterns} candidates`
-                        : ''}
-                      {patternDiscoveryProgress.validationSurvivors !== undefined
-                        ? ` · ${patternDiscoveryProgress.validationSurvivors} survivors`
-                        : ''}
-                      {patternDiscoveryProgress.historicalStablePatterns !== undefined
-                        ? ` · ${patternDiscoveryProgress.historicalStablePatterns} stable`
-                        : ''}
-                      {patternDiscoveryProgress.promotedPatterns !== undefined
-                        ? ` · ${patternDiscoveryProgress.promotedPatterns} promoted`
-                        : ''}
-                    </span>
-                  )}
-                  <span>{patternDiscoveryElapsedSeconds}s elapsed</span>
-                </div>
-                <progress
-                  className="pattern-discovery-progress"
-                  max={patternDiscoveryProgress?.thresholdsTotal ?? 11}
-                  value={patternDiscoveryProgress?.thresholdsCompleted ?? 0}
-                  aria-label="Pattern Discovery coverage-level progress"
-                />
-                <small>{patternDiscoveryLoadingDetail}</small>
-                <ol className="copytrade-loading-steps">
-                  <li>
-                    Read saved {copyTradePeriodDays}-day GMGN history and Dune outcomes from SQLite
-                  </li>
-                  <li>
-                    Apply the same point-in-time and wallet-balanced rules at each 5% coverage step
-                  </li>
-                  <li>Run the isolated Python discovery engine and cache each grid level</li>
-                </ol>
-                <small>
-                  No GMGN or Dune request is made. The server is processing one local request and
-                  reports each threshold as it finishes.
-                </small>
-              </div>
-            </div>
+          {patternDiscoveryRunLoading && (
+            <PatternDiscoveryProgressPanel
+              progress={patternDiscoveryProgress}
+              elapsedSeconds={patternDiscoveryElapsedSeconds}
+              fallbackMessage={patternDiscoveryLoadingDetail}
+              periodDays={copyTradePeriodDays}
+            />
           )}
-          {patternDiscoveryExport && !patternDiscoveryLoading && (
+          {patternDiscoveryExport && !patternDiscoveryRunLoading && (
             <>
               <div className="copytrade-table-overview">
                 <span>
@@ -11093,6 +11091,8 @@ function App() {
                 summary={`100% coverage-level source data · ${patternDiscoveryExport.metadata.exported_rows} events`}
               >
                 <DataTable
+                  enableColumnHiding
+                  columnVisibilityStorageKey="vantage-pattern-discovery-source-columns"
                   wrapClassName="table-wrap copytrade-table-wrap"
                   tableClassName="copytrade-table fully-covered-table"
                   rows={patternDiscoveryExport.rows.slice(0, 100)}
@@ -11166,11 +11166,10 @@ function App() {
               </Collapsible>
             </>
           )}
-          {!patternDiscoveryLoading && patternDiscoveryExport?.metadata.exported_rows === 0 && (
+          {!patternDiscoveryRunLoading && patternDiscoveryExport?.metadata.exported_rows === 0 && (
             <p className="muted">No wallets meet the 100% coverage level for this period.</p>
           )}
-          {!patternDiscoveryLoading &&
-            patternDiscoveryExport &&
+          {patternDiscoveryExport &&
             !patternDiscoveryReport &&
             !patternDiscoveryRunLoading &&
             !patternDiscoveryRunError && (
@@ -11183,112 +11182,10 @@ function App() {
           {(patternDiscoveryReport || patternDiscoverySensitivity) &&
             !patternDiscoveryRunLoading && (
               <div className="copytrade-info-panel pattern-discovery-readable">
-                {patternDiscoveryReport && (
-                  <>
-                    <div className="pattern-discovery-headline">
-                      <div>
-                        <span className="eyebrow">PLAIN-ENGLISH RESULT</span>
-                        <h3>What did the finder learn?</h3>
-                      </div>
-                      <span className="pattern-discovery-status">
-                        {(patternDiscoveryReport.status_counts['validation survivor'] ?? 0) > 0
-                          ? 'Evidence repeated on later trades'
-                          : 'No reliable rule yet'}
-                      </span>
-                    </div>
-                    <div className="pattern-discovery-cards">
-                      <div>
-                        <strong>
-                          {patternDiscoveryReport.status_counts['validation survivor'] ?? 0}
-                        </strong>
-                        <span>rules that survived a second test</span>
-                      </div>
-                      <div>
-                        <strong>{patternDiscoveryReport.split.discovery_rows ?? 0}</strong>
-                        <span>older trades used to discover rules</span>
-                      </div>
-                      <div>
-                        <strong>{patternDiscoveryReport.split.validation_rows ?? 0}</strong>
-                        <span>newer trades used to check them</span>
-                      </div>
-                      <div>
-                        <strong>{patternDiscoveryReport.split.untouched_holdout_rows ?? 0}</strong>
-                        <span>trades kept untouched</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-                {patternDiscoverySensitivity && (
-                  <div className="pattern-discovery-sensitivity">
-                    <div className="pattern-discovery-results-heading">
-                      <div>
-                        <h4>Coverage sensitivity</h4>
-                        <p className="muted">
-                          The same wallet-balanced engine at every 5% threshold from 50% through
-                          100%. A stronger rule should remain visible as coverage becomes stricter.
-                        </p>
-                      </div>
-                      <span>50% → 100% · 5% steps</span>
-                    </div>
-                    <DataTable
-                      wrapClassName="table-wrap copytrade-table-wrap"
-                      tableClassName="copytrade-table pattern-sensitivity-table"
-                      rows={patternDiscoverySensitivity.thresholds}
-                      getRowKey={(row) => String(row.minimumCoveragePercent)}
-                      columns={[
-                        {
-                          key: 'threshold',
-                          header: 'Minimum coverage',
-                          render: (row) => `${row.minimumCoveragePercent}%`,
-                        },
-                        {
-                          key: 'wallets',
-                          header: 'Wallets',
-                          render: (row) =>
-                            row.reportAvailable ? row.wallets.toLocaleString() : '—',
-                        },
-                        {
-                          key: 'entries',
-                          header: 'Independent entries',
-                          render: (row) =>
-                            row.reportAvailable ? row.independentEntries.toLocaleString() : '—',
-                        },
-                        {
-                          key: 'rows',
-                          header: 'Rows',
-                          render: (row) => (row.reportAvailable ? row.rows.toLocaleString() : '—'),
-                        },
-                        {
-                          key: 'survivors',
-                          header: 'Validation survivors',
-                          render: (row) =>
-                            row.reportAvailable ? row.validationSurvivors.toLocaleString() : '—',
-                        },
-                        {
-                          key: 'candidates',
-                          header: 'Candidate patterns',
-                          render: (row) =>
-                            row.reportAvailable ? row.discoveredCandidates.toLocaleString() : '—',
-                        },
-                        {
-                          key: 'stable',
-                          header: 'Stable / promoted',
-                          render: (row) =>
-                            row.reportAvailable
-                              ? `${row.historicalStablePatterns.toLocaleString()} / ${row.promotedPatterns.toLocaleString()}`
-                              : '—',
-                        },
-                        {
-                          key: 'status',
-                          header: 'Status',
-                          render: (row) =>
-                            row.reportAvailable ? 'Available' : (row.error ?? 'No report'),
-                        },
-                      ]}
-                    />
-                    <p className="muted">{patternDiscoverySensitivity.note}</p>
-                  </div>
-                )}
+                <PatternDiscoveryRunSummary
+                  report={patternDiscoveryReport}
+                  sensitivity={patternDiscoverySensitivity}
+                />
                 {patternDiscoveryReport && (
                   <>
                     <div className="pattern-discovery-flow">
@@ -11323,89 +11220,12 @@ function App() {
                         </p>
                       ) : null;
                     })()}
-                    <div className="pattern-discovery-results">
-                      <div className="pattern-discovery-results-heading">
-                        <div>
-                          <h4>Rules found</h4>
-                          <p className="muted">
-                            Click a rule for a plain-English example and a visual summary. Effects
-                            are measured in percentage points of net copied return.
-                          </p>
-                        </div>
-                        <span>
-                          {patternDiscoveryReport.status_counts['validation survivor'] ?? 0}{' '}
-                          repeated
-                        </span>
-                      </div>
-                      {patternDiscoveryReport.patterns
-                        .filter(
-                          (pattern) =>
-                            pattern.validationStatus === 'discovered candidate' ||
-                            pattern.validationStatus === 'validation survivor',
-                        )
-                        .map((pattern, index) => {
-                          const effect = pattern.effect ?? null;
-                          const status =
-                            pattern.validationStatus === 'validation survivor'
-                              ? 'repeated'
-                              : 'candidate';
-                          return (
-                            <button
-                              type="button"
-                              className={`pattern-discovery-rule ${effect !== null && effect >= 0 ? 'positive-rule' : 'negative-rule'}`}
-                              key={`${pattern.feature ?? 'pattern'}-${index}`}
-                              onClick={() => setSelectedPatternRule(pattern)}
-                            >
-                              <span className="pattern-discovery-rule-title">
-                                <strong>
-                                  {pattern.feature?.replaceAll('_', ' ') ?? 'Unknown feature'}
-                                </strong>
-                                <span className={status}>
-                                  {status === 'repeated' ? 'REPEATS' : 'CANDIDATE'}
-                                </span>
-                              </span>
-                              <span className="pattern-discovery-rule-main">
-                                <span>
-                                  <small>RULE</small>
-                                  <strong>
-                                    {Array.isArray(pattern.conditions) && pattern.conditions.length
-                                      ? 'Open for explanation and example'
-                                      : 'Relationship summary'}
-                                  </strong>
-                                </span>
-                                <span
-                                  className={`pattern-discovery-effect ${effect !== null && effect >= 0 ? 'positive' : 'negative'}`}
-                                >
-                                  <small>
-                                    {pattern.kind === 'correlation'
-                                      ? 'CORRELATION'
-                                      : 'OUTCOME DIFFERENCE'}
-                                  </small>
-                                  <b>
-                                    {effect === null
-                                      ? '—'
-                                      : `${effect >= 0 ? '+' : ''}${effect.toFixed(2)}${pattern.kind === 'correlation' ? '' : ' pts'}`}
-                                  </b>
-                                </span>
-                              </span>
-                              <span className="pattern-discovery-rule-meta">
-                                <span>
-                                  Older data <b>{pattern.discovery_sample_size ?? 0}</b>
-                                </span>
-                                <span>
-                                  Newer data <b>{pattern.validation?.sample_size ?? 0}</b>
-                                </span>
-                                <span className="pattern-discovery-open-hint">View details ↗</span>
-                              </span>
-                            </button>
-                          );
-                        })}
-                      {patternDiscoveryReport.patterns.filter(
-                        (pattern) =>
-                          pattern.validationStatus === 'discovered candidate' ||
-                          pattern.validationStatus === 'validation survivor',
-                      ).length === 0 && <p className="muted">No rules found yet.</p>}
-                    </div>
+                    {patternDiscoverySensitivity && (
+                      <PatternDiscoveryPromotedPatterns
+                        sensitivity={patternDiscoverySensitivity}
+                        onSelectPattern={setSelectedPatternRule}
+                      />
+                    )}
                     {selectedPatternRule && (
                       <PatternDiscoveryRuleDialog
                         rule={selectedPatternRule}

@@ -50,3 +50,9 @@ _Investigated 2026-08-24, confirmed feasible, not implemented._
 _Investigated 2026-08-24, confirmed there isn't one, not implemented._
 
 There's currently no client-side store for API-fetched data with real invalidation: the shared `api()` fetch helper has no caching or dedup; the dominant pattern (useState + useEffect pairs) unconditionally re-fetches on every trigger; the one TanStack Query usage is deliberately configured with `staleTime: 0` to reproduce old always-refetch behavior, not to cache; Zustand and localStorage both hold only UI state/preferences, not fetched data. The only thing making repeat fetches cheap today is the server's own disk-backed cache (a different, already-fragile layer). Most natural next step: extend the existing TanStack Query pattern with real `queryKey`/`staleTime` invalidation tied to the actions that actually change server data (roster sync, Dune fetch completion, GMGN refresh).
+
+### Centralize endpoint definitions
+Move all application endpoint strings into one shared constants module and reuse those definitions throughout the crypto project.
+
+### Standardize API calls through one client
+Route every application API request through a shared client that provides consistent progress logging, error handling, retries/timeouts, and persisted database diagnostics.

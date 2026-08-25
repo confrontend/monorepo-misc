@@ -46,7 +46,11 @@ def main(argv: list[str] | None = None) -> int:
             if progress_path is None:
                 return
             progress_path.parent.mkdir(parents=True, exist_ok=True)
-            progress_path.write_text(json.dumps(update, ensure_ascii=False), encoding="utf-8")
+            temporary_progress_path = progress_path.with_suffix(progress_path.suffix + ".tmp")
+            temporary_progress_path.write_text(
+                json.dumps(update, ensure_ascii=False), encoding="utf-8"
+            )
+            temporary_progress_path.replace(progress_path)
 
         report = run_discovery(
             dataset,

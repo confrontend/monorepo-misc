@@ -1,5 +1,4 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { createHash } from 'node:crypto';
 import {
   computeCopySimulationReport,
   type CopySimulationTradeResult,
@@ -10,7 +9,7 @@ export const DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS = 30;
 export const MAX_PATTERN_DISCOVERY_PERIOD_DAYS = 90;
 export const MAX_PATTERN_DISCOVERY_WALLETS = 500;
 /** Change this when the normalized export or discovery input contract changes. */
-export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v2-entry-wallet-balanced';
+export const PATTERN_DISCOVERY_ENGINE_VERSION = 'crypto-pattern-discovery-v4-historical-features';
 
 export type PatternDiscoveryExportRow = {
   project: 'crypto';
@@ -42,6 +41,19 @@ export type PatternDiscoveryExportRow = {
     prior_wallet_median_hold_seconds: number | null;
     prior_wallet_under_15_seconds_percent: number | null;
     prior_wallet_paired_trade_count: number;
+    prior_wallet_distinct_token_count: number;
+    prior_wallet_trades_per_active_day: number | null;
+    prior_wallet_median_buy_size_usd: number | null;
+    prior_wallet_return_volatility_percent: number | null;
+    prior_wallet_top3_token_profit_share_percent: number | null;
+    prior_token_buy_count: number;
+    prior_token_sell_count: number;
+    prior_token_buy_volume_usd: number;
+    prior_token_sell_volume_usd: number;
+    token_market_cap_at_entry: number | null;
+    token_age_seconds_at_entry: number | null;
+    token_launchpad_platform: string | null;
+    entry_trade_amount_usd: number | null;
   };
   hold_seconds: number;
   wallet_return_percent: number | null;
@@ -68,7 +80,7 @@ export type PatternDiscoveryExport = {
   metadata: {
     project: 'crypto';
     schema_version: 'normalized-v1';
-    feature_allowlist_version: 'gmgn-v3-pre-event-only';
+    feature_allowlist_version: 'gmgn-v4-historical-context';
     feature_source: 'features';
     feature_policy: string;
     outcome: 'net_return_after_costs';
@@ -98,61 +110,26 @@ type FullyCoveredWallet = { walletAddress: string };
 
 type PatternDiscoveryCacheRow = { reportJson: string };
 
-/**
- * Fingerprint every persisted input that can change the discovery population or outcome.
- * Counts/max ids are not sufficient here: Dune runs are updated in place from running to
- * completed, so the relevant row values are included in the digest as well.
- */
+/** Return an exact, constant-size evidence revision. Write triggers mark the revision dirty;
+ * the first reader after a change advances it once. This replaces serializing and hashing the
+ * multi-gigabyte trade/Dune tables on every coverage level. */
 export const readPatternDiscoveryDataFingerprint = (database: DatabaseSync): string => {
-  const hash = createHash('sha256');
-  const addRows = (label: string, rows: unknown[]): void => {
-    hash.update(label, 'utf8');
-    for (const row of rows) hash.update(JSON.stringify(row), 'utf8');
-  };
-  addRows(
-    'wallets\n',
-    database
-      .prepare(
-        `SELECT wallet_address, chain, rank_position, source_snapshot_id, gmgn_tags
-     FROM copytrade_wallets ORDER BY wallet_address, chain, source_snapshot_id, rank_position`,
-      )
-      .all(),
-  );
-  addRows(
-    'coverage\n',
-    database
-      .prepare(
-        `SELECT wallet_address, chain, last_run_id, requests_used, truncated, coverage_complete,
-            requested_period_days, stop_reason, updated_at
-     FROM copytrade_wallet_coverage ORDER BY wallet_address, chain`,
-      )
-      .all(),
-  );
-  addRows(
-    'trades\n',
-    database
-      .prepare(
-        `SELECT id, wallet_address, chain, event_type, token_address, observed_timestamp,
-            cost_usd, buy_cost_usd, price_usd, gas_usd, fetched_at
-     FROM copytrade_trades ORDER BY id`,
-      )
-      .all(),
-  );
-  addRows(
-    'dune-runs\n',
-    database
-      .prepare(
-        `SELECT id, trade_refs, status, requested_at, completed_at, raw_result, search_window_minutes,
-            match_source, dune_last_state, dune_last_status_at
-     FROM copytrade_copy_simulation_runs ORDER BY id`,
-      )
-      .all(),
-  );
-  return hash.digest('hex');
+  database
+    .prepare(
+      `UPDATE pattern_discovery_data_revision
+       SET revision = revision + 1, dirty = 0, updated_at = CURRENT_TIMESTAMP
+       WHERE singleton_id = 1 AND dirty = 1`,
+    )
+    .run();
+  const row = database
+    .prepare(`SELECT revision FROM pattern_discovery_data_revision WHERE singleton_id = 1`)
+    .get() as { revision: number } | undefined;
+  if (!row) throw new Error('Pattern Discovery data revision is unavailable.');
+  return `pattern-discovery-revision-v1:${row.revision}`;
 };
 
 export const patternDiscoveryCacheKey = (
-  kind: 'export' | 'report',
+  kind: 'export' | 'report' | 'sensitivity',
   periodDays: number,
   minimumCoveragePercent: number,
   minN?: number,
@@ -249,6 +226,19 @@ type PreEventFeatures = {
   priorWalletMedianHoldSeconds: number | null;
   priorWalletUnder15SecondsPercent: number | null;
   priorWalletPairedTradeCount: number;
+  priorWalletDistinctTokenCount: number;
+  priorWalletTradesPerActiveDay: number | null;
+  priorWalletMedianBuySizeUsd: number | null;
+  priorWalletReturnVolatilityPercent: number | null;
+  priorWalletTop3TokenProfitSharePercent: number | null;
+  priorTokenBuyCount: number;
+  priorTokenSellCount: number;
+  priorTokenBuyVolumeUsd: number;
+  priorTokenSellVolumeUsd: number;
+  tokenMarketCapAtEntry: number | null;
+  tokenAgeSecondsAtEntry: number | null;
+  tokenLaunchpadPlatform: string | null;
+  entryTradeAmountUsd: number | null;
 };
 
 type PriorTrade = {
@@ -258,6 +248,7 @@ type PriorTrade = {
   observedTimestamp: number;
   costUsd: string | null;
   buyCostUsd: string | null;
+  launchpadPlatform?: string | null;
 };
 
 const amount = (value: string | null): number | null => {
@@ -266,11 +257,239 @@ const amount = (value: string | null): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const median = (values: number[]): number | null => {
-  if (values.length === 0) return null;
-  const ordered = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(ordered.length / 2);
-  return ordered.length % 2 === 0 ? (ordered[middle - 1] + ordered[middle]) / 2 : ordered[middle];
+class NumberHeap {
+  private readonly values: number[] = [];
+
+  constructor(private readonly before: (left: number, right: number) => boolean) {}
+
+  get size(): number {
+    return this.values.length;
+  }
+
+  peek(): number | undefined {
+    return this.values[0];
+  }
+
+  push(value: number): void {
+    this.values.push(value);
+    let index = this.values.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (!this.before(this.values[index], this.values[parent])) break;
+      [this.values[index], this.values[parent]] = [this.values[parent], this.values[index]];
+      index = parent;
+    }
+  }
+
+  pop(): number | undefined {
+    const first = this.values[0];
+    const last = this.values.pop();
+    if (this.values.length > 0 && last !== undefined) {
+      this.values[0] = last;
+      let index = 0;
+      while (true) {
+        const left = index * 2 + 1;
+        const right = left + 1;
+        let next = index;
+        if (left < this.values.length && this.before(this.values[left], this.values[next]))
+          next = left;
+        if (right < this.values.length && this.before(this.values[right], this.values[next]))
+          next = right;
+        if (next === index) break;
+        [this.values[index], this.values[next]] = [this.values[next], this.values[index]];
+        index = next;
+      }
+    }
+    return first;
+  }
+}
+
+class StreamingMedian {
+  private readonly lower = new NumberHeap((left, right) => left > right);
+  private readonly upper = new NumberHeap((left, right) => left < right);
+
+  add(value: number): void {
+    if (this.lower.size === 0 || value <= (this.lower.peek() ?? value)) this.lower.push(value);
+    else this.upper.push(value);
+    if (this.lower.size > this.upper.size + 1) this.upper.push(this.lower.pop()!);
+    if (this.upper.size > this.lower.size) this.lower.push(this.upper.pop()!);
+  }
+
+  value(): number | null {
+    if (this.lower.size === 0) return null;
+    return this.lower.size === this.upper.size
+      ? ((this.lower.peek() ?? 0) + (this.upper.peek() ?? 0)) / 2
+      : (this.lower.peek() ?? null);
+  }
+}
+
+class PreEventAccumulator {
+  private tradeCount = 0;
+  private buyCount = 0;
+  private sellCount = 0;
+  private buyVolume = 0;
+  private sellVolume = 0;
+  private realizedProfit = 0;
+  private returnCount = 0;
+  private winningReturns = 0;
+  private positiveDays = 0;
+  private positiveTokenProfit = 0;
+  private pairedTradeCount = 0;
+  private under15Seconds = 0;
+  private readonly activeDays = new Set<string>();
+  private readonly buySizeMedian = new StreamingMedian();
+  private readonly returns: number[] = [];
+  private readonly tokenBuyCount = new Map<string, number>();
+  private readonly tokenSellCount = new Map<string, number>();
+  private readonly tokenBuyVolume = new Map<string, number>();
+  private readonly tokenSellVolume = new Map<string, number>();
+  private readonly tokenTradeCount = new Map<string, number>();
+  private readonly lastBuyByToken = new Map<string, number>();
+  private readonly profitByToken = new Map<string, number>();
+  private readonly profitByDay = new Map<string, number>();
+  private readonly returnMedian = new StreamingMedian();
+  private readonly holdMedian = new StreamingMedian();
+
+  apply(row: PriorTrade): void {
+    this.tradeCount += 1;
+    this.tokenTradeCount.set(
+      row.tokenAddress,
+      (this.tokenTradeCount.get(row.tokenAddress) ?? 0) + 1,
+    );
+    this.activeDays.add(new Date(row.observedTimestamp * 1000).toISOString().slice(0, 10));
+    if (row.eventType === 'buy') {
+      this.buyCount += 1;
+      this.buyVolume += amount(row.costUsd) ?? 0;
+      this.tokenBuyCount.set(row.tokenAddress, (this.tokenBuyCount.get(row.tokenAddress) ?? 0) + 1);
+      this.tokenBuyVolume.set(
+        row.tokenAddress,
+        (this.tokenBuyVolume.get(row.tokenAddress) ?? 0) + (amount(row.costUsd) ?? 0),
+      );
+      const buySize = amount(row.costUsd);
+      if (buySize !== null) this.buySizeMedian.add(buySize);
+      this.lastBuyByToken.set(row.tokenAddress, row.observedTimestamp);
+      return;
+    }
+    this.sellCount += 1;
+    this.sellVolume += amount(row.costUsd) ?? 0;
+    this.tokenSellCount.set(row.tokenAddress, (this.tokenSellCount.get(row.tokenAddress) ?? 0) + 1);
+    this.tokenSellVolume.set(
+      row.tokenAddress,
+      (this.tokenSellVolume.get(row.tokenAddress) ?? 0) + (amount(row.costUsd) ?? 0),
+    );
+    const boughtAt = this.lastBuyByToken.get(row.tokenAddress);
+    if (boughtAt !== undefined) {
+      const hold = Math.max(0, row.observedTimestamp - boughtAt);
+      this.holdMedian.add(hold);
+      this.pairedTradeCount += 1;
+      if (hold <= 15) this.under15Seconds += 1;
+    }
+    const proceeds = amount(row.costUsd);
+    const costBasis = amount(row.buyCostUsd);
+    if (proceeds === null || costBasis === null || costBasis <= 0) return;
+    const profitUsd = proceeds - costBasis;
+    const returnPercent = (profitUsd / costBasis) * 100;
+    this.realizedProfit += profitUsd;
+    this.returnCount += 1;
+    this.returns.push(returnPercent);
+    if (returnPercent > 0) this.winningReturns += 1;
+    this.returnMedian.add(returnPercent);
+
+    const priorTokenProfit = this.profitByToken.get(row.tokenAddress) ?? 0;
+    if (priorTokenProfit > 0) this.positiveTokenProfit -= priorTokenProfit;
+    const tokenProfit = priorTokenProfit + profitUsd;
+    this.profitByToken.set(row.tokenAddress, tokenProfit);
+    if (tokenProfit > 0) this.positiveTokenProfit += tokenProfit;
+
+    const day = new Date(row.observedTimestamp * 1000).toISOString().slice(0, 10);
+    const priorDayProfit = this.profitByDay.get(day) ?? 0;
+    if (priorDayProfit > 0) this.positiveDays -= 1;
+    const dayProfit = priorDayProfit + profitUsd;
+    this.profitByDay.set(day, dayProfit);
+    if (dayProfit > 0) this.positiveDays += 1;
+  }
+
+  snapshot(tokenAddress: string, entry?: PriorTrade): PreEventFeatures {
+    const positiveProfits = [...this.profitByToken.values()]
+      .filter((profit) => profit > 0)
+      .sort((a, b) => b - a);
+    const bestTokenProfit = positiveProfits[0] ?? 0;
+    const top3TokenProfit = positiveProfits.slice(0, 3).reduce((sum, profit) => sum + profit, 0);
+    const meanReturn = this.returns.length
+      ? this.returns.reduce((sum, value) => sum + value, 0) / this.returns.length
+      : 0;
+    const returnVariance =
+      this.returns.length > 1
+        ? this.returns.reduce((sum, value) => sum + (value - meanReturn) ** 2, 0) /
+          this.returns.length
+        : null;
+    return {
+      priorWalletTradeCount: this.tradeCount,
+      priorTokenTradeCount: this.tokenTradeCount.get(tokenAddress) ?? 0,
+      priorWalletBuyVolumeUsd: this.buyVolume,
+      priorWalletBuyCount: this.buyCount,
+      priorWalletSellCount: this.sellCount,
+      priorWalletSellVolumeUsd: this.sellVolume,
+      priorWalletRealizedProfitUsd: this.returnCount === 0 ? null : this.realizedProfit,
+      priorWalletMedianReturnPercent: this.returnMedian.value(),
+      priorWalletWinRatePercent:
+        this.returnCount === 0 ? null : (this.winningReturns / this.returnCount) * 100,
+      priorWalletPositiveDayPercent:
+        this.profitByDay.size === 0 ? null : (this.positiveDays / this.profitByDay.size) * 100,
+      priorWalletBestTokenProfitSharePercent:
+        this.positiveTokenProfit <= 0 ? null : (bestTokenProfit / this.positiveTokenProfit) * 100,
+      priorWalletMedianHoldSeconds: this.holdMedian.value(),
+      priorWalletUnder15SecondsPercent:
+        this.pairedTradeCount === 0 ? null : (this.under15Seconds / this.pairedTradeCount) * 100,
+      priorWalletPairedTradeCount: this.pairedTradeCount,
+      priorWalletDistinctTokenCount: this.tokenTradeCount.size,
+      priorWalletTradesPerActiveDay:
+        this.activeDays.size === 0 ? null : this.tradeCount / this.activeDays.size,
+      priorWalletMedianBuySizeUsd: this.buySizeMedian.value(),
+      priorWalletReturnVolatilityPercent:
+        returnVariance === null ? null : Math.sqrt(returnVariance),
+      priorWalletTop3TokenProfitSharePercent:
+        this.positiveTokenProfit <= 0 ? null : (top3TokenProfit / this.positiveTokenProfit) * 100,
+      priorTokenBuyCount: this.tokenBuyCount.get(tokenAddress) ?? 0,
+      priorTokenSellCount: this.tokenSellCount.get(tokenAddress) ?? 0,
+      priorTokenBuyVolumeUsd: this.tokenBuyVolume.get(tokenAddress) ?? 0,
+      priorTokenSellVolumeUsd: this.tokenSellVolume.get(tokenAddress) ?? 0,
+      tokenMarketCapAtEntry: null,
+      tokenAgeSecondsAtEntry: null,
+      tokenLaunchpadPlatform: entry?.launchpadPlatform ?? null,
+      entryTradeAmountUsd: entry ? amount(entry.costUsd) : null,
+    };
+  }
+}
+
+const addTokenEntryContext = (
+  database: DatabaseSync,
+  features: PreEventFeatures,
+  tokenAddress: string,
+  observedTimestamp: number,
+): PreEventFeatures => {
+  const signal = database
+    .prepare(
+      `SELECT COALESCE(trigger_mc, first_trigger_mc, market_cap) AS marketCap
+       FROM gmgn_signals
+       WHERE token_address = ? AND observed_at IS NOT NULL AND observed_at < ?
+       ORDER BY observed_at DESC, id DESC LIMIT 1`,
+    )
+    .get(tokenAddress, new Date(observedTimestamp * 1000).toISOString()) as
+    { marketCap: number | null } | undefined;
+  const token = database
+    .prepare(`SELECT first_trade_time AS firstTradeTime FROM tokens WHERE token_address = ?`)
+    .get(tokenAddress) as { firstTradeTime: string | null } | undefined;
+  const firstTradeSeconds = token?.firstTradeTime
+    ? Math.floor(Date.parse(token.firstTradeTime) / 1000)
+    : NaN;
+  return {
+    ...features,
+    tokenMarketCapAtEntry: signal?.marketCap ?? null,
+    tokenAgeSecondsAtEntry: Number.isFinite(firstTradeSeconds)
+      ? Math.max(0, observedTimestamp - firstTradeSeconds)
+      : null,
+  };
 };
 
 /** Build aggregates using only rows strictly before the wallet buy, including id as a
@@ -300,70 +519,31 @@ export const readPreEventFeatures = (
       observedTimestamp,
       buyTradeId,
     ) as unknown as PriorTrade[];
-  const priorWalletTradeCount = rows.length;
-  const buys = rows.filter((row) => row.eventType === 'buy');
-  const sells = rows.filter((row) => row.eventType === 'sell');
-  const buyVolume = buys.reduce((sum, row) => sum + (amount(row.costUsd) ?? 0), 0);
-  const sellVolume = sells.reduce((sum, row) => sum + (amount(row.costUsd) ?? 0), 0);
-  const returns: Array<{
-    tokenAddress: string;
-    returnPercent: number;
-    profitUsd: number;
-    day: string;
-  }> = [];
-  const lastBuyByToken = new Map<string, number>();
-  const profitByToken = new Map<string, number>();
-  const profitByDay = new Map<string, number>();
-  const holds: number[] = [];
-  for (const row of rows) {
-    if (row.eventType === 'buy') {
-      lastBuyByToken.set(row.tokenAddress, row.observedTimestamp);
-      continue;
-    }
-    const proceeds = amount(row.costUsd);
-    const costBasis = amount(row.buyCostUsd);
-    const boughtAt = lastBuyByToken.get(row.tokenAddress);
-    if (boughtAt !== undefined) holds.push(Math.max(0, row.observedTimestamp - boughtAt));
-    if (proceeds === null || costBasis === null || costBasis <= 0) continue;
-    const profitUsd = proceeds - costBasis;
-    const returnPercent = (profitUsd / costBasis) * 100;
-    const day = new Date(row.observedTimestamp * 1000).toISOString().slice(0, 10);
-    returns.push({ tokenAddress: row.tokenAddress, returnPercent, profitUsd, day });
-    profitByToken.set(row.tokenAddress, (profitByToken.get(row.tokenAddress) ?? 0) + profitUsd);
-    profitByDay.set(day, (profitByDay.get(day) ?? 0) + profitUsd);
-  }
-  const positiveProfit = [...profitByToken.values()]
-    .filter((value) => value > 0)
-    .reduce((sum, value) => sum + value, 0);
-  const bestTokenProfit = Math.max(0, ...profitByToken.values());
-  const positiveDays = [...profitByDay.values()].filter((value) => value > 0).length;
-  const realizedProfit =
-    returns.length === 0 ? null : returns.reduce((sum, row) => sum + row.profitUsd, 0);
-  const winningReturns = returns.filter((row) => row.returnPercent > 0).length;
-  const positiveDaysWithData = profitByDay.size;
-  const row: PreEventFeatures = {
-    priorWalletTradeCount,
-    priorTokenTradeCount: rows.filter((prior) => prior.tokenAddress === tokenAddress).length,
-    priorWalletBuyVolumeUsd: buyVolume,
-    priorWalletBuyCount: buys.length,
-    priorWalletSellCount: sells.length,
-    priorWalletSellVolumeUsd: sellVolume,
-    priorWalletRealizedProfitUsd: realizedProfit,
-    priorWalletMedianReturnPercent: median(returns.map((entry) => entry.returnPercent)),
-    priorWalletWinRatePercent:
-      returns.length === 0 ? null : (winningReturns / returns.length) * 100,
-    priorWalletPositiveDayPercent:
-      positiveDaysWithData === 0 ? null : (positiveDays / positiveDaysWithData) * 100,
-    priorWalletBestTokenProfitSharePercent:
-      positiveProfit <= 0 ? null : (bestTokenProfit / positiveProfit) * 100,
-    priorWalletMedianHoldSeconds: median(holds),
-    priorWalletUnder15SecondsPercent:
-      holds.length === 0
-        ? null
-        : (holds.filter((seconds) => seconds <= 15).length / holds.length) * 100,
-    priorWalletPairedTradeCount: holds.length,
-  };
-  return row;
+  const accumulator = new PreEventAccumulator();
+  for (const row of rows) accumulator.apply(row);
+  const entry = database
+    .prepare(
+      `SELECT cost_usd AS costUsd, launchpad_platform AS launchpadPlatform FROM copytrade_trades WHERE id = ?`,
+    )
+    .get(buyTradeId) as { costUsd: string | null; launchpadPlatform: string | null } | undefined;
+  return addTokenEntryContext(
+    database,
+    accumulator.snapshot(
+      tokenAddress,
+      entry
+        ? {
+            ...entry,
+            id: buyTradeId,
+            eventType: 'buy',
+            tokenAddress,
+            observedTimestamp,
+            buyCostUsd: null,
+          }
+        : undefined,
+    ),
+    tokenAddress,
+    observedTimestamp,
+  );
 };
 
 const fullyCoveredWalletAddresses = (
@@ -421,11 +601,84 @@ const aggregateEntries = (trades: CopySimulationTradeResult[]): AggregatedEntry[
     .map(aggregateEntry);
 };
 
-const normalizedRow = (
+type PatternDiscoveryEntry = {
+  wallet: CopySimulationWalletReport;
+  entry: AggregatedEntry;
+};
+
+const readPreEventFeatureSnapshots = (
   database: DatabaseSync,
+  entries: PatternDiscoveryEntry[],
+  onWallet?: (completed: number, total: number, walletAddress: string) => void,
+): Map<number, PreEventFeatures> => {
+  const entriesByWallet = new Map<string, PatternDiscoveryEntry[]>();
+  for (const item of entries) {
+    const group = entriesByWallet.get(item.wallet.walletAddress) ?? [];
+    group.push(item);
+    entriesByWallet.set(item.wallet.walletAddress, group);
+  }
+  const snapshots = new Map<number, PreEventFeatures>();
+  const wallets = [...entriesByWallet.entries()];
+  for (let walletIndex = 0; walletIndex < wallets.length; walletIndex += 1) {
+    const [walletAddress, walletEntries] = wallets[walletIndex];
+    const requested = new Map(
+      walletEntries.map((item) => [
+        item.entry.buyTradeId,
+        item.entry.trades[0]?.tokenAddress ?? '',
+      ]),
+    );
+    const rows = database
+      .prepare(
+        `SELECT id, event_type AS eventType, token_address AS tokenAddress,
+                observed_timestamp AS observedTimestamp, cost_usd AS costUsd,
+                buy_cost_usd AS buyCostUsd, launchpad_platform AS launchpadPlatform
+         FROM copytrade_trades
+         WHERE chain = 'sol' AND wallet_address = ? AND event_type IN ('buy', 'sell')
+         ORDER BY observed_timestamp ASC, id ASC`,
+      )
+      .all(walletAddress) as unknown as PriorTrade[];
+    const accumulator = new PreEventAccumulator();
+    for (const row of rows) {
+      const tokenAddress = requested.get(row.id);
+      if (tokenAddress !== undefined) {
+        snapshots.set(
+          row.id,
+          addTokenEntryContext(
+            database,
+            accumulator.snapshot(tokenAddress, row),
+            tokenAddress,
+            row.observedTimestamp,
+          ),
+        );
+      }
+      accumulator.apply(row);
+    }
+    for (const item of walletEntries) {
+      if (!snapshots.has(item.entry.buyTradeId)) {
+        const trade = item.entry.trades[0];
+        if (!trade?.buyAt) throw new Error('Pattern Discovery entry is missing its buy time.');
+        snapshots.set(
+          item.entry.buyTradeId,
+          readPreEventFeatures(
+            database,
+            walletAddress,
+            trade.tokenAddress,
+            trade.buyAt,
+            item.entry.buyTradeId,
+          ),
+        );
+      }
+    }
+    onWallet?.(walletIndex + 1, wallets.length, walletAddress);
+  }
+  return snapshots;
+};
+
+const normalizedRow = (
   wallet: CopySimulationWalletReport,
   entry: AggregatedEntry,
   periodDays: number,
+  prior: PreEventFeatures,
 ): PatternDiscoveryExportRow => {
   const trade = entry.trades[0];
   if (
@@ -438,13 +691,6 @@ const normalizedRow = (
       `Fully covered wallet ${wallet.walletAddress} contained a non-simulated or incomplete round trip.`,
     );
   }
-  const prior = readPreEventFeatures(
-    database,
-    wallet.walletAddress,
-    trade.tokenAddress,
-    trade.buyAt,
-    entry.buyTradeId,
-  );
   const stake =
     entry.trades.reduce((sum, item) => sum + (item.copyStakeUsd ?? 0), 0) || entry.trades.length;
   const simulatedPnl = entry.trades.reduce(
@@ -497,6 +743,19 @@ const normalizedRow = (
       prior_wallet_median_hold_seconds: prior.priorWalletMedianHoldSeconds,
       prior_wallet_under_15_seconds_percent: prior.priorWalletUnder15SecondsPercent,
       prior_wallet_paired_trade_count: prior.priorWalletPairedTradeCount,
+      prior_wallet_distinct_token_count: prior.priorWalletDistinctTokenCount,
+      prior_wallet_trades_per_active_day: prior.priorWalletTradesPerActiveDay,
+      prior_wallet_median_buy_size_usd: prior.priorWalletMedianBuySizeUsd,
+      prior_wallet_return_volatility_percent: prior.priorWalletReturnVolatilityPercent,
+      prior_wallet_top3_token_profit_share_percent: prior.priorWalletTop3TokenProfitSharePercent,
+      prior_token_buy_count: prior.priorTokenBuyCount,
+      prior_token_sell_count: prior.priorTokenSellCount,
+      prior_token_buy_volume_usd: prior.priorTokenBuyVolumeUsd,
+      prior_token_sell_volume_usd: prior.priorTokenSellVolumeUsd,
+      token_market_cap_at_entry: prior.tokenMarketCapAtEntry,
+      token_age_seconds_at_entry: prior.tokenAgeSecondsAtEntry,
+      token_launchpad_platform: prior.tokenLaunchpadPlatform,
+      entry_trade_amount_usd: prior.entryTradeAmountUsd,
     },
     hold_seconds: Math.max(0, (Date.parse(lastTrade.sellAt!) - Date.parse(trade.buyAt)) / 1000),
     wallet_return_percent: walletReturnPercent,
@@ -522,43 +781,40 @@ const normalizedRow = (
   };
 };
 
-/**
- * Read-only adapter boundary for the shared pattern finder. Wallets enter the population only
- * through persisted local-history coverage markers; returns are never used for selection. The
- * copy-simulation report then applies the requested minimum outcome-coverage threshold.
- */
-export const readPatternDiscoveryExport = (
-  database: DatabaseSync,
-  periodDays = DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
-  limit = MAX_PATTERN_DISCOVERY_WALLETS,
-  minimumCoveragePercent = 100,
+export type PatternDiscoveryGridProgress = {
+  stage: 'simulation' | 'indexing Dune evidence' | 'features' | 'finalizing';
+  message: string;
+  walletsCompleted?: number;
+  walletsTotal?: number;
+  independentEntries?: number;
+};
+
+const buildPatternDiscoveryExport = (
+  simulationWallets: CopySimulationWalletReport[],
+  rowsWithCoverage: Array<{ row: PatternDiscoveryExportRow; coverage: number }>,
+  selectedPeriod: number,
+  selectedCoverage: number,
+  exitRowsByWallet: Map<string, number>,
 ): PatternDiscoveryExport => {
-  const selectedPeriod = validatePeriodDays(periodDays);
-  const selectedLimit = validateWalletLimit(limit);
-  const selectedCoverage = validateCoveragePercent(minimumCoveragePercent);
-  const walletAddresses = fullyCoveredWalletAddresses(database, selectedPeriod, selectedLimit);
-  const simulation = computeCopySimulationReport(database, {
-    walletAddresses,
-    periodDays: selectedPeriod,
-  });
-  const eligibleWallets = simulation.wallets.filter(
+  const eligibleWallets = simulationWallets.filter(
     (wallet) => (wallet.coverageRatePercent ?? 0) >= selectedCoverage,
   );
-  const entries = eligibleWallets.flatMap((wallet) =>
-    aggregateEntries(wallet.trades).map((entry) => ({ wallet, entry })),
+  const eligibleAddresses = new Set(eligibleWallets.map((wallet) => wallet.walletAddress));
+  const rows = rowsWithCoverage
+    .filter((item) => item.coverage >= selectedCoverage)
+    .map((item) => item.row);
+  const exitRows = [...eligibleAddresses].reduce(
+    (sum, walletAddress) => sum + (exitRowsByWallet.get(walletAddress) ?? 0),
+    0,
   );
-  const rows = entries.map(({ wallet, entry }) =>
-    normalizedRow(database, wallet, entry, selectedPeriod),
-  );
-
   return {
     metadata: {
       project: 'crypto',
       schema_version: 'normalized-v1',
-      feature_allowlist_version: 'gmgn-v3-pre-event-only',
+      feature_allowlist_version: 'gmgn-v4-historical-context',
       feature_source: 'features',
       feature_policy:
-        'Only the explicit row.features object is eligible for discovery. Every historical aggregate is calculated strictly before the event buy, with the buy id as a same-second tie-breaker. Future outcome, return, delay, fee, and post-event matching fields are labels or metadata, never discovery inputs; prior holding-time metrics are allowed because they are known before the event.',
+        'Only the explicit row.features object is eligible for discovery. Historical aggregates use trades strictly before the event buy with the buy id as a same-second tie-breaker. Token market cap is sourced strictly before the buy; token age, launchpad, and entry size are event-time context. Future outcome, return, delay, fee, coverage, and post-event matching fields are labels or metadata, never discovery inputs. GMGN tags and true historical liquidity are not included because the current source does not provide them.',
       outcome: 'net_return_after_costs',
       outcome_horizon: `copy-${selectedPeriod}d`,
       period_days: selectedPeriod,
@@ -570,19 +826,128 @@ export const readPatternDiscoveryExport = (
       shared_engine_database_opened: false,
       selected_wallet_count: eligibleWallets.length,
       exported_rows: rows.length,
-      eligible_wallets_before_threshold: simulation.wallets.length,
-      excluded_wallets_below_threshold: simulation.wallets.length - eligibleWallets.length,
-      coverage_distribution_percent: simulation.wallets.map(
+      eligible_wallets_before_threshold: simulationWallets.length,
+      excluded_wallets_below_threshold: simulationWallets.length - eligibleWallets.length,
+      coverage_distribution_percent: simulationWallets.map(
         (wallet) => wallet.coverageRatePercent ?? 0,
       ),
       aggregation: 'one_row_per_buy_entry_all_exits_usable',
       independent_entry_count: rows.length,
-      exit_rows_collapsed:
-        entries.reduce((sum, item) => sum + item.entry.trades.length, 0) - rows.length,
+      exit_rows_collapsed: Math.max(0, exitRows - rows.length),
       wallet_balanced_validation:
         'The shared engine weights each eligible entry by 1 / entries_per_wallet so every wallet contributes equal total weight; chronological validation remains unchanged.',
       export_generated_at: new Date().toISOString(),
     },
     rows,
   };
+};
+
+/** Build the complete coverage grid from one simulation and one chronological wallet scan. */
+export const readPatternDiscoveryExportGrid = (
+  database: DatabaseSync,
+  periodDays = DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
+  limit = MAX_PATTERN_DISCOVERY_WALLETS,
+  coverageThresholds: number[] = [100],
+  onProgress?: (progress: PatternDiscoveryGridProgress) => void,
+): Map<number, PatternDiscoveryExport> => {
+  const selectedPeriod = validatePeriodDays(periodDays);
+  const selectedLimit = validateWalletLimit(limit);
+  const thresholds = [...new Set(coverageThresholds.map(validateCoveragePercent))].sort(
+    (left, right) => left - right,
+  );
+  const minimumCoverage = thresholds[0] ?? 100;
+  const walletAddresses = fullyCoveredWalletAddresses(database, selectedPeriod, selectedLimit);
+  onProgress?.({
+    stage: 'simulation',
+    message: `Reconstructing delayed-copy outcomes once for ${walletAddresses.length} wallets…`,
+    walletsTotal: walletAddresses.length,
+  });
+  const simulation = computeCopySimulationReport(database, {
+    walletAddresses,
+    periodDays: selectedPeriod,
+    onMatchIndexProgress: (indexProgress) =>
+      onProgress?.({
+        stage: 'indexing Dune evidence',
+        message: `One-time Dune index: run ${indexProgress.completedRuns}/${indexProgress.totalRuns}; ${indexProgress.indexedTradeLegs.toLocaleString()} trade legs indexed.`,
+        walletsTotal: walletAddresses.length,
+      }),
+  });
+  const candidateWallets = simulation.wallets.filter(
+    (wallet) => (wallet.coverageRatePercent ?? 0) >= minimumCoverage,
+  );
+  const entries: PatternDiscoveryEntry[] = candidateWallets.flatMap((wallet) =>
+    aggregateEntries(wallet.trades).map((entry) => ({ wallet, entry })),
+  );
+  onProgress?.({
+    stage: 'features',
+    message: `Building point-in-time features for ${entries.length} independent entries…`,
+    walletsCompleted: 0,
+    walletsTotal: candidateWallets.length,
+    independentEntries: entries.length,
+  });
+  const snapshots = readPreEventFeatureSnapshots(
+    database,
+    entries,
+    (completed, total, walletAddress) =>
+      onProgress?.({
+        stage: 'features',
+        message: `Point-in-time features: wallet ${completed}/${total} (${walletAddress.slice(0, 6)}…)`,
+        walletsCompleted: completed,
+        walletsTotal: total,
+        independentEntries: entries.length,
+      }),
+  );
+  const rowsWithCoverage = entries.map(({ wallet, entry }) => {
+    const prior = snapshots.get(entry.buyTradeId);
+    if (!prior) throw new Error(`Missing pre-event snapshot for trade ${entry.buyTradeId}.`);
+    return {
+      row: normalizedRow(wallet, entry, selectedPeriod, prior),
+      coverage: wallet.coverageRatePercent ?? 0,
+    };
+  });
+  const exitRowsByWallet = new Map<string, number>();
+  for (const { wallet, entry } of entries) {
+    exitRowsByWallet.set(
+      wallet.walletAddress,
+      (exitRowsByWallet.get(wallet.walletAddress) ?? 0) + entry.trades.length,
+    );
+  }
+  onProgress?.({
+    stage: 'finalizing',
+    message: `Finalizing ${thresholds.length} coverage datasets from the shared feature rows…`,
+    walletsCompleted: candidateWallets.length,
+    walletsTotal: candidateWallets.length,
+    independentEntries: entries.length,
+  });
+  return new Map(
+    thresholds.map((threshold) => [
+      threshold,
+      buildPatternDiscoveryExport(
+        simulation.wallets,
+        rowsWithCoverage,
+        selectedPeriod,
+        threshold,
+        exitRowsByWallet,
+      ),
+    ]),
+  );
+};
+
+/**
+ * Read-only adapter boundary for the shared pattern finder. Wallets enter the population only
+ * through persisted local-history coverage markers; returns are never used for selection. The
+ * copy-simulation report then applies the requested minimum outcome-coverage threshold.
+ */
+export const readPatternDiscoveryExport = (
+  database: DatabaseSync,
+  periodDays = DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS,
+  limit = MAX_PATTERN_DISCOVERY_WALLETS,
+  minimumCoveragePercent = 100,
+): PatternDiscoveryExport => {
+  const selectedCoverage = validateCoveragePercent(minimumCoveragePercent);
+  const result = readPatternDiscoveryExportGrid(database, periodDays, limit, [
+    selectedCoverage,
+  ]).get(selectedCoverage);
+  if (!result) throw new Error(`Pattern Discovery could not build ${selectedCoverage}% export.`);
+  return result;
 };

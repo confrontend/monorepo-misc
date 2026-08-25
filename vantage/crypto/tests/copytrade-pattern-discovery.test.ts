@@ -107,6 +107,22 @@ test('pattern discovery pre-event features exclude the current and later same-se
       'D4',
     );
     database.prepare(`UPDATE copytrade_trades SET buy_cost_usd = '25' WHERE id = 2`).run();
+    database
+      .prepare(`UPDATE copytrade_trades SET launchpad_platform = 'pumpdotfun' WHERE id = 4`)
+      .run();
+    database
+      .prepare(
+        `INSERT INTO tokens (token_address, symbol, first_trade_time, first_dex, source, imported_at, raw_payload)
+         VALUES ('TOKEN_A', 'A', ?, 'pumpdotfun', 'test', ?, '{}')`,
+      )
+      .run(new Date((1_700_000_000 - 100) * 1000).toISOString(), '2026-08-21T00:00:00.000Z');
+    database
+      .prepare(
+        `INSERT INTO gmgn_signals
+         (observed_at, token_address, signal_type, market_cap, raw_payload, captured_at, first_trigger_mc)
+         VALUES (?, 'TOKEN_A', 'test', 500, '{}', ?, 450)`,
+      )
+      .run(new Date((1_700_000_000 - 1) * 1000).toISOString(), '2026-08-21T00:00:00.000Z');
 
     const features = readPreEventFeatures(
       database,
@@ -129,6 +145,19 @@ test('pattern discovery pre-event features exclude the current and later same-se
     assert.equal(features.priorWalletMedianHoldSeconds, 10);
     assert.equal(features.priorWalletUnder15SecondsPercent, 100);
     assert.equal(features.priorWalletPairedTradeCount, 1);
+    assert.equal(features.priorWalletDistinctTokenCount, 2);
+    assert.equal(features.priorWalletTradesPerActiveDay, 3);
+    assert.equal(features.priorWalletMedianBuySizeUsd, 62.5);
+    assert.equal(features.priorWalletReturnVolatilityPercent, null);
+    assert.equal(features.priorWalletTop3TokenProfitSharePercent, 100);
+    assert.equal(features.priorTokenBuyCount, 1);
+    assert.equal(features.priorTokenSellCount, 1);
+    assert.equal(features.priorTokenBuyVolumeUsd, 25);
+    assert.equal(features.priorTokenSellVolumeUsd, 40);
+    assert.equal(features.tokenMarketCapAtEntry, 450);
+    assert.equal(features.tokenAgeSecondsAtEntry, 300);
+    assert.equal(features.tokenLaunchpadPlatform, 'pumpdotfun');
+    assert.equal(features.entryTradeAmountUsd, 999);
   } finally {
     database.close();
   }
