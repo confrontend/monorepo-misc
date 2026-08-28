@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { HTMLAttributes, Key, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
+import type {
+  HTMLAttributes,
+  Key,
+  ReactElement,
+  ReactNode,
+  TdHTMLAttributes,
+  ThHTMLAttributes,
+} from 'react';
 
 type DataTableColumn<Row> = {
   key: string;
@@ -31,7 +38,31 @@ type DataTableProps<Row> = {
   tableClassName?: string;
   enableColumnHiding?: boolean;
   columnVisibilityStorageKey?: string;
+  enableExport?: boolean;
+  exportFilename?: string;
+  /** Replaces the body rows with a single spinner row spanning every visible column. */
+  isLoading?: boolean;
+  loadingMessage?: ReactNode;
+  /** Replaces the body rows with a single error row; takes priority over isLoading. */
+  isError?: boolean;
+  errorMessage?: ReactNode;
 };
+
+const csvText = (value: ReactNode): string => {
+  if (value === null || value === undefined || typeof value === 'boolean') return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map(csvText).join('');
+  if (typeof value === 'object' && 'props' in value) {
+    const props = (value as ReactElement<{ status?: string; tag?: string; value?: unknown; children?: ReactNode }>).props;
+    if (props.status) return props.status.replaceAll('_', ' ');
+    if (props.tag) return props.tag;
+    if (props.value !== undefined && typeof props.value !== 'object') return String(props.value);
+    return csvText(props.children);
+  }
+  return '';
+};
+
+const csvCell = (value: string): string => `"${value.replaceAll('"', '""')}"`;
 
 const defaultColumnLabel = (key: string): string =>
   key
@@ -49,6 +80,12 @@ export function DataTable<Row>({
   tableClassName,
   enableColumnHiding = false,
   columnVisibilityStorageKey,
+  enableExport = false,
+  exportFilename = 'table.csv',
+  isLoading = false,
+  loadingMessage = 'Loading…',
+  isError = false,
+  errorMessage = 'Something went wrong.',
 }: DataTableProps<Row>) {
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
 
@@ -82,8 +119,26 @@ export function DataTable<Row>({
       current.includes(key) ? current.filter((value) => value !== key) : [...current, key],
     );
   };
+  const exportTable = () => {
+    const header = visibleColumns.map((column) => csvCell(column.label ?? csvText(column.header)));
+    const body = rows.map((row, index) =>
+      visibleColumns.map((column) => csvCell(csvText(column.render(row, index)))),
+    );
+    const csv = [header, ...body].map((line) => line.join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = exportFilename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   return (
     <div className={`${wrapClassName} data-table-wrap`}>
+      {enableExport && (
+        <button type="button" className="secondary data-table-export" onClick={exportTable}>
+          Export CSV
+        </button>
+      )}
       {enableColumnHiding && (
         <details className="data-table-column-picker">
           <summary>Columns</summary>
@@ -119,21 +174,37 @@ export function DataTable<Row>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={getRowKey(row, index)} {...rowProps?.(row, index)}>
-              {visibleColumns.map((column) => (
-                <td key={column.key} {...column.cellProps?.(row, index)}>
-                  {column.render(row, index)}
-                </td>
-              ))}
-            </tr>
-          ))}
-          {rows.length === 0 && emptyMessage !== undefined && (
+          {isError ? (
             <tr>
-              <td colSpan={visibleColumns.length} className="muted">
-                {emptyMessage}
+              <td colSpan={visibleColumns.length} className="muted data-table-error-cell">
+                {errorMessage}
               </td>
             </tr>
+          ) : isLoading ? (
+            <tr>
+              <td colSpan={visibleColumns.length} className="muted data-table-loading-cell">
+                <span className="loading-spinner" aria-hidden="true" /> {loadingMessage}
+              </td>
+            </tr>
+          ) : (
+            <>
+              {rows.map((row, index) => (
+                <tr key={getRowKey(row, index)} {...rowProps?.(row, index)}>
+                  {visibleColumns.map((column) => (
+                    <td key={column.key} {...column.cellProps?.(row, index)}>
+                      {column.render(row, index)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {rows.length === 0 && emptyMessage !== undefined && (
+                <tr>
+                  <td colSpan={visibleColumns.length} className="muted">
+                    {emptyMessage}
+                  </td>
+                </tr>
+              )}
+            </>
           )}
         </tbody>
       </table>

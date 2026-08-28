@@ -8,6 +8,7 @@ import {
   readPatternDiscoveryCache,
   readPatternDiscoveryDataFingerprint,
   readPatternDiscoveryExport,
+  readLatestPatternDiscoveryCache,
   readPreEventFeatures,
   writePatternDiscoveryCache,
 } from '../src/copytrade/discovery/patternDiscovery.js';
@@ -182,6 +183,22 @@ test('pattern discovery cache changes when persisted evidence changes', () => {
     const secondFingerprint = readPatternDiscoveryDataFingerprint(database);
     assert.notEqual(secondFingerprint, firstFingerprint);
     assert.equal(readPatternDiscoveryCache(database, key, secondFingerprint), null);
+  } finally {
+    database.close();
+  }
+});
+
+test('pattern discovery exposes the last saved result as metadata after evidence changes', () => {
+  const database = setup();
+  try {
+    const key = patternDiscoveryCacheKey('sensitivity', 30, 50, 10);
+    const fingerprint = readPatternDiscoveryDataFingerprint(database);
+    writePatternDiscoveryCache(database, key, fingerprint, { cached: true });
+
+    const latest = readLatestPatternDiscoveryCache<{ cached: boolean }>(database, key);
+    assert.deepEqual(latest?.value, { cached: true });
+    assert.equal(latest?.metadata.dataFingerprint, fingerprint);
+    assert.ok(latest?.metadata.updatedAt);
   } finally {
     database.close();
   }

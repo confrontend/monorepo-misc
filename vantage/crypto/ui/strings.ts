@@ -1,4 +1,75 @@
 export const strings = {
+  liveEvaluation: {
+    title: 'Live Evaluation',
+    subtitle: 'GMGN-only wallet estimate',
+    disclaimer: 'GMGN only · no Dune validation',
+    addressLabel: 'Wallet address',
+    addressPlaceholder: 'Solana wallet address',
+    evaluateButton: 'Evaluate',
+    evaluatingButton: 'Evaluating…',
+    fetchingNotice:
+      'Fetching this wallet’s 30-day GMGN data — a cold wallet with a lot of activity can take a while.',
+    stopButton: 'Stop',
+    stoppingButton: 'Stopping…',
+    stoppedNotice:
+      'Stop requested. Finishing the current page, then scoring from whatever was fetched.',
+    progress: {
+      expectedTrades: 'Expected trades',
+      storedTrades: 'Stored so far',
+      remainingTrades: 'Remaining',
+      requestsMade: 'Requests made',
+      estimatedRemaining: 'Est. remaining',
+    },
+    verdictLabels: {
+      pass: 'Pass',
+      reject: 'Reject',
+      insufficient_evidence: 'Insufficient Evidence',
+    },
+    confidenceLabel: 'Confidence',
+    evidenceLevelLabel: 'Evidence level',
+    profileStatusLabel: 'Pattern Discovery profile',
+    profileStatus: {
+      loaded: 'Loaded (current)',
+      stale: 'Loaded (stale — evidence has changed since this profile was computed)',
+      unavailable: 'Unavailable',
+    },
+    componentScoreLabels: {
+      historicalProfitability: 'Historical profitability',
+      consistency: 'Consistency',
+      robustness: 'Robustness',
+      copyability: 'Copyability',
+    },
+    componentScoreDescriptions: {
+      historicalProfitability:
+        'GMGN-realized median return — not Decision Lab’s Dune-simulated Edge.',
+      consistency: 'Share of saved weekly/monthly periods with a positive median return.',
+      robustness: 'Performance after removing the single best token.',
+      copyability:
+        'Holding-time proxy, reduced by promoted hyperactivity/fast-trading penalties. No Dune coverage term.',
+    },
+    overallScoreLabel: 'Estimated overall score',
+    weightingUnavailable: 'No validated weighting exists — an overall score is not produced.',
+    positiveReasonsTitle: 'Main positive reasons',
+    riskReasonsTitle: 'Main risk/rejection reasons',
+    noReasons: 'None.',
+    gmgnStatsTitle: '30-day GMGN stats used',
+    rulesAppliedTitle: 'Pattern Discovery rules that affected the result',
+    rulesUnavailableTitle: 'Promoted rules not applied',
+    rulesUnavailableReasons: {
+      'no-gmgn-mapping': 'No standing-wallet equivalent',
+      'condition-shape-not-modeled': 'Condition shape not modeled',
+      'insufficient-wallet-data': 'Insufficient wallet data',
+    },
+    noRulesApplied: 'No promoted rule affected this result.',
+    noRulesUnavailable: 'None.',
+    historyTitle: 'Evaluation history',
+    historyCaption: 'Each evaluation is compared with the immediately older evaluation for this wallet. Higher score is better.',
+    historyEmpty: 'No prior evaluation history is available yet.',
+    historyFirst: 'First evaluation',
+    historySourceLive: 'Live Evaluation',
+    historySourceDecisionLab: 'Decision Lab',
+    emptyState: 'Enter a wallet address and click Evaluate.',
+  },
   decisionLab: {
     copyingRisk: 'Copying risk',
     copyingRiskUnknown: 'Not enough data',
@@ -7,6 +78,33 @@ export const strings = {
     copyingRiskHigh: 'Copying risk',
     copyingRiskTitle: 'Whether trade size appears to threaten successful copying',
     bandDetails: 'Technical size-band evidence',
+    scoreUnavailable: {
+      missing: 'No simulation',
+      partial: 'Partial evidence',
+      insufficient: 'Insufficient evidence',
+      complete: 'Gate failed',
+    },
+    sourceSummary:
+      'Decision Lab is an exploratory, read-only ranking built from the last saved 30-day GMGN wallet data and saved Dune delayed-copy simulations. Live Evaluation fetches do not replace this report; use Reload saved evidence to recalculate it. It does not change the production verdict.',
+    scoringTitle: 'How scoring works',
+    scoringRule:
+      'Each group receives a score from 0 to 100. The overall score is their weighted average; it is a comparison score, not a guaranteed profit forecast.',
+    candidateGatesLabel: 'Final-candidate gates:',
+    componentDescriptions: {
+      edge: 'typical delayed-copy return',
+      consistency: 'repeatability across saved periods',
+      robustness: 'performance after removing the best token',
+      copyability: 'coverage, holding time, and validated copying penalties',
+    },
+    candidateGates:
+      'Final-candidate gates are separate from the weighted score: complete evidence, positive delayed-copy median, a $100 portfolio ending above $100, and a passing out-of-sample stability check.',
+    missingEvidence:
+      'Missing evidence stays unavailable—not zero—and prevents a raw overall score until all four components can be calculated.',
+    weightsTitle: 'Weights currently in use',
+    tableLegend: 'Scores run from 0 to 100; higher is better.',
+    winnersOnly: 'Winners only',
+    walletFilterPlaceholder: 'Filter wallet or name',
+    generatedAt: (date: string) => `Report generated ${date}.`,
   },
   common: {
     signalTypeLabels: {
@@ -579,80 +677,17 @@ export const strings = {
     stopBatchRequested:
       'Stop requested. The current Dune batch will finish, then no further batches will be submitted.',
   },
-  scrutiny: {
-    noReportReturned: 'No pinned wallet returned a scrutiny report.',
-    newTrades: (label: string, delta: number) =>
-      `${label}: +${delta} new trade${delta === 1 ? '' : 's'}`,
-    noNewTrades: (label: string) => `${label}: no new trades (already up to date)`,
-    simulationAlreadyRunning: 'A copy simulation is already running.',
-    duneCoverageRunFinished: (walletCount: number, submitted: number, total: number) =>
-      `Dune coverage run finished for ${walletCount} pinned wallet(s) (${submitted}/${total} targets submitted).`,
-    newDuneMatches: (label: string, delta: number) => `${label}: +${delta} newly Dune-matched`,
-    noNewDuneMatches: (label: string) =>
-      `${label}: no new matches (already up to date, or Dune returned nothing)`,
-    noUsableRiskResponse: (wallet: string) =>
-      `This file has no usable 30d risk response for ${wallet}.`,
-    importedRiskUnavailable: 'The imported GMGN response was unavailable.',
-    importedRiskDetails: 'Imported GMGN 30-day risk details.',
-    couldNotReadRiskJson: 'Could not read the GMGN risk JSON.',
-    maxPinnedWallets: (max: number) =>
-      `At most ${max} wallets can be pinned for scrutiny at once — unpin one first.`,
-    fetchAlreadyRunningWaiting: 'A CopyTrade fetch is already running. Waiting for it to finish.',
-    gmgnRiskLoadedUnavailable: (unavailable: number) =>
-      `GMGN risk details loaded with ${unavailable} unavailable period${unavailable === 1 ? '' : 's'}.`,
-    gmgnRiskLoadedForSelected: 'GMGN risk details loaded for the selected wallets.',
-    eyebrow: 'SCRUTINY · INDIVIDUAL CANDIDATE INTERROGATION',
-    heading: 'Does each wallet hold up?',
-    introPrefix: 'Mirrors the saved 30-day GMGN Wallet Stats table. Reads',
-    introMiddle:
-      '(per-wallet checks, from already-stored GMGN/Dune evidence); the risk-detail drop zone below uses',
-    introSuffix: 'to save an imported file locally — none of these call GMGN or Dune directly.',
-    reviewingWallets: (count: number | string) =>
-      `Automatically reviewing ${count} wallets from the 30-day GMGN Wallet Stats table. Click a row for the detailed view.`,
-    all: 'all',
-    noScoredDataFor: (wallets: string) =>
-      `No scored data yet for: ${wallets}. Fetch their trades first.`,
-    readingSavedEvidence:
-      'Reading saved GMGN and Dune evidence from SQLite — no provider fetch is running.',
-    noScrutinyDataForPinned: 'No scrutiny data yet for the pinned wallets.',
-    verdictLegendAriaLabel: 'Verdict legend',
-    columnRank: 'Rank',
-    rankTitle: 'Current rank in the selected GMGN top-100 roster',
-    columnWallet: 'Wallet',
-    checkTitle: (label: string, verdictLabel: string, detail: string) =>
-      `${label}: ${verdictLabel} — ${detail}`,
-    scrutinyDetailsFor: (name: string) => `Scrutiny details for ${name}`,
-    closeDetails: 'Close details',
-    viewOnGmgn: 'View on GMGN ↗',
-    gmgnRiskDetailsAriaLabel: 'GMGN risk details',
-    gmgn30dRiskHeading: 'GMGN 30-day risk details',
-    exportRiskJsonNote: (viewOnGmgn: string) =>
-      `Click ${viewOnGmgn} above, then export the 30d risk JSON from the extension.`,
-    dropExportedJsonHere: 'Drop the exported JSON here',
-    orChooseFile: 'or choose a file from your computer',
-    day30Label: '30d',
-    openGmgnAndImport: 'Open GMGN and import the exported JSON above.',
-    unavailable: 'Unavailable',
-    pnl: 'P&L',
-    winRate: 'Win rate',
-    fees: 'Fees',
-    avgHold: 'Avg hold',
-    fastTx: 'Fast tx',
-    sellGtBuy: 'Sell>buy',
-    noBuyHold: 'No buy/hold',
-    nativeBalance: 'Native balance',
-  },
   header: {
     eyebrow: 'GMGN / DUNE · BACKTEST',
     title: 'GMGN/Dune Backtest',
     lede: 'Find promising Solana wallets by comparing GMGN performance with realistic delayed-copy backtests.',
-    sqliteConnected: 'SQLite connected',
-    sectionsAriaLabel: 'CopyTrade sections',
-    navWalletStats: 'CopyTrade · GMGN wallet stats',
-    navPatternDiscovery: 'CopyTrade · Pattern Discovery',
-    navScrutiny: 'CopyTrade · Scrutiny',
-    navApiReference: 'CopyTrade · API Reference',
-    navDecisionLab: 'CopyTrade · Decision Lab',
+    themeLight: 'Light mode',
+    themeDark: 'Dark mode',
+    sectionsAriaLabel: 'Research sections',
+    navWalletStats: 'Wallet Data',
+    navPatternDiscovery: 'Pattern Research',
+    navApiReference: 'API Docs',
+    navDecisionLab: 'Decision Engine',
     signalWorkspaceAriaLabel: 'Signal workspace',
     signalLabel: 'Signal',
     navImports: 'Imports',
@@ -1041,11 +1076,6 @@ export const strings = {
     verdictNotCopyableNote: 'The typical holding time is shorter than the configured copy delay.',
     verdictOtherNote:
       'This is a historical or data-quality result, not a final follow recommendation.',
-    scrutinyChecksLabel: 'Scrutiny checks',
-    scrutinyChecksTip:
-      'The same per-wallet checks shown on the Scrutiny tab (GET /api/copytrade/scrutiny), computed once from already-stored GMGN/Dune evidence — no new provider request.',
-    loadingSavedScrutinyEvidence: 'Loading saved Scrutiny evidence…',
-    noScrutinyDataForWallet: 'No scrutiny data yet for this wallet. Fetch its trades first.',
     hundredDollarPathLabel: '$100 after-copy path',
     hundredDollarPathTip:
       'The simulated cash balance after each completed copied trade, using the configured delay, fees, slippage, gas, fixed $10 stake, and position limit. Older saved runs may show one point per day until they are recomputed.',
@@ -1200,6 +1230,30 @@ export const strings = {
     },
   },
   patternDiscovery: {
+    summaryEyebrow: 'DISCOVERY SUMMARY',
+    summaryTitle: 'What the run found',
+    promotedPatterns: 'promoted patterns',
+    stableCoverageLevels: 'coverage levels stable',
+    highestUsefulCoverage: 'highest useful coverage',
+    stableAtFullCoverage: 'stable patterns at 100%',
+    strongestSignal: 'Strongest recurring signal:',
+    strongestSignalText: 'high wallet activity → worse future copy returns.',
+    coverageSensitivityTitle: 'Coverage sensitivity',
+    coverageSensitivityHint: 'Click a coverage level to inspect its run details.',
+    promoted: 'promoted',
+    coverageDetailEvents: (wallets: string, rows: string, stable: number) =>
+      `${wallets} wallets · ${rows} events · ${stable} stable patterns`,
+    strictCoverageNote:
+      'The strictest level has the smallest cohort. Zero stable patterns here does not invalidate patterns that repeat across wider coverage levels.',
+    methodologyDiagnostics: 'Methodology and 100% diagnostics',
+    validationSurvivorsAtFullCoverage: '100% validation survivors',
+    discoveryRows: 'discovery rows',
+    validationRows: 'validation rows',
+    holdoutRows: 'untouched holdout rows',
+    direction: 'Direction',
+    strength: 'Strength',
+    strong: 'Strong',
+    medium: 'Medium',
     gridEyebrow: 'SHARED-GRID RESULT',
     gridTitle: 'What did the full discovery run learn?',
     gridStatus: (eligibleLevels: number, availableLevels: number): string =>
@@ -1240,6 +1294,11 @@ export const strings = {
     evidenceSearch: 'Find a rule',
     evidenceSearchPlaceholder: 'Feature, condition, or status',
     evidenceEmpty: 'No rules match the selected filters.',
+    currentResult: 'Current result matches the saved evidence.',
+    staleResult: (time: string) =>
+      `Showing the previous result from ${time}. New evidence is available; refresh discovery before relying on it.`,
+    staleResultSafety: 'This older result is display-only and is not used by Decision Lab scoring.',
+    remainingWork: (count: number) => `${count} coverage level${count === 1 ? '' : 's'} remaining`,
     evidenceFeature: 'Rule / feature',
     evidenceCategory: 'Decision Lab group',
     evidenceCondition: 'Condition',

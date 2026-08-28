@@ -1458,19 +1458,20 @@ export const runCopyTradeFetch = async (
   }
 };
 
-export const startCopyTradeFetch = (
+/** Inserts the run-bookkeeping row `runCopyTradeFetch` reports progress against. Factored out
+ *  of `startCopyTradeFetch` so a caller that wants to `await runCopyTradeFetch` directly
+ *  (rather than fire-and-forget it) can still create a spec-compliant run row first. */
+export const createCopyTradeFetchRun = (
   database: DatabaseSync,
   options: {
     limit: number;
     periodDays: number;
-    chain?: string;
-    walletAddresses?: string[];
     /** Explicit, not inferred — see the fetch_scope migration's own comment for why inferring
      *  this from walletAddresses/wallet_total is unsafe. Defaults to 'roster' for the ordinary
      *  top-N discovery fetch; a caller passing walletAddresses should always pass this too. */
     scope?: 'roster' | 'winners' | 'single';
   },
-): { runId: number; status: 'running' } => {
+): number => {
   const startedAt = new Date().toISOString();
   const scope = options.scope ?? 'roster';
   database
@@ -1481,9 +1482,20 @@ export const startCopyTradeFetch = (
      VALUES (?, 'running', 0, 0, 0, 0, ?, ?, ?)`,
     )
     .run(startedAt, options.periodDays, options.limit, scope);
-  const runId = Number(
-    (database.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number }).id,
-  );
+  return Number((database.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number }).id);
+};
+
+export const startCopyTradeFetch = (
+  database: DatabaseSync,
+  options: {
+    limit: number;
+    periodDays: number;
+    chain?: string;
+    walletAddresses?: string[];
+    scope?: 'roster' | 'winners' | 'single';
+  },
+): { runId: number; status: 'running' } => {
+  const runId = createCopyTradeFetchRun(database, options);
   // Intentionally not awaited: the HTTP route returns immediately and the UI polls the run
   // row for progress. Every failure path inside runCopyTradeFetch writes its own terminal
   // state, and this catch is the last resort so a fetch can never become an unhandled

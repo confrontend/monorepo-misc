@@ -4,6 +4,8 @@ This package creates a trustworthy local dataset for later research into early S
 
 It uses the same core data stack as `seekingalpha/backtest`: TypeScript on Node.js 22+ and SQLite through the built-in `node:sqlite` module. The default database is `.data/crypto-research.sqlite` and is intentionally excluded from Git.
 
+The later CopyTrade research surface (roster screening, Dune delayed-copy simulation, Pattern Discovery, Decision Lab, and Live Evaluation) is documented in [docs/BROWNFIELD_SYSTEM_BASELINE.md](docs/BROWNFIELD_SYSTEM_BASELINE.md), not below — this file covers only the original V1 capture/import workflow.
+
 ## Local UI
 
 The normal workflow is UI-only after the local app is started. Use the IDE's Run/Debug action for the single `dev` npm task (or run `npm run dev` once); it starts the API and Vite UI together and watches both for changes. Open `http://localhost:5173`.

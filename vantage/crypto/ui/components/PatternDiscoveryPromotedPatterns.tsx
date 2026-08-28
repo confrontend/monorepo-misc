@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { DataTable } from './DataTable.js';
-import { conditionText, labelFor } from './PatternDiscoveryRuleDialog.js';
+import { labelFor } from './PatternDiscoveryRuleDialog.js';
 import { UI_STRINGS } from '../strings.js';
 
 type Pattern = {
@@ -46,8 +46,18 @@ const validationEffect = (pattern: Pattern): number | null => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 };
 
-const formatEffect = (value: number | null): string =>
-  value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+const direction = (pattern: Pattern): string => {
+  const value = validationEffect(pattern) ?? effect(pattern);
+  return value === null ? '—' : value >= 0 ? '↑ better' : '↓ worse';
+};
+const strength = (pattern: Pattern): string => {
+  const value = Math.abs(validationEffect(pattern) ?? effect(pattern) ?? 0);
+  return value >= 0.1
+    ? UI_STRINGS.patternDiscovery.strong
+    : value > 0
+      ? UI_STRINGS.patternDiscovery.medium
+      : '—';
+};
 
 export const PatternDiscoveryPromotedPatterns = ({
   sensitivity,
@@ -138,9 +148,14 @@ export const PatternDiscoveryPromotedPatterns = ({
             render: (row) => labelFor(row.pattern.feature),
           },
           {
-            key: 'condition',
-            header: copy.evidenceCondition,
-            render: (row) => conditionText(row.pattern.conditions),
+            key: 'direction',
+            header: copy.direction,
+            render: (row) => direction(row.pattern),
+          },
+          {
+            key: 'strength',
+            header: copy.strength,
+            render: (row) => strength(row.pattern),
           },
           {
             key: 'coverage',
@@ -149,30 +164,9 @@ export const PatternDiscoveryPromotedPatterns = ({
               view === 'cross' ? `${row.coverage} (${row.supportCount} runs)` : row.coverage,
           },
           {
-            key: 'discoveryEffect',
-            header: copy.evidenceDiscoveryEffect,
-            render: (row) => formatEffect(effect(row.pattern)),
-            cellProps: (row) => ({
-              className: (effect(row.pattern) ?? 0) >= 0 ? 'positive' : 'negative',
-            }),
-          },
-          {
-            key: 'validationEffect',
-            header: copy.evidenceValidationEffect,
-            render: (row) => formatEffect(validationEffect(row.pattern)),
-            cellProps: (row) => ({
-              className: (validationEffect(row.pattern) ?? 0) >= 0 ? 'positive' : 'negative',
-            }),
-          },
-          {
-            key: 'stability',
-            header: copy.promotedStability,
-            render: (row) => {
-              const stability = row.pattern.historical_stability;
-              return stability?.blocks !== undefined
-                ? `${stability.surviving_blocks ?? 0} / ${stability.blocks}`
-                : (stability?.status ?? '—');
-            },
+            key: 'support',
+            header: 'Support',
+            render: (row) => `${row.supportCount} ${row.supportCount === 1 ? 'level' : 'levels'}`,
           },
         ]}
       />

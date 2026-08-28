@@ -10,7 +10,7 @@
 
 ## Phase 2 — Evidence table
 
-- [x] T004 Create `crypto/ui/components/PatternDiscoveryRuleEvidence.tsx` using the shared DataTable, existing category helper, current report fields, and explicit missing-value fallbacks.
+- [x] T004 Add the rule-evidence table using the shared DataTable, existing category helper, current report fields, and explicit missing-value fallbacks. The evidence view is now integrated into the active Pattern Research components; the former standalone component was removed as unused.
 - [x] T005 Add all requested evidence columns, status/stability/promotion distinctions, positive/negative effect styling, and concise legend copy.
 - [x] T006 Wire row clicks from the evidence component to the existing `PatternDiscoveryRuleDialog` selection in `crypto/ui/main.tsx`.
 

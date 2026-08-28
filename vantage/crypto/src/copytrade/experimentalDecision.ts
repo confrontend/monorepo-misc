@@ -62,6 +62,7 @@ export type ExperimentalDecisionWallet = {
   rank: number | null;
   tags: string[];
   evidence: { level: 'complete' | 'partial' | 'insufficient' | 'missing'; detail: string };
+  candidateStatus: 'eligible' | 'rejected' | 'insufficient_evidence' | 'missing_evidence';
   scores: {
     edge: number | null;
     consistency: number | null;
@@ -74,7 +75,18 @@ export type ExperimentalDecisionWallet = {
     { label: string; detail: string }
   >;
   facts: {
+    gmgnPeriod?: string | null;
+    gmgnFetchedAt?: string | null;
+    gmgnTrades?: number | null;
+    gmgnBuyCount?: number | null;
+    gmgnSellCount?: number | null;
     gmgnMedianPercent: number | null;
+    gmgnWinRatePercent?: number | null;
+    gmgnUnder15SecondsPercent?: number | null;
+    gmgnBestTokenSharePercent?: number | null;
+    gmgnRealizedProfitUsd?: number | null;
+    gmgnFastRoundTripPercent?: number | null;
+    gmgnNoCostBasisPercent?: number | null;
     copyMedianPercent: number | null;
     copyCapitalUsd: number | null;
     duneCoveragePercent: number | null;
@@ -119,9 +131,10 @@ export type ExperimentalDecisionReport = {
   wallets: ExperimentalDecisionWallet[];
 };
 
-const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(value * 10) / 10));
+export const clamp = (value: number): number =>
+  Math.max(0, Math.min(100, Math.round(value * 10) / 10));
 const COPY_DELAY_REFERENCE_SECONDS = 15;
-const positiveReturnScore = (value: number | null): number | null =>
+export const positiveReturnScore = (value: number | null): number | null =>
   value === null ? null : clamp(50 + value * 1.25);
 /** Final candidacy requires the delayed-copy median itself to be positive. A high score from
  * other dimensions must not rescue a wallet whose typical copied trade lost money. */
@@ -132,12 +145,36 @@ export const delayedCopyPerformancePassesCandidacyGate = (
   simulation?.simulatedMedianReturnPercent !== undefined &&
   simulation.simulatedMedianReturnPercent > 0;
 
+/** Final candidacy also requires the realistic fixed-stake portfolio to make money. A positive
+ * median trade is not enough when cash constraints, missed trades, and costs leave the account
+ * below its starting balance. */
+export const copyPortfolioProfitabilityPassesCandidacyGate = (
+  simulation:
+    | {
+        portfolio: Pick<
+          CopySimulationWalletReport['portfolio'],
+          'startingCapitalUsd' | 'endingCapitalUsd'
+        >;
+      }
+    | null
+    | undefined,
+): boolean => {
+  const portfolio = simulation?.portfolio;
+  return (
+    portfolio !== undefined &&
+    Number.isFinite(portfolio.startingCapitalUsd) &&
+    Number.isFinite(portfolio.endingCapitalUsd) &&
+    portfolio.startingCapitalUsd > 0 &&
+    portfolio.endingCapitalUsd > portfolio.startingCapitalUsd
+  );
+};
+
 /** Final candidacy consumes Candidate Scrutiny's existing Out-of-sample stability verdict.
  * Keep the chronological calculation in one place; Decision Lab must not derive a parallel split. */
 export const outOfSampleStabilityPassesCandidacyGate = (
   check: CandidateScrutinyReport['checks']['outOfSampleStability'] | null | undefined,
 ): boolean => check?.verdict === 'pass';
-const holdScore = (seconds: number | null): number | null =>
+export const holdScore = (seconds: number | null): number | null =>
   seconds === null
     ? null
     : clamp(
@@ -266,14 +303,14 @@ export type ExperimentalDecisionPromotedRules = {
   fastTradingCorrelations: PromotedCorrelationRule[];
 };
 
-const HYPERACTIVITY_FEATURES = new Set([
+export const HYPERACTIVITY_FEATURES = new Set([
   'prior_wallet_trade_count',
   'prior_wallet_buy_count',
   'prior_wallet_sell_count',
   'prior_wallet_buy_volume_usd',
   'prior_wallet_sell_volume_usd',
 ]);
-const FAST_TRADING_FEATURE = 'prior_wallet_under_15_seconds_percent';
+export const FAST_TRADING_FEATURE = 'prior_wallet_under_15_seconds_percent';
 
 const numericCondition = (conditions: unknown): { operator: string; value: number } | null => {
   if (!Array.isArray(conditions) || conditions.length !== 1) return null;
@@ -414,7 +451,7 @@ export const readExperimentalDecisionCacheVersion = (database: DatabaseSync): st
   return `${fingerprint}:${row?.updatedAt ?? 'no-promoted-patterns'}`;
 };
 
-const consistencyScore = (row: CopyTradeRow): number | null => {
+export const consistencyScore = (row: CopyTradeRow): number | null => {
   const periods = [...row.weeklyPerformance, ...row.monthlyPerformance].filter(
     (period) => period.medianReturnPercent !== null,
   );
@@ -533,14 +570,8 @@ export const computeExperimentalDecisionReport = (
           hyperactivityPenalty,
         )
       : null;
-    const overall =
-      edge !== null &&
-      consistency !== null &&
-      robustness !== null &&
-      copyability !== null &&
-      evidence.level === 'complete' &&
-      delayedCopyPerformancePassesCandidacyGate(sim) &&
-      outOfSampleStabilityPassesCandidacyGate(outOfSampleStability)
+    const rawOverall =
+      edge !== null && consistency !== null && robustness !== null && copyability !== null
         ? clamp(
             edge * weighting.weights.edge +
               consistency * weighting.weights.consistency +
@@ -548,6 +579,16 @@ export const computeExperimentalDecisionReport = (
               copyability * weighting.weights.copyability,
           )
         : null;
+    const candidateStatus: ExperimentalDecisionWallet['candidateStatus'] =
+      evidence.level === 'missing'
+        ? 'missing_evidence'
+        : evidence.level !== 'complete'
+          ? 'insufficient_evidence'
+          : delayedCopyPerformancePassesCandidacyGate(sim) &&
+              copyPortfolioProfitabilityPassesCandidacyGate(sim) &&
+              outOfSampleStabilityPassesCandidacyGate(outOfSampleStability)
+            ? 'eligible'
+            : 'rejected';
     const positivePeriods = [...row.weeklyPerformance, ...row.monthlyPerformance].filter(
       (period) => period.medianReturnPercent !== null,
     );
@@ -588,20 +629,26 @@ export const computeExperimentalDecisionReport = (
       },
       overall: {
         label: 'Overall',
-        detail: !delayedCopyPerformancePassesCandidacyGate(sim)
-          ? `Not a final candidate: delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; a positive typical copied result is required.`
-          : !outOfSampleStabilityPassesCandidacyGate(outOfSampleStability)
-            ? `Not a final candidate: the existing Out-of-sample stability check is ${outOfSampleStability?.verdict ?? 'unavailable'} (late-period median ${outOfSampleStability?.metrics.lateMedianReturnPercent?.toFixed(1) ?? 'missing'}%); a passing check is required.`
-            : overall === null
-              ? 'Requires all four component scores and non-missing evidence.'
-              : `Weighted score: edge ${(weighting.weights.edge * 100).toFixed(0)}%, consistency ${(weighting.weights.consistency * 100).toFixed(0)}%, robustness ${(weighting.weights.robustness * 100).toFixed(0)}%, copyability ${(weighting.weights.copyability * 100).toFixed(0)}%.`,
+        detail:
+          rawOverall === null
+            ? 'Requires all four component scores and non-missing evidence.'
+            : candidateStatus === 'eligible'
+              ? `Raw weighted score: ${rawOverall.toFixed(1)}. This wallet passes the final candidacy gates.`
+              : `Raw weighted score: ${rawOverall.toFixed(1)}, but this wallet is not a final candidate. ${!delayedCopyPerformancePassesCandidacyGate(sim) ? `Delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; a positive typical copied result is required.` : !copyPortfolioProfitabilityPassesCandidacyGate(sim) ? `The saved portfolio ended at $${sim?.portfolio.endingCapitalUsd?.toFixed(2) ?? 'missing'}; ending capital must be above starting capital.` : !outOfSampleStabilityPassesCandidacyGate(outOfSampleStability) ? `The existing Out-of-sample stability check is ${outOfSampleStability?.verdict ?? 'unavailable'}.` : evidence.detail}`,
       },
     };
-    const risks: string[] = [];
+    // Persist the same GMGN-derived risk evidence that Live Evaluation can explain. These are
+    // derived from saved rows only; no provider call is involved. Keeping them in the report
+    // makes future comparisons historical rather than dependent on the current evaluator.
+    const risks: string[] = [...row.riskNotes];
     if (evidence.level !== 'complete') risks.push(evidence.detail);
     if (!delayedCopyPerformancePassesCandidacyGate(sim))
       risks.push(
         `Delayed-copy median return is ${sim?.simulatedMedianReturnPercent?.toFixed(1) ?? 'missing'}%; this prevents final candidacy even when other scores are high.`,
+      );
+    if (!copyPortfolioProfitabilityPassesCandidacyGate(sim))
+      risks.push(
+        `Profitability gate failed: the saved $${sim?.portfolio.startingCapitalUsd?.toFixed(0) ?? '100'} portfolio ended at $${sim?.portfolio.endingCapitalUsd?.toFixed(2) ?? 'missing'}; final candidacy requires a profit.`,
       );
     if (!outOfSampleStabilityPassesCandidacyGate(outOfSampleStability))
       risks.push(
@@ -640,10 +687,23 @@ export const computeExperimentalDecisionReport = (
       rank: row.rankHistory.currentRank,
       tags: row.gmgnTags ?? [],
       evidence,
-      scores: { edge, consistency, robustness, copyability, overall },
+      candidateStatus,
+      scores: { edge, consistency, robustness, copyability, overall: rawOverall },
       scoreDetails,
       facts: {
+        gmgnPeriod: row.gmgnAggregate?.period ?? null,
+        gmgnFetchedAt: row.gmgnAggregate?.fetchedAt ?? null,
+        gmgnTrades: row.trades,
+        gmgnBuyCount: row.gmgnAggregate?.buyCount ?? null,
+        gmgnSellCount: row.gmgnAggregate?.sellCount ?? null,
         gmgnMedianPercent: row.medianReturnPercent,
+        gmgnWinRatePercent: row.gmgnAggregate?.winRatePercent ?? row.winRatePercent,
+        gmgnUnder15SecondsPercent: row.riskEvidence.under15SecondsPercent ?? null,
+        gmgnBestTokenSharePercent:
+          row.profitConcentration.bestTokenSharePositiveProfitPercent ?? null,
+        gmgnRealizedProfitUsd: row.gmgnAggregate?.realizedProfit ?? null,
+        gmgnFastRoundTripPercent: row.riskEvidence.fastRoundTripPercent,
+        gmgnNoCostBasisPercent: row.riskEvidence.noCostBasisPercent,
         copyMedianPercent: sim?.simulatedMedianReturnPercent ?? null,
         copyCapitalUsd: sim?.portfolio.endingCapitalUsd ?? null,
         duneCoveragePercent: sim?.coverageRatePercent ?? null,
@@ -681,7 +741,7 @@ export const computeExperimentalDecisionReport = (
           }
         : null,
       liquidityBands: walletLiquidity?.bands ?? null,
-      risks,
+      risks: [...new Set(risks)],
     };
   });
   return {
@@ -692,8 +752,9 @@ export const computeExperimentalDecisionReport = (
     source: 'saved SQLite evidence',
     methodology: [
       '30-day saved GMGN report plus saved Dune delayed-copy simulation.',
-      `Overall scores require at least ${RULES.minTrades} GMGN trades, 30 eligible round trips, reliable coverage, and complete cost evidence; thinner samples are unrankable.`,
+      `Raw overall scores require all four components; thinner samples remain unavailable. Candidate status separately requires at least ${RULES.minTrades} GMGN trades, 30 eligible round trips, reliable coverage, and complete cost evidence.`,
       'Scores are exploratory, capped at 0–100, and missing inputs stay null.',
+      'Profitability is a hard gate for final candidacy: the saved $100 delayed-copy portfolio must end above $100, even when the raw weighted score is high.',
       weighting.detail,
       promotedRules.hyperactivityThresholds.length > 0 ||
       promotedRules.hyperactivityCorrelations.length > 0 ||

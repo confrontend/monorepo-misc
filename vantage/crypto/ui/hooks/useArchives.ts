@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../App.js';
+import { api } from '../httpClient.js';
 import type { GmgnArchiveSummary } from '../types.js';
 
 export function useArchives(setMessage: (message: string) => void) {

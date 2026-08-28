@@ -23,6 +23,7 @@ test('schema initialization creates V1 tables and is idempotent', () => {
       'copytrade_copy_simulation_matches',
       'copytrade_copy_simulation_runs',
       'copytrade_dune_fetch_audits',
+      'copytrade_evaluation_history',
       'copytrade_experiment_wallets',
       'copytrade_experiments',
       'copytrade_fetch_estimate',

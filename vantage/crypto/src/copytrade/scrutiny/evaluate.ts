@@ -278,7 +278,7 @@ type CompletedTrade = ReturnObservation & {
   tokenSymbol: string | null;
 };
 
-const parseAmount = (value: string | null): number | null => {
+export const parseAmount = (value: string | null): number | null => {
   if (value === null) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -304,7 +304,7 @@ const numberField = (value: unknown): number | null => {
   return null;
 };
 
-const readGmgnAggregate = (row: {
+export const readGmgnAggregate = (row: {
   period: string;
   fetchedAt: string;
   rawPayload: string;
@@ -337,7 +337,7 @@ const readGmgnAggregate = (row: {
   };
 };
 
-const round = (value: number, places: number): number => {
+export const round = (value: number, places: number): number => {
   const factor = 10 ** places;
   return Math.round(value * factor) / factor;
 };

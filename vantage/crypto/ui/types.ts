@@ -1,5 +1,13 @@
-import type { ScrutinyCheck } from './components/ScrutinyChecklist.js';
 import type { PatternDiscoveryProgressView } from './components/PatternDiscoveryProgressPanel.js';
+
+export type ScrutinyCheck<M> = {
+  key: string;
+  label: string;
+  n: number;
+  verdict: 'pass' | 'fail' | 'insufficient';
+  detail: string;
+  metrics: M;
+};
 
 export type Stats = {
   tokenCount: number;
@@ -582,6 +590,12 @@ export type PatternDiscoveryRunResponse = {
   report?: PatternDiscoveryReport;
   execution?: PatternDiscoveryExecution;
   sensitivity?: PatternDiscoverySensitivity;
+  freshness?: {
+    state: 'current' | 'stale';
+    currentFingerprint: string;
+    cachedFingerprint?: string;
+    cachedAt?: string;
+  };
 };
 
 export type PatternDiscoveryStartResponse = {
@@ -1433,7 +1447,11 @@ export type DuneCoverageSummary = {
 } | null;
 
 export type CopyTradeSubTab =
-  'wallet-stats' | 'pattern-discovery' | 'scrutiny' | 'api-reference' | 'experimental-decision';
+  | 'wallet-stats'
+  | 'pattern-discovery'
+  | 'api-reference'
+  | 'experimental-decision'
+  | 'live-evaluation';
 
 export type DecisionColumnKey =
   | 'rank'

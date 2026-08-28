@@ -1,6 +1,12 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  MAX_PATTERN_DISCOVERY_WALLETS,
+  patternDiscoveryCacheKey,
+  readPatternDiscoveryCache,
+  readPatternDiscoveryDataFingerprint,
+} from './patternDiscovery.js';
+import {
   PATTERN_DISCOVERY_COVERAGE_THRESHOLDS,
   validatePatternDiscoveryRunInput,
   type PatternDiscoveryProgress,
@@ -56,6 +62,39 @@ export class PatternDiscoveryCoordinator {
     if (this.isActive()) throw new Error('Pattern Discovery is already running.');
     const { periodDays, minN } = validatePatternDiscoveryRunInput(rawPeriodDays, rawMinN);
     const startedAt = new Date().toISOString();
+    const currentFingerprint = readPatternDiscoveryDataFingerprint(this.database);
+    const currentResult = readPatternDiscoveryCache(
+      this.database,
+      patternDiscoveryCacheKey(
+        'sensitivity',
+        periodDays,
+        PATTERN_DISCOVERY_COVERAGE_THRESHOLDS[0],
+        minN,
+        MAX_PATTERN_DISCOVERY_WALLETS,
+      ),
+      currentFingerprint,
+    );
+    if (currentResult) {
+      const cached: PatternDiscoveryProgress = {
+        status: 'complete',
+        stage: 'complete',
+        message: 'The current discovery result is already cached. No recalculation was needed.',
+        thresholdsTotal: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length,
+        thresholdsCompleted: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length,
+        currentThreshold: null,
+        startedAt,
+        completedAt: startedAt,
+        heartbeatAt: startedAt,
+        activeThresholds: [],
+        cpuWorkersActive: 0,
+        cpuWorkersTotal: 0,
+        cacheHits: PATTERN_DISCOVERY_COVERAGE_THRESHOLDS.length,
+        recentEvents: [{ at: startedAt, message: 'Current result found in SQLite cache.' }],
+      };
+      this.runId = startPatternDiscoveryRun(this.database, periodDays, minN, cached);
+      this.progress = { ...cached, runId: this.runId };
+      return { runId: this.runId, progress: this.progress };
+    }
     const initial: PatternDiscoveryProgress = {
       status: 'preparing',
       stage: 'loading evidence',

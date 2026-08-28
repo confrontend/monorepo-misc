@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import { GmgnTag } from './GmgnTag.js';
@@ -10,6 +10,7 @@ type LabWallet = {
   rank: number | null;
   tags?: string[];
   evidence: { level: 'complete' | 'partial' | 'insufficient' | 'missing'; detail: string };
+  candidateStatus: 'eligible' | 'rejected' | 'insufficient_evidence' | 'missing_evidence';
   scores: {
     edge: number | null;
     consistency: number | null;
@@ -97,6 +98,13 @@ const usd = (value: number | null) =>
         maximumFractionDigits: value < 10 ? 2 : 0,
       }).format(value);
 const score = (value: number | null) => (value === null ? '—' : `${Math.round(value)}`);
+const candidateStatusLabel = (status: LabWallet['candidateStatus']) =>
+  ({
+    eligible: 'Eligible',
+    rejected: 'Not a candidate',
+    insufficient_evidence: 'Insufficient evidence',
+    missing_evidence: 'Missing evidence',
+  })[status];
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 const gmgnUrl = (address: string) => `https://gmgn.ai/sol/address/${encodeURIComponent(address)}`;
 type CopyingRisk = 'unknown' | 'low' | 'watch' | 'high';
@@ -117,20 +125,96 @@ const copyingRiskLabel = (wallet: LabWallet) => {
   if (risk === 'high') return strings.decisionLab.copyingRiskHigh;
   return strings.decisionLab.copyingRiskLow;
 };
-const ScoreCell = ({ value }: { value: number | null }) => (
-  <strong
-    className={
-      value === null
-        ? 'muted'
-        : value >= 70
-          ? 'change-positive'
-          : value < 40
-            ? 'change-negative'
-            : ''
-    }
-  >
-    {score(value)}
-  </strong>
+const ScoreCell = ({
+  wallet,
+  value,
+  scoreKey,
+}: {
+  wallet: LabWallet;
+  value: number | null;
+  scoreKey: 'edge' | 'consistency' | 'robustness' | 'copyability' | 'overall';
+}) => {
+  if (value !== null) {
+    return (
+      <strong
+        className={value >= 70 ? 'change-positive' : value < 40 ? 'change-negative' : undefined}
+      >
+        {score(value)}
+      </strong>
+    );
+  }
+
+  const status = strings.decisionLab.scoreUnavailable[wallet.evidence.level];
+  const detail = wallet.scoreDetails?.[scoreKey]?.detail ?? wallet.evidence.detail;
+  return (
+    <TableTooltip
+      label="Score unavailable"
+      detail={detail}
+      className="experimental-score-unavailable"
+    >
+      <strong>—</strong>
+      <small>{status}</small>
+    </TableTooltip>
+  );
+};
+const TableTooltip = ({
+  children,
+  label,
+  detail,
+  className,
+}: {
+  children: ReactNode;
+  label: string;
+  detail: string;
+  className?: string;
+}) => (
+  <span className={`experimental-tooltip-cell ${className ?? ''}`} tabIndex={0}>
+    {children}
+    <span className="experimental-table-tooltip" role="tooltip">
+      <b>{label}</b>
+      <p>{detail}</p>
+    </span>
+  </span>
+);
+const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
+  <span className="experimental-tooltip-cell experimental-facts-cell" tabIndex={0}>
+    <span>
+      {pct(wallet.facts.copyMedianPercent)} · {usd(wallet.facts.copyCapitalUsd)}
+      <small>
+        {wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered} round trips
+      </small>
+    </span>
+    <span className="experimental-table-tooltip experimental-facts-tooltip" role="tooltip">
+      <b>Saved facts</b>
+      <span>
+        <strong>Copy median</strong>
+        <small>Typical delayed-copy return per copied trade.</small>
+        <em>{pct(wallet.facts.copyMedianPercent)}</em>
+      </span>
+      <span>
+        <strong>$100 after copy</strong>
+        <small>Ending value of a $100 delayed-copy portfolio after costs.</small>
+        <em>{usd(wallet.facts.copyCapitalUsd)}</em>
+      </span>
+      <span>
+        <strong>Round trips</strong>
+        <small>Matched copied round trips out of eligible round trips.</small>
+        <em>
+          {wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered}
+        </em>
+      </span>
+      <span>
+        <strong>Dune coverage</strong>
+        <small>Eligible trades with usable delayed-copy pricing.</small>
+        <em>{pct(wallet.facts.duneCoveragePercent)}</em>
+      </span>
+      <span>
+        <strong>GMGN median</strong>
+        <small>Wallet-reported median return before copy delay and costs.</small>
+        <em>{pct(wallet.facts.gmgnMedianPercent)}</em>
+      </span>
+    </span>
+  </span>
 );
 const legacyScoreDetail = (
   wallet: LabWallet,
@@ -252,10 +336,16 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
   const [sort, setSort] = useState<LabSort>({ key: 'overall', direction: 'desc' });
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
-  const load = () => {
+  const [scoringInfoOpen, setScoringInfoOpen] = useState(false);
+  const [riskImportInfoOpen, setRiskImportInfoOpen] = useState(false);
+  const [winnersOnly, setWinnersOnly] = useState(false);
+  const [walletFilter, setWalletFilter] = useState('');
+  const load = (refresh = false) => {
     setLoading(true);
     setError(null);
-    void api<LabResponse>('/api/copytrade/experimental-decision?periodDays=30&limit=100')
+    void api<LabResponse>(
+      `/api/copytrade/experimental-decision?periodDays=30&limit=100${refresh ? '&refresh=1' : ''}`,
+    )
       .then(setResponse)
       .catch((reason: unknown) =>
         setError(reason instanceof Error ? reason.message : String(reason)),
@@ -277,6 +367,18 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
         );
       })
     : [];
+  const displayedWallets = (
+    winnersOnly
+      ? sortedWallets.filter((wallet) => wallet.candidateStatus === 'eligible')
+      : sortedWallets
+  ).filter((wallet) => {
+    const query = walletFilter.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      wallet.walletAddress.toLowerCase().includes(query) ||
+      (wallet.name?.toLowerCase().includes(query) ?? false)
+    );
+  });
   const toggleSort = (key: LabSortKey) =>
     setSort((current) =>
       current.key === key
@@ -407,21 +509,11 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
           <button
             type="button"
             className="secondary"
-            onClick={load}
+            onClick={() => load(true)}
             disabled={loading || importing}
           >
             Reload saved evidence
           </button>
-          {response && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => exportDecisionLab(response)}
-              disabled={loading || importing}
-            >
-              Export table + details
-            </button>
-          )}
           <label className="experimental-import-button">
             Import GMGN risk bundle
             <input
@@ -435,13 +527,18 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
               }}
             />
           </label>
+          <button
+            type="button"
+            className="experimental-info-button"
+            aria-label="How to export a GMGN risk bundle"
+            title="How to export a GMGN risk bundle"
+            onClick={() => setRiskImportInfoOpen(true)}
+          >
+            <span aria-hidden="true">i</span> How to import
+          </button>
         </div>
       </div>
-      <p className="muted">
-        A separate, exploratory score built from saved 30-day GMGN and Dune evidence. Only GMGN
-        30-day risk is imported and scored; 7-day and all-time responses are ignored. It never calls
-        a provider, changes the production verdict, or spends credits.
-      </p>
+      <p className="muted">{strings.decisionLab.sourceSummary}</p>
       {loading && (
         <p className="copytrade-analysis-status running">
           <span className="loading-spinner" /> Reading saved SQLite evidence…
@@ -451,39 +548,178 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
       {importMessage && <p className="copytrade-analysis-status">{importMessage}</p>}
       {response && !loading && (
         <>
-          <div className="experimental-note">
-            <strong>Experimental only.</strong> Overall scores require all four component scores. A
-            dash means that evidence is missing, not zero. Generated{' '}
-            {new Date(response.generatedAt).toLocaleString()}.
-          </div>
-          {response.weighting && (
-            <div className="experimental-note">
-              <strong>
-                {response.weighting.mode === 'validated-patterns'
-                  ? 'Validated adaptive weights'
-                  : 'Fixed fallback weights'}
-              </strong>
-              <span>
-                {' '}
-                Edge {(response.weighting.weights.edge * 100).toFixed(0)}% · Consistency{' '}
-                {(response.weighting.weights.consistency * 100).toFixed(0)}% · Robustness{' '}
-                {(response.weighting.weights.robustness * 100).toFixed(0)}% · Copyability{' '}
-                {(response.weighting.weights.copyability * 100).toFixed(0)}%.
+          <div className="experimental-scoring-card">
+            <section className="experimental-model-block">
+              <span className="experimental-model-icon" aria-hidden="true">
+                ☷
               </span>
-              <small>{response.weighting.detail}</small>
-            </div>
+              <div>
+                <strong>Weights</strong>
+                <div className="experimental-weight-bars">
+                  {response.weighting &&
+                    (Object.entries(response.weighting.weights) as Array<[string, number]>).map(
+                      ([key, value]) => (
+                        <div key={key}>
+                          <span>{key[0].toUpperCase() + key.slice(1)}</span>
+                          <i>
+                            <b style={{ width: `${value * 100}%` }} />
+                          </i>
+                          <em>{(value * 100).toFixed(0)}%</em>
+                        </div>
+                      ),
+                    )}
+                </div>
+              </div>
+            </section>
+            <section className="experimental-model-block">
+              <span className="experimental-model-icon" aria-hidden="true">
+                ✓
+              </span>
+              <div>
+                <strong>Final candidate gates</strong>
+                <div className="experimental-gate-pills">
+                  <span>Complete evidence</span>
+                  <span>Copy median &gt; 0</span>
+                  <span>Portfolio &gt; $100</span>
+                  <span>OOS stability pass</span>
+                </div>
+              </div>
+            </section>
+            <section className="experimental-model-block">
+              <span className="experimental-model-icon" aria-hidden="true">
+                ✦
+              </span>
+              <div>
+                <strong>Pattern profile</strong>
+                <p>
+                  {response.weighting?.mode === 'validated-patterns'
+                    ? `Promoted rules active · ${response.weighting.supportingThresholds.length ? `${Math.min(...response.weighting.supportingThresholds)}–${Math.max(...response.weighting.supportingThresholds)}% coverage` : 'validated coverage'} · ${response.weighting.supportingWallets} supporting wallets`
+                    : 'Fallback / insufficient pattern support'}
+                </p>
+                <small>Evidence: saved 30-day GMGN + Dune delayed-copy data</small>
+              </div>
+            </section>
+            <button
+              type="button"
+              className="experimental-info-button"
+              aria-label="Open scoring and candidate gate details"
+              title="Scoring and gate details"
+              onClick={() => setScoringInfoOpen(true)}
+            >
+              <span aria-hidden="true">i</span> Scoring details
+            </button>
+          </div>
+          {scoringInfoOpen && (
+            <Modal
+              onClose={() => setScoringInfoOpen(false)}
+              ariaLabel="Decision Engine scoring details"
+              dialogClassName="experimental-scoring-help-modal"
+            >
+              <div className="copytrade-modal-head">
+                <div>
+                  <p className="eyebrow">DECISION ENGINE · EXPLANATION</p>
+                  <h3>How the score is calculated</h3>
+                </div>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setScoringInfoOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <h4>Scoring model</h4>
+              <p>{strings.decisionLab.scoringRule}</p>
+              <div className="experimental-scoring-grid">
+                {(['edge', 'consistency', 'robustness', 'copyability'] as const).map((key) => (
+                  <div key={key}>
+                    <strong>{key[0].toUpperCase() + key.slice(1)}</strong>
+                    <span>{strings.decisionLab.componentDescriptions[key]}</span>
+                  </div>
+                ))}
+              </div>
+              <h4>Active rules</h4>
+              <ul className="experimental-rule-list">
+                <li>Scores are capped from 0 to 100; missing inputs are not treated as zero.</li>
+                <li>Edge uses the typical delayed-copy return.</li>
+                <li>Consistency uses positive saved weekly and monthly periods.</li>
+                <li>
+                  Robustness uses return after removing the best token; concentration is neutral.
+                </li>
+                <li>
+                  Copyability uses coverage and holding time, less validated fast-trading and
+                  activity penalties.
+                </li>
+                <li>
+                  Pattern rules:{' '}
+                  {response.weighting?.mode === 'validated-patterns'
+                    ? 'promoted patterns only, repeated across validated coverage levels.'
+                    : 'none active; neutral fallback is in use.'}
+                </li>
+                <li>
+                  Final gates: complete evidence, positive delayed-copy median, portfolio above
+                  $100, and passing out-of-sample stability.
+                </li>
+              </ul>
+              <h4>Final candidate gates</h4>
+              <p>
+                <strong>{strings.decisionLab.candidateGatesLabel}</strong>{' '}
+                {strings.decisionLab.candidateGates}
+              </p>
+              <h4>Pattern support</h4>
+              <p>
+                {response.weighting?.mode === 'validated-patterns'
+                  ? `Promoted rules · ${response.weighting.supportingThresholds.length ? `${Math.min(...response.weighting.supportingThresholds)}–${Math.max(...response.weighting.supportingThresholds)}% coverage` : 'validated coverage'} · ${response.weighting.supportingWallets} supporting wallets.`
+                  : 'Fallback profile: no promoted pattern support is active.'}
+              </p>
+              <p className="muted">{strings.decisionLab.missingEvidence}</p>
+              <small className="muted">
+                {strings.decisionLab.generatedAt(new Date(response.generatedAt).toLocaleString())}
+              </small>
+            </Modal>
           )}
-          <p className="experimental-score-legend">
-            <strong>Score legend:</strong> every score is from 0 to 100. Higher is better. Rows
-            marked <strong>insufficient</strong> are unrankable and are not comparable to scored
-            wallets. Click a row for the calculation details.
-          </p>
+          <div className="experimental-table-toolbar">
+            <div className="experimental-table-controls">
+              <label className="experimental-wallet-filter">
+                <span className="visually-hidden">Filter wallets</span>
+                <input
+                  type="search"
+                  value={walletFilter}
+                  onChange={(event) => setWalletFilter(event.target.value)}
+                  placeholder={strings.decisionLab.walletFilterPlaceholder}
+                  aria-label="Filter wallet or name"
+                />
+              </label>
+              <label className={`experimental-winners-toggle${winnersOnly ? ' active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={winnersOnly}
+                  onChange={(event) => setWinnersOnly(event.target.checked)}
+                />
+                <span className="experimental-toggle-track" aria-hidden="true">
+                  <i />
+                </span>
+                <span>{strings.decisionLab.winnersOnly}</span>
+              </label>
+              {response && (
+                <button
+                  type="button"
+                  className="secondary experimental-export-table-button"
+                  onClick={() => exportDecisionLab(response)}
+                  disabled={loading || importing}
+                >
+                  Export table + details
+                </button>
+              )}
+            </div>
+            <p className="experimental-score-legend">{strings.decisionLab.tableLegend}</p>
+          </div>
           <DataTable
             wrapClassName="experimental-table-wrap"
             tableClassName="experimental-table"
             enableColumnHiding
             columnVisibilityStorageKey="vantage-decision-lab-columns"
-            rows={sortedWallets}
+            rows={displayedWallets}
             getRowKey={(wallet) => wallet.walletAddress}
             rowProps={(wallet) => ({
               className: 'experimental-clickable-row',
@@ -502,7 +738,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                 headerProps: { className: 'experimental-wallet-column' },
                 cellProps: () => ({ className: 'experimental-wallet-column' }),
                 render: (wallet) => (
-                  <span title={wallet.walletAddress}>
+                  <TableTooltip label="Wallet address" detail={wallet.walletAddress}>
                     <a
                       className="gmgn-wallet-link"
                       href={gmgnUrl(wallet.walletAddress)}
@@ -513,18 +749,28 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                       <strong>{wallet.name?.trim() || short(wallet.walletAddress)}</strong>
                       {wallet.name?.trim() && <small>{short(wallet.walletAddress)}</small>}
                     </a>
-                  </span>
+                  </TableTooltip>
                 ),
               },
               {
                 key: 'evidence',
                 header: sortableHeader('evidence', 'Evidence'),
                 render: (wallet) => (
-                  <span
+                  <TableTooltip
                     className={`experimental-evidence ${wallet.evidence.level}`}
-                    title={wallet.evidence.detail}
+                    label="Evidence"
+                    detail={wallet.evidence.detail}
                   >
                     {wallet.evidence.level}
+                  </TableTooltip>
+                ),
+              },
+              {
+                key: 'candidateStatus',
+                header: 'Candidate status',
+                render: (wallet) => (
+                  <span className={`experimental-evidence ${wallet.candidateStatus}`}>
+                    {candidateStatusLabel(wallet.candidateStatus)}
                   </span>
                 ),
               },
@@ -533,62 +779,76 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                 header: sortableHeader('edge', 'Edge score'),
                 headerProps: { className: 'experimental-score-column' },
                 cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => <ScoreCell value={wallet.scores.edge} />,
+                render: (wallet) => (
+                  <ScoreCell wallet={wallet} scoreKey="edge" value={wallet.scores.edge} />
+                ),
               },
               {
                 key: 'consistency',
                 header: sortableHeader('consistency', 'Consistency score'),
                 headerProps: { className: 'experimental-score-column' },
                 cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => <ScoreCell value={wallet.scores.consistency} />,
+                render: (wallet) => (
+                  <ScoreCell
+                    wallet={wallet}
+                    scoreKey="consistency"
+                    value={wallet.scores.consistency}
+                  />
+                ),
               },
               {
                 key: 'robustness',
                 header: sortableHeader('robustness', 'Robustness score'),
                 headerProps: { className: 'experimental-score-column' },
                 cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => <ScoreCell value={wallet.scores.robustness} />,
+                render: (wallet) => (
+                  <ScoreCell
+                    wallet={wallet}
+                    scoreKey="robustness"
+                    value={wallet.scores.robustness}
+                  />
+                ),
               },
               {
                 key: 'copyability',
                 header: sortableHeader('copyability', 'Copyability score'),
                 headerProps: { className: 'experimental-score-column' },
                 cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => <ScoreCell value={wallet.scores.copyability} />,
+                render: (wallet) => (
+                  <ScoreCell
+                    wallet={wallet}
+                    scoreKey="copyability"
+                    value={wallet.scores.copyability}
+                  />
+                ),
               },
               {
                 key: 'overall',
                 header: sortableHeader('overall', 'Overall score'),
                 headerProps: { className: 'experimental-score-column' },
                 cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => <ScoreCell value={wallet.scores.overall} />,
+                render: (wallet) => (
+                  <ScoreCell wallet={wallet} scoreKey="overall" value={wallet.scores.overall} />
+                ),
               },
               {
                 key: 'facts',
                 header: sortableHeader('facts', 'Saved facts'),
-                render: (wallet) => (
-                  <span title={wallet.risks.join(' · ') || 'No recorded warning'}>
-                    {pct(wallet.facts.copyMedianPercent)} · {usd(wallet.facts.copyCapitalUsd)}
-                    <small>
-                      {wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered} round
-                      trips
-                    </small>
-                  </span>
-                ),
+                render: (wallet) => <SavedFactsCell wallet={wallet} />,
               },
               {
                 key: 'scrutiny',
                 header: sortableHeader('scrutiny', 'Scrutiny'),
                 render: (wallet) =>
                   wallet.scrutiny ? (
-                    <span
-                      title={wallet.scrutiny.checks
-                        .map((check) => `${check.label}: ${check.verdict} — ${check.detail}`)
-                        .join('\n')}
+                    <TableTooltip
+                      className="experimental-scrutiny-tooltip"
+                      label="Scrutiny checks"
+                      detail={`${wallet.scrutiny.pass} pass · ${wallet.scrutiny.fail} fail · ${wallet.scrutiny.insufficient} insufficient. Open the row for check details.`}
                     >
                       {wallet.scrutiny.pass} pass · {wallet.scrutiny.fail} fail
                       <small>{wallet.scrutiny.insufficient} insufficient</small>
-                    </span>
+                    </TableTooltip>
                   ) : (
                     '—'
                   ),
@@ -598,7 +858,10 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                 header: sortableHeader('liquidity', strings.decisionLab.copyingRisk),
                 render: (wallet) =>
                   wallet.liquidityBands ? (
-                    <span title={strings.decisionLab.copyingRiskTitle}>
+                    <TableTooltip
+                      label="Copying risk"
+                      detail={strings.decisionLab.copyingRiskTitle}
+                    >
                       <span
                         className={
                           copyingRisk(wallet) === 'low'
@@ -610,7 +873,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                       >
                         {copyingRiskLabel(wallet)}
                       </span>
-                    </span>
+                    </TableTooltip>
                   ) : (
                     '—'
                   ),
@@ -620,16 +883,21 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                 header: sortableHeader('risk', 'GMGN risk'),
                 render: (wallet) =>
                   wallet.riskDetails?.available ? (
-                    <span
+                    <TableTooltip
                       className="experimental-evidence complete"
-                      title="Saved GMGN 30-day risk details are available"
+                      label="GMGN risk"
+                      detail="Saved GMGN 30-day risk details are available."
                     >
                       available
-                    </span>
+                    </TableTooltip>
                   ) : (
-                    <span className="muted" title="No saved GMGN risk JSON for this wallet">
+                    <TableTooltip
+                      className="muted"
+                      label="GMGN risk"
+                      detail="No saved GMGN risk JSON for this wallet."
+                    >
                       not imported
-                    </span>
+                    </TableTooltip>
                   ),
               },
               {
@@ -777,6 +1045,44 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
             </Modal>
           )}
         </>
+      )}
+      {riskImportInfoOpen && (
+        <Modal
+          onClose={() => setRiskImportInfoOpen(false)}
+          ariaLabel="How to export a GMGN risk bundle"
+          dialogClassName="experimental-scoring-help-modal"
+        >
+          <div className="copytrade-modal-head">
+            <div>
+              <p className="eyebrow">GMGN RISK DATA</p>
+              <h3>How to get the import file</h3>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setRiskImportInfoOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+          <ol className="experimental-rule-list">
+            <li>Install or reload the Vantage GMGN Chrome extension.</li>
+            <li>
+              Open GMGN and enable <strong>30d risk capture</strong> in the extension popup.
+            </li>
+            <li>Open the wallet pages or wallet list you want to capture.</li>
+            <li>
+              Return to the popup and click <strong>Export 30d risk JSON</strong>.
+            </li>
+            <li>
+              Use <strong>Import GMGN risk bundle</strong> here and select that JSON file.
+            </li>
+          </ol>
+          <p className="muted">
+            The extension captures GMGN’s existing browser response; it does not request GMGN data
+            itself. Only 30-day responses are imported.
+          </p>
+        </Modal>
       )}
     </section>
   );

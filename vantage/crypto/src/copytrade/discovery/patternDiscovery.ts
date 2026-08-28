@@ -109,7 +109,12 @@ export type PatternDiscoveryExport = {
 
 type FullyCoveredWallet = { walletAddress: string };
 
-type PatternDiscoveryCacheRow = { reportJson: string };
+type PatternDiscoveryCacheRow = { reportJson: string; dataFingerprint: string; updatedAt: string };
+
+export type PatternDiscoveryCacheMetadata = {
+  dataFingerprint: string;
+  updatedAt: string;
+};
 
 /** Return an exact, constant-size evidence revision. Write triggers mark the revision dirty;
  * the first reader after a change advances it once. This replaces serializing and hashing the
@@ -152,7 +157,8 @@ export const readPatternDiscoveryCache = <T>(
 ): T | null => {
   const row = database
     .prepare(
-      `SELECT report_json AS reportJson
+      `SELECT report_json AS reportJson, data_fingerprint AS dataFingerprint,
+              updated_at AS updatedAt
      FROM copytrade_report_cache
      WHERE cache_key = ? AND data_fingerprint = ?`,
     )
@@ -160,6 +166,32 @@ export const readPatternDiscoveryCache = <T>(
   if (!row) return null;
   try {
     return JSON.parse(row.reportJson) as T;
+  } catch {
+    return null;
+  }
+};
+
+/** Read the most recently persisted value even when the evidence fingerprint has changed.
+ * This is for transparent UI status only. Callers that affect scoring must use the exact
+ * fingerprinted reader above. */
+export const readLatestPatternDiscoveryCache = <T>(
+  database: DatabaseSync,
+  cacheKey: string,
+): { value: T; metadata: PatternDiscoveryCacheMetadata } | null => {
+  const row = database
+    .prepare(
+      `SELECT report_json AS reportJson, data_fingerprint AS dataFingerprint,
+              updated_at AS updatedAt
+       FROM copytrade_report_cache
+       WHERE cache_key = ?`,
+    )
+    .get(cacheKey) as PatternDiscoveryCacheRow | undefined;
+  if (!row) return null;
+  try {
+    return {
+      value: JSON.parse(row.reportJson) as T,
+      metadata: { dataFingerprint: row.dataFingerprint, updatedAt: row.updatedAt },
+    };
   } catch {
     return null;
   }
@@ -545,6 +577,96 @@ export const readPreEventFeatures = (
     tokenAddress,
     observedTimestamp,
   );
+};
+
+/** The `prior_wallet_*`-only subset of {@link PreEventFeatures} — safe for a standing wallet
+ *  evaluation that has no specific token-entry event to attach `prior_token_*`/`token_*`/
+ *  `entry_*` fields to. Those fields do not exist for "this wallet, right now" and must never
+ *  be fabricated, so this type omits them entirely rather than setting them to null/0. */
+export type CurrentWalletFeatures = Pick<
+  PreEventFeatures,
+  | 'priorWalletTradeCount'
+  | 'priorWalletBuyVolumeUsd'
+  | 'priorWalletBuyCount'
+  | 'priorWalletSellCount'
+  | 'priorWalletSellVolumeUsd'
+  | 'priorWalletRealizedProfitUsd'
+  | 'priorWalletMedianReturnPercent'
+  | 'priorWalletWinRatePercent'
+  | 'priorWalletPositiveDayPercent'
+  | 'priorWalletBestTokenProfitSharePercent'
+  | 'priorWalletMedianHoldSeconds'
+  | 'priorWalletUnder15SecondsPercent'
+  | 'priorWalletPairedTradeCount'
+  | 'priorWalletDistinctTokenCount'
+  | 'priorWalletTradesPerActiveDay'
+  | 'priorWalletMedianBuySizeUsd'
+  | 'priorWalletReturnVolatilityPercent'
+  | 'priorWalletTop3TokenProfitSharePercent'
+>;
+
+/** Standing (as-of-now) wallet feature snapshot for Live Evaluation — the same point-in-time-safe
+ *  accumulation `readPreEventFeatures` uses for a specific past buy, applied instead to the
+ *  wallet's entire stored trade history. Deliberately skips `addTokenEntryContext` (there is no
+ *  buy event to attach token-entry context to) and returns only the `prior_wallet_*` fields. */
+export const readCurrentWalletFeatures = (
+  database: DatabaseSync,
+  walletAddress: string,
+  options: { chain?: string } = {},
+): CurrentWalletFeatures | null => {
+  const chain = options.chain ?? 'sol';
+  const rows = database
+    .prepare(
+      `SELECT id, event_type AS eventType, token_address AS tokenAddress,
+            observed_timestamp AS observedTimestamp, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
+     FROM copytrade_trades
+     WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell')
+     ORDER BY observed_timestamp ASC, id ASC`,
+    )
+    .all(chain, walletAddress) as unknown as PriorTrade[];
+  if (rows.length === 0) return null;
+  const accumulator = new PreEventAccumulator();
+  for (const row of rows) accumulator.apply(row);
+  const {
+    priorWalletTradeCount,
+    priorWalletBuyVolumeUsd,
+    priorWalletBuyCount,
+    priorWalletSellCount,
+    priorWalletSellVolumeUsd,
+    priorWalletRealizedProfitUsd,
+    priorWalletMedianReturnPercent,
+    priorWalletWinRatePercent,
+    priorWalletPositiveDayPercent,
+    priorWalletBestTokenProfitSharePercent,
+    priorWalletMedianHoldSeconds,
+    priorWalletUnder15SecondsPercent,
+    priorWalletPairedTradeCount,
+    priorWalletDistinctTokenCount,
+    priorWalletTradesPerActiveDay,
+    priorWalletMedianBuySizeUsd,
+    priorWalletReturnVolatilityPercent,
+    priorWalletTop3TokenProfitSharePercent,
+  } = accumulator.snapshot('');
+  return {
+    priorWalletTradeCount,
+    priorWalletBuyVolumeUsd,
+    priorWalletBuyCount,
+    priorWalletSellCount,
+    priorWalletSellVolumeUsd,
+    priorWalletRealizedProfitUsd,
+    priorWalletMedianReturnPercent,
+    priorWalletWinRatePercent,
+    priorWalletPositiveDayPercent,
+    priorWalletBestTokenProfitSharePercent,
+    priorWalletMedianHoldSeconds,
+    priorWalletUnder15SecondsPercent,
+    priorWalletPairedTradeCount,
+    priorWalletDistinctTokenCount,
+    priorWalletTradesPerActiveDay,
+    priorWalletMedianBuySizeUsd,
+    priorWalletReturnVolatilityPercent,
+    priorWalletTop3TokenProfitSharePercent,
+  };
 };
 
 const fullyCoveredWalletAddresses = (

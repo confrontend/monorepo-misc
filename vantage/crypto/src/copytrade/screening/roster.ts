@@ -673,7 +673,7 @@ export const listRosterWallets = (
 /** Base58, Solana address alphabet only (excludes 0/O/I/l — those never appear in a real
  *  base58check-encoded key), 32-44 chars covers every real SOL wallet length seen in this
  *  project's own captured data. */
-const SOL_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export const SOL_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export type SingleTraderLookup =
   | { kind: 'address'; walletAddress: string }

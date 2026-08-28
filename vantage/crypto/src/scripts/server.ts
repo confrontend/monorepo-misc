@@ -51,10 +51,8 @@ import {
   readCopyTradeSummary,
   saveCopyTradeSnapshot,
 } from '../copytrade/scrutiny/evaluate.js';
-import {
-  computeHistoricalConsistency,
-  readHistoricalConsistencyForWallets,
-} from '../copytrade/scrutiny/historicalConsistency.js';
+import type { computeHistoricalConsistency } from '../copytrade/scrutiny/historicalConsistency.js';
+import { readHistoricalConsistencyForWallets } from '../copytrade/scrutiny/historicalConsistency.js';
 import {
   computeCopyCandidates,
   computeHighUpsideEligibleCandidates,
@@ -113,6 +111,7 @@ import {
   patternDiscoveryCacheKey,
   readPatternDiscoveryCache,
   readPatternDiscoveryDataFingerprint,
+  readLatestPatternDiscoveryCache,
 } from '../copytrade/discovery/patternDiscovery.js';
 import {
   PATTERN_DISCOVERY_COVERAGE_THRESHOLDS,
@@ -121,14 +120,25 @@ import {
   type PatternDiscoverySensitivity,
 } from '../copytrade/discovery/patternDiscoveryRunner.js';
 import { PatternDiscoveryCoordinator } from '../copytrade/discovery/patternDiscoveryCoordinator.js';
-import { waitForGmgnRequest } from '../gmgn/client/rateLimit.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
-import { readGmgnRiskResults, saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
+import { saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
 import {
   computeExperimentalDecisionReport,
   readExperimentalDecisionCacheVersion,
+  type ExperimentalDecisionReport,
 } from '../copytrade/experimentalDecision.js';
-import { versionedCacheKey } from '../platform/cache/cacheVersions.js';
+import {
+  computeLiveEvaluation,
+  parseLiveEvaluationRequest,
+} from '../copytrade/liveEvaluation.js';
+import {
+  computeEvaluationTrend,
+  decisionLabHistoryEntry,
+  readEvaluationHistory,
+  recordEvaluationHistory,
+  shouldRecordEvaluationHistory,
+} from '../copytrade/liveEvaluationHistory.js';
+import { CACHE_VERSIONS, versionedCacheKey } from '../platform/cache/cacheVersions.js';
 import { API_CATALOG } from '../apiCatalog.js';
 
 /** Scrutiny interrogates individually-pinned wallets, not a ranked top-N — so its roster scope
@@ -138,6 +148,15 @@ const SCRUTINY_ROSTER_LIMIT = 500;
 
 import type { DunePollUpdate } from '../copytrade/simulation/copySimulationDune.js';
 import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
+
+// Background fetches (roster, winners, single/Live Evaluation) run detached from any one HTTP
+// request -- an error inside one must not take down every other in-flight request. Node's
+// default for an unhandled promise rejection is to terminate the process; registering a handler
+// here overrides that default to log-and-continue instead, matching the same "record the failure
+// on the run row, never crash" intent already used for every awaited fetch path in this file.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled promise rejection (process kept alive):', reason);
+});
 
 const database = openDatabase();
 // A CopyTrade fetch only runs inside the process that started it, so anything still marked
@@ -249,6 +268,50 @@ const readCachedResearch = <T>(key: string, compute: () => T): T => {
     .run(key, fingerprint, JSON.stringify(value), new Date().toISOString());
   return value;
 };
+
+/** Read a completed report without rebuilding it. Used when another view needs to compare
+ * against the exact Decision Lab run the user already opened. */
+const readPersistedResearch = <T>(key: string): T | null => {
+  const fingerprint = researchDataFingerprint();
+  const cached = researchReportCache.get(key);
+  if (cached?.fingerprint === fingerprint) return cached.value as T;
+  const persisted = database
+    .prepare(
+      `SELECT report_json AS reportJson FROM copytrade_report_cache WHERE cache_key = ? AND data_fingerprint = ?`,
+    )
+    .get(key, fingerprint) as { reportJson: string } | undefined;
+  if (!persisted) return null;
+  try {
+    const value = JSON.parse(persisted.reportJson) as T;
+    researchReportCache.set(key, { fingerprint, value });
+    return value;
+  } catch {
+    return null;
+  }
+};
+
+/** Read the last saved report without treating unrelated evidence writes as permission to
+ * replace it. Live single-wallet fetches update shared evidence tables, but must not rewrite a
+ * historical Decision Lab result until the user explicitly requests a refresh. */
+const readLatestPersistedResearch = <T>(keyPrefix: string): T | null => {
+  const persisted = database
+    .prepare(
+      `SELECT report_json AS reportJson FROM copytrade_report_cache
+       WHERE cache_key LIKE ? ORDER BY updated_at DESC LIMIT 1`,
+    )
+    .get(`${keyPrefix}%`) as { reportJson: string } | undefined;
+  if (!persisted) return null;
+  try {
+    return JSON.parse(persisted.reportJson) as T;
+  } catch {
+    return null;
+  }
+};
+
+// Version bumps invalidate recalculation caches, but must not hide the last completed report
+// from comparison views. A newly saved run will replace it naturally.
+const decisionLabLatestKeyPrefix = (limit: number): string =>
+  `experimental-decision:%:${limit}:latest:`;
 
 // Bump the v-suffix whenever CopySimulationReport/CopySimulationWalletReport's shape changes
 // (new/renamed/removed fields). readCachedResearch's fingerprint only tracks DATA changes (row
@@ -740,18 +803,31 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           Number(requestUrl.searchParams.get('minN') ?? 10),
         );
         const fingerprint = readPatternDiscoveryDataFingerprint(database);
-        const result = readPatternDiscoveryCache<PatternDiscoverySensitivity>(
+        const sensitivityCacheKey = patternDiscoveryCacheKey(
+          'sensitivity',
+          periodDays,
+          PATTERN_DISCOVERY_COVERAGE_THRESHOLDS[0],
+          minN,
+          MAX_PATTERN_DISCOVERY_WALLETS,
+        );
+        const exactResult = readPatternDiscoveryCache<PatternDiscoverySensitivity>(
           database,
-          patternDiscoveryCacheKey(
-            'sensitivity',
-            periodDays,
-            PATTERN_DISCOVERY_COVERAGE_THRESHOLDS[0],
-            minN,
-            MAX_PATTERN_DISCOVERY_WALLETS,
-          ),
+          sensitivityCacheKey,
           fingerprint,
         );
+        const staleResult = exactResult
+          ? null
+          : readLatestPatternDiscoveryCache<PatternDiscoverySensitivity>(
+              database,
+              sensitivityCacheKey,
+            );
+        const result = exactResult ?? staleResult?.value;
         if (!result) {
+          respond(404, { error: 'No completed discovery result exists for the current evidence.' });
+          return;
+        }
+        const resultFingerprint = exactResult ? fingerprint : staleResult?.metadata.dataFingerprint;
+        if (!resultFingerprint) {
           respond(404, { error: 'No completed discovery result exists for the current evidence.' });
           return;
         }
@@ -773,7 +849,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
               minN,
               MAX_PATTERN_DISCOVERY_WALLETS,
             ),
-            fingerprint,
+            resultFingerprint,
           );
           if (report) reportsByCoverage[key] = report;
         }
@@ -795,6 +871,14 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           report: hydratedResult.report,
           execution: result.execution,
           sensitivity: hydratedResult,
+          freshness: exactResult
+            ? { state: 'current', currentFingerprint: fingerprint }
+            : {
+                state: 'stale',
+                currentFingerprint: fingerprint,
+                cachedFingerprint: resultFingerprint,
+                cachedAt: staleResult?.metadata.updatedAt,
+              },
         });
       } catch (error) {
         respond(400, { error: error instanceof Error ? error.message : String(error) });
@@ -904,8 +988,69 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, { ...result, resolved });
       return;
     }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/live-evaluation') {
+      const payload = await readJsonBody(request);
+      const parsed = parseLiveEvaluationRequest(payload);
+      if (!parsed.ok) {
+        respond(400, { error: parsed.error });
+        return;
+      }
+      // Evaluation is read-only: use whatever evidence is already stored in SQLite. It must not
+      // start a provider fetch, overwrite history, or mutate a past decision just because the
+      // user inspected one wallet.
+      {
+        const result = computeLiveEvaluation(database, parsed.walletAddress, { chain: 'sol' });
+        if (shouldRecordEvaluationHistory({
+          score: result.estimatedOverallScore,
+          evidenceLevel: result.evidenceLevel,
+        })) {
+          const previous = readEvaluationHistory(database, parsed.walletAddress, {
+            chain: 'sol',
+            limit: 1,
+          })[0] ?? null;
+          const current = recordEvaluationHistory(database, {
+            walletAddress: parsed.walletAddress,
+            chain: 'sol',
+            source: 'live',
+            generatedAt: result.generatedAt,
+            score: result.estimatedOverallScore,
+            verdict: result.verdict,
+            evidenceLevel: result.evidenceLevel,
+            componentScores: result.componentScores,
+          });
+          result.trend = computeEvaluationTrend(current, previous);
+        }
+        respond(200, { status: 'result', result });
+        return;
+      }
+    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch/stop') {
       respond(200, requestCopyTradeFetchStop(database));
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/live-evaluation/history') {
+      const walletAddress = requestUrl.searchParams.get('walletAddress')?.trim() ?? '';
+      if (!walletAddress) {
+        respond(400, { error: 'walletAddress is required.' });
+        return;
+      }
+      const chain = requestUrl.searchParams.get('chain') ?? 'sol';
+      const requestedLimit = Number(requestUrl.searchParams.get('limit') ?? '50');
+      const limit = Number.isFinite(requestedLimit)
+        ? Math.min(200, Math.max(1, Math.floor(requestedLimit)))
+        : 50;
+      const entries = readEvaluationHistory(database, walletAddress, {
+        chain,
+        limit,
+      });
+      respond(200, {
+        walletAddress,
+        chain,
+        entries: entries.map((entry, index) => ({
+          ...entry,
+          trend: computeEvaluationTrend(entry, entries[index + 1] ?? null),
+        })),
+      });
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch/resume') {
@@ -1579,164 +1724,32 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       // This endpoint is intentionally not wired to any fetch runner. It only computes a
       // separately named experiment from saved SQLite evidence and cannot spend provider credits.
       const weightingVersion = readExperimentalDecisionCacheVersion(database);
-      respond(
-        200,
+      const refresh = requestUrl.searchParams.get('refresh') === '1';
+      const savedReport =
+        !refresh && rosterSnapshotId === undefined
+          ? readLatestPersistedResearch<ExperimentalDecisionReport>(
+              decisionLabLatestKeyPrefix(limit),
+            )
+          : null;
+      const report =
+        savedReport ??
         readCachedResearch(
           versionedCacheKey('decisionLab', limit, rosterSnapshotId ?? 'latest', weightingVersion),
-          () => computeExperimentalDecisionReport(database, { limit, rosterSnapshotId }),
-        ),
-      );
-      return;
-    }
-    if (
-      request.method === 'POST' &&
-      requestUrl.pathname === '/api/copytrade/scrutiny/refresh-trades'
-    ) {
-      // Scoped re-fetch for the pinned candidates only — same startCopyTradeFetch call and the
-      // same 'single' scope as POST /api/copytrade/fetch/single above, just for several wallets
-      // at once instead of one resolved-by-name wallet. Goes through the same GMGN request gate
-      // (src/gmgn/rateLimit.ts) as every other fetch; no new concurrency.
-      const payload = (await readJsonBody(request)) as {
-        walletAddresses?: unknown;
-        periodDays?: unknown;
-      };
-      const walletAddresses = Array.isArray(payload.walletAddresses)
-        ? [
-            ...new Set(
-              payload.walletAddresses.filter(
-                (value): value is string => typeof value === 'string' && value.trim().length > 0,
-              ),
-            ),
-          ]
-        : [];
-      if (!walletAddresses.length) {
-        respond(400, { error: 'walletAddresses must be a non-empty array of wallet addresses.' });
-        return;
-      }
-      if (walletAddresses.length > MAX_SCRUTINY_WALLETS) {
-        respond(400, {
-          error: `At most ${MAX_SCRUTINY_WALLETS} wallets can be refreshed at once.`,
-        });
-        return;
-      }
-      const periodDaysRaw = Number(payload.periodDays);
-      // Default matches the 30-day Scrutiny scoring window (see /api/copytrade/scrutiny's own
-      // comment) rather than the 90-day default used elsewhere — fetching 90 days for every
-      // pinned wallet on every refresh is expensive and not what Scrutiny actually scores against.
-      const periodDays =
-        Number.isInteger(periodDaysRaw) && periodDaysRaw > 0 && periodDaysRaw <= 365
-          ? periodDaysRaw
-          : 30;
-      if (hasActiveFetchRun(database)) {
-        respond(409, { error: 'A fetch run is already in progress.' });
-        return;
-      }
-      respond(
-        200,
-        startCopyTradeFetch(database, {
-          limit: walletAddresses.length,
-          periodDays,
-          walletAddresses,
-          scope: 'single',
-        }),
-      );
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/scrutiny/gmgn-risk') {
-      const payload = (await readJsonBody(request)) as {
-        walletAddresses?: unknown;
-        periods?: unknown;
-      };
-      const walletAddresses = Array.isArray(payload.walletAddresses)
-        ? [
-            ...new Set(
-              payload.walletAddresses.filter(
-                (value): value is string => typeof value === 'string' && value.trim().length > 0,
-              ),
-            ),
-          ]
-        : [];
-      // Scrutiny is a 30-day decision surface. Keep this endpoint single-period so it cannot
-      // accidentally fan out into redundant 7d/all-time requests.
-      const periods = ['30d'];
-      if (!walletAddresses.length) {
-        respond(400, { error: 'walletAddresses must be a non-empty array of wallet addresses.' });
-        return;
-      }
-      if (walletAddresses.length > MAX_SCRUTINY_WALLETS) {
-        respond(400, {
-          error: `At most ${MAX_SCRUTINY_WALLETS} wallets can be requested at once.`,
-        });
-        return;
-      }
-      const results: Array<Record<string, unknown>> = [];
-      for (const walletAddress of walletAddresses) {
-        for (const period of periods) {
-          const endpoint = `https://gmgn.ai/pf/api/v1/wallet/sol/${encodeURIComponent(walletAddress)}/profit_stat/${period}`;
-          try {
-            await waitForGmgnRequest();
-            const response = await fetch(endpoint, {
-              headers: {
-                accept: 'application/json',
-                'user-agent': process.env.GMGN_USER_AGENT ?? 'Mozilla/5.0',
-                ...(process.env.GMGN_COOKIE ? { cookie: process.env.GMGN_COOKIE } : {}),
-                ...(process.env.GMGN_API_KEY ? { 'x-api-key': process.env.GMGN_API_KEY } : {}),
-              },
-              signal: AbortSignal.timeout(30_000),
+          () => {
+            const computed = computeExperimentalDecisionReport(database, {
+              limit,
+              rosterSnapshotId,
             });
-            const text = await response.text();
-            if (!response.ok) throw new Error(`GMGN returned HTTP ${response.status}`);
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(text);
-            } catch {
-              throw new Error(
-                'GMGN returned non-JSON data (browser session or Cloudflare may be required).',
+            for (const wallet of computed.wallets) {
+              recordEvaluationHistory(
+                database,
+                decisionLabHistoryEntry(wallet, computed.generatedAt),
               );
             }
-            results.push({
-              walletAddress,
-              period,
-              available: true,
-              metrics: normalizeGmgnProfitStat(parsed),
-            });
-          } catch (error: unknown) {
-            results.push({
-              walletAddress,
-              period,
-              available: false,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-      }
-      const savedResults = results.map((result) =>
-        saveGmgnRiskResult(database, {
-          walletAddress: String(result.walletAddress),
-          period: '30d',
-          available: result.available === true,
-          metrics: result.metrics,
-          error: typeof result.error === 'string' ? result.error : undefined,
-        }),
-      );
-      logDiagnostic(database, {
-        level: savedResults.some((result) => !result.available) ? 'warn' : 'info',
-        event: 'scrutiny_gmgn_risk_fetch',
-        method: request.method,
-        path: requestUrl.pathname,
-        status: 200,
-        message: 'Fetched and persisted Scrutiny GMGN 30d risk details.',
-        detail: {
-          requestedWallets: walletAddresses.length,
-          saved: savedResults.filter((result) => result.available).length,
-          failed: savedResults.filter((result) => !result.available).length,
-        },
-      });
-      respond(200, {
-        results: savedResults,
-        requestedWallets: walletAddresses.length,
-        requestedPeriods: periods,
-      });
+            return computed;
+          },
+        );
+      respond(200, report);
       return;
     }
     if (
@@ -1769,22 +1782,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         ];
       });
       respond(200, { results: savedResults, imported: savedResults.length, ignored });
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/scrutiny/gmgn-risk') {
-      const walletAddresses = [
-        ...new Set(
-          (requestUrl.searchParams.get('wallets') ?? '')
-            .split(',')
-            .map((value) => value.trim())
-            .filter(Boolean),
-        ),
-      ];
-      respond(200, {
-        results: readGmgnRiskResults(database, walletAddresses),
-        requestedWallets: walletAddresses.length,
-        requestedPeriods: ['30d'],
-      });
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/copy-simulation') {

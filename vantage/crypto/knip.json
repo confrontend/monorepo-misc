@@ -3,6 +3,7 @@
   "entry": [
     "src/scripts/server.ts",
     "src/scripts/cli.ts",
+    "src/scripts/patternDiscoveryWorker.ts",
     "ui/main.tsx",
     "extension/**/*.js",
     "tests/**/*.test.ts"
@@ -28,5 +29,8 @@
   ],
   "ignoreDependencies": [
     "gmgn-cli"
+  ],
+  "ignoreBinaries": [
+    "uv"
   ]
 }

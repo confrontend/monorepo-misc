@@ -58,7 +58,7 @@ export const PatternDiscoveryProgressPanel = ({
         <div className="pattern-discovery-progress-meta">
           <span>
             {progress
-              ? `${progress.thresholdsCompleted}/${progress.thresholdsTotal} coverage levels complete`
+              ? `${progress.thresholdsCompleted}/${progress.thresholdsTotal} coverage levels complete · ${Math.max(0, progress.thresholdsTotal - progress.thresholdsCompleted)} remaining`
               : 'Starting local evidence preparation'}
           </span>
           <span>{elapsedSeconds}s elapsed</span>

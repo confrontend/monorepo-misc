@@ -113,6 +113,39 @@ verdict. It uses only promoted/stable discovery patterns for adaptive weights; o
 visible neutral state is `25/25/25/25` because evidence is insufficient. It must not silently
 change production verdicts.
 
+### Live Evaluation
+
+`src/copytrade/liveEvaluation.ts` estimates a single wallet's copy-trading candidacy from GMGN
+30-day data only, with no Dune fetch anywhere in the module (enforced by a
+`.dependency-cruiser.cjs` rule forbidding it from importing `src/dune/**` or the history module). It
+builds a non-roster-scoped `CopyTradeRow` for the requested
+wallet (`computeCopyTradeReport` is roster-scoped and silently skips any wallet not on the current
+roster, so it cannot be reused here), reuses Decision Lab's `robustnessScore`, `consistencyScore`,
+`computeHistoricalHyperactivityPenalty`, and `computeFastTradingPenalty` unmodified, and applies a
+new generic threshold/correlation evaluator (`applyPromotedGmgnRules`) to every other
+cross-coverage-promoted Pattern Discovery pattern whose feature is in the GMGN-safe
+`prior_wallet_*` vocabulary. Patterns on per-token-entry-only features or on bucket/mutual-
+information condition shapes are reported in `rulesUnavailable`, never silently applied.
+
+`estimatedOverallScore` is a distinct field from Decision Lab's `overall` score — never aliased —
+using category weights read from `readExperimentalDecisionWeighting` (also Dune-free) renormalized
+per-wallet over only the categories that have a computable score for that wallet. If no category
+has survived promotion (`mode: 'neutral-fallback'`), Live Evaluation reports `weighting.mode:
+'unavailable'` and produces no score, rather than adopting the neutral 25/25/25/25 split. Whether
+the current promoted-rule profile is current, stale, or unavailable is always surfaced via
+`profileLoadStatus`, mirroring the freshness reporting already established in
+`GET /api/copytrade/pattern-discovery/run/result`.
+
+Evaluation results are recorded in the append-only `copytrade_evaluation_history` table through
+`src/copytrade/liveEvaluationHistory.ts`. Live Evaluation records a row after each read-only
+evaluation; Decision Lab records one row for each genuine report recomputation. Both sources use
+the same component-score vocabulary and normalized verdicts. The API returns the current row's
+trend against the immediately preceding row, and `GET /api/live-evaluation/history` returns the
+full wallet timeline. The UI presents that timeline instead of comparing two different
+methodologies in a permanent side-by-side table. The history module remains separate from
+`liveEvaluation.ts`, preserving the boundary that keeps GMGN-only scoring from reading Decision
+Lab or Dune state.
+
 ## Persistence and contracts
 
 The migration history in `src/platform/db/schema.ts` is authoritative for tables and compatibility.

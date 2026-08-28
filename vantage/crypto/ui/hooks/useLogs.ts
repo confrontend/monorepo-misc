@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../App.js';
+import { api } from '../httpClient.js';
 import type { DiagnosticLog } from '../types.js';
 
 export function useLogs(setMessage: (message: string) => void) {

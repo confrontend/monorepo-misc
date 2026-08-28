@@ -6,6 +6,7 @@ import {
   computeCopyabilityScore,
   computeFastTradingPenalty,
   computeHistoricalHyperactivityPenalty,
+  copyPortfolioProfitabilityPassesCandidacyGate,
   delayedCopyPerformancePassesCandidacyGate,
   outOfSampleStabilityPassesCandidacyGate,
   readExperimentalDecisionPromotedRules,
@@ -129,6 +130,20 @@ test('negative or missing delayed-copy median cannot pass final candidacy', () =
     delayedCopyPerformancePassesCandidacyGate({ simulatedMedianReturnPercent: 0.1 }),
     true,
   );
+});
+
+test('a $100 delayed-copy portfolio must end above $100 for final candidacy', () => {
+  const portfolio = (endingCapitalUsd: number) => ({
+    startingCapitalUsd: 100,
+    endingCapitalUsd,
+  });
+  assert.equal(copyPortfolioProfitabilityPassesCandidacyGate({ portfolio: portfolio(64) }), false);
+  assert.equal(copyPortfolioProfitabilityPassesCandidacyGate({ portfolio: portfolio(100) }), false);
+  assert.equal(
+    copyPortfolioProfitabilityPassesCandidacyGate({ portfolio: portfolio(100.01) }),
+    true,
+  );
+  assert.equal(copyPortfolioProfitabilityPassesCandidacyGate(undefined), false);
 });
 
 test('final candidacy consumes the existing Out-of-sample stability verdict', () => {

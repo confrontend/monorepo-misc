@@ -4,7 +4,7 @@
  */
 export const CACHE_VERSIONS = {
   patternDiscovery: 'crypto-pattern-discovery-v5-reduced-coverage-grid',
-  decisionLab: 'experimental-decision:decision-lab-scoring-v6-shared-oos-stability',
+  decisionLab: 'experimental-decision:decision-lab-scoring-v8-risk-evidence-snapshot',
   copySimulation: 'copy-simulation-v2',
 } as const;
 

@@ -29,6 +29,17 @@ module.exports = {
       from: { path: '^ui' },
       to: { path: '^src/scripts' },
     },
+    {
+      name: 'live-evaluation-does-not-read-decision-lab-or-dune',
+      comment:
+        'Live Evaluation is a GMGN-only estimate that must never fetch Dune data or read a saved ' +
+        'Decision Lab score into its own computation. The history module reads finished evaluation ' +
+        'results separately -- this rule keeps liveEvaluation.ts structurally unable to import back ' +
+        'into that comparison module or into any Dune-dependent code.',
+      severity: 'error',
+      from: { path: '^src/copytrade/liveEvaluation\\.ts$' },
+      to: { path: '^(src/copytrade/liveEvaluationHistory\\.ts$|src/dune)' },
+    },
   ],
   options: {
     doNotFollow: [

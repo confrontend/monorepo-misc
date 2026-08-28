@@ -1,4 +1,4 @@
-import { formatTime } from '../App.js';
+import { formatTime } from '../httpClient.js';
 import { useLogs } from '../hooks/useLogs.js';
 
 export function DiagnosticsRoute({ setMessage }: { setMessage: (message: string) => void }) {

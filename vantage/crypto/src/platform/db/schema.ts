@@ -1572,6 +1572,26 @@ const migrations: Migration[] = [
       END;
     `),
   },
+  {
+    description: 'Persist wallet evaluation history for Live Evaluation and Decision Lab',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_evaluation_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_address TEXT NOT NULL,
+        chain TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('live', 'decision_lab')),
+        generated_at TEXT NOT NULL,
+        score REAL,
+        verdict TEXT NOT NULL,
+        evidence_level TEXT,
+        component_scores_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_evaluation_history_wallet
+      ON copytrade_evaluation_history(wallet_address, chain, id DESC);
+    `),
+  },
 ];
 
 export const latestSchemaVersion = migrations.length;

@@ -52,7 +52,7 @@ crypto/
 ├── ui/strings.ts
 ├── ui/components/DataTable.tsx
 ├── ui/components/PatternDiscoveryRuleDialog.tsx
-├── ui/components/PatternDiscoveryRuleEvidence.tsx
+├── ui/components/PatternDiscoveryPromotedPatterns.tsx
 └── specs/001-pattern-rule-evidence/
     ├── spec.md
     ├── plan.md

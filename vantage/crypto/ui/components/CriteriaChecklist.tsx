@@ -7,7 +7,7 @@ export type CriteriaChecklistItem = {
 };
 
 /** The one minimal pass/fail/pending list style used for any "criteria behind this verdict"
- *  display -- the 30-day decision gates and the Scrutiny checks both render through this in the
+ *  display -- the 30-day decision gates and candidate checks both render through this in the
  *  Wallet Stats detail dialog, so the two checklists read as one consistent design instead of a
  *  compact list next to a grid of bordered cards. */
 export function CriteriaChecklist({ items }: { items: CriteriaChecklistItem[] }) {

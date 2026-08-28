@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { formatTime } from '../App.js';
+import { formatTime } from '../httpClient.js';
 import { useArchives } from '../hooks/useArchives.js';
 
 export function ArchivesRoute({ setMessage }: { setMessage: (message: string) => void }) {
