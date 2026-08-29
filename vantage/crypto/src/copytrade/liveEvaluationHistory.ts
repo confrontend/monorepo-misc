@@ -34,10 +34,7 @@ export type EvaluationTrend =
       previousGeneratedAt: string;
     };
 
-export type RecordEvaluationHistoryInput = Omit<
-  EvaluationHistoryEntry,
-  'id' | 'createdAt'
->;
+export type RecordEvaluationHistoryInput = Omit<EvaluationHistoryEntry, 'id' | 'createdAt'>;
 
 export const shouldRecordEvaluationHistory = (
   entry: Pick<RecordEvaluationHistoryInput, 'score' | 'evidenceLevel'>,
@@ -51,9 +48,7 @@ const normalizeVerdict = (
   return 'insufficient_evidence';
 };
 
-const decisionLabComponents = (
-  wallet: ExperimentalDecisionWallet,
-): EvaluationComponentScores => ({
+const decisionLabComponents = (wallet: ExperimentalDecisionWallet): EvaluationComponentScores => ({
   historicalProfitability: wallet.scores.edge,
   consistency: wallet.scores.consistency,
   robustness: wallet.scores.robustness,

@@ -1,0 +1,59 @@
+import type { CopyTradeSubTab } from '../types.js';
+
+type AppNavigationProps = {
+  copyTradeSubTab: CopyTradeSubTab;
+  activeMenu: string;
+  signalMenuActive: boolean;
+  onCopyTradeTabChange: (tab: CopyTradeSubTab) => void;
+  onMenuChange: (menu: string) => void;
+};
+
+const tabs: Array<{ key: CopyTradeSubTab; label: string }> = [
+  { key: 'pattern-discovery', label: 'Pattern Research' },
+  { key: 'experimental-decision', label: 'Decision Engine' },
+  { key: 'live-evaluation', label: 'Live Evaluation' },
+  { key: 'api-reference', label: 'API Docs' },
+];
+
+export function AppNavigation({
+  copyTradeSubTab,
+  activeMenu,
+  signalMenuActive,
+  onCopyTradeTabChange,
+  onMenuChange,
+}: AppNavigationProps) {
+  return (
+    <>
+      <nav className="section-nav" aria-label="Research sections">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            className={`nav-button ${copyTradeSubTab === tab.key ? 'active' : ''}`}
+            onClick={() => onCopyTradeTabChange(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+      {signalMenuActive && (
+        <nav className="subsection-nav" aria-label="Signal workspace">
+          <span className="subsection-label">Signal</span>
+          {[
+            ['imports', 'Imports'],
+            ['capture', 'GMGN Capture'],
+            ['dune-capture', 'Dune Capture'],
+            ['patterns', 'Patterns'],
+          ].map(([menu, label]) => (
+            <button
+              key={menu}
+              className={`nav-button ${activeMenu === menu ? 'active' : ''}`}
+              onClick={() => onMenuChange(menu)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+    </>
+  );
+}

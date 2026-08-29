@@ -53,7 +53,14 @@ const csvText = (value: ReactNode): string => {
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   if (Array.isArray(value)) return value.map(csvText).join('');
   if (typeof value === 'object' && 'props' in value) {
-    const props = (value as ReactElement<{ status?: string; tag?: string; value?: unknown; children?: ReactNode }>).props;
+    const props = (
+      value as ReactElement<{
+        status?: string;
+        tag?: string;
+        value?: unknown;
+        children?: ReactNode;
+      }>
+    ).props;
     if (props.status) return props.status.replaceAll('_', ' ');
     if (props.tag) return props.tag;
     if (props.value !== undefined && typeof props.value !== 'object') return String(props.value);

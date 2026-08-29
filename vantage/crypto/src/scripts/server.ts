@@ -127,10 +127,7 @@ import {
   readExperimentalDecisionCacheVersion,
   type ExperimentalDecisionReport,
 } from '../copytrade/experimentalDecision.js';
-import {
-  computeLiveEvaluation,
-  parseLiveEvaluationRequest,
-} from '../copytrade/liveEvaluation.js';
+import { computeLiveEvaluation, parseLiveEvaluationRequest } from '../copytrade/liveEvaluation.js';
 import {
   computeEvaluationTrend,
   decisionLabHistoryEntry,
@@ -1000,14 +997,17 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       // user inspected one wallet.
       {
         const result = computeLiveEvaluation(database, parsed.walletAddress, { chain: 'sol' });
-        if (shouldRecordEvaluationHistory({
-          score: result.estimatedOverallScore,
-          evidenceLevel: result.evidenceLevel,
-        })) {
-          const previous = readEvaluationHistory(database, parsed.walletAddress, {
-            chain: 'sol',
-            limit: 1,
-          })[0] ?? null;
+        if (
+          shouldRecordEvaluationHistory({
+            score: result.estimatedOverallScore,
+            evidenceLevel: result.evidenceLevel,
+          })
+        ) {
+          const previous =
+            readEvaluationHistory(database, parsed.walletAddress, {
+              chain: 'sol',
+              limit: 1,
+            })[0] ?? null;
           const current = recordEvaluationHistory(database, {
             walletAddress: parsed.walletAddress,
             chain: 'sol',

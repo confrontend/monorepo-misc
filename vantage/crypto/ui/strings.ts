@@ -63,7 +63,8 @@ export const strings = {
     noRulesApplied: 'No promoted rule affected this result.',
     noRulesUnavailable: 'None.',
     historyTitle: 'Evaluation history',
-    historyCaption: 'Each evaluation is compared with the immediately older evaluation for this wallet. Higher score is better.',
+    historyCaption:
+      'Each evaluation is compared with the immediately older evaluation for this wallet. Higher score is better.',
     historyEmpty: 'No prior evaluation history is available yet.',
     historyFirst: 'First evaluation',
     historySourceLive: 'Live Evaluation',
@@ -71,6 +72,18 @@ export const strings = {
     emptyState: 'Enter a wallet address and click Evaluate.',
   },
   decisionLab: {
+    dataControls: {
+      title: 'GMGN data',
+      importRoster: 'Import roster JSON',
+      fetchStats: 'Fetch GMGN data',
+      working: 'Working…',
+      hint: 'Import or refresh the roster, then fetch its 30-day GMGN history.',
+      fetchStarted: 'GMGN fetch started. Progress will update automatically.',
+      fetchAlreadyRunning: 'A GMGN fetch is already running. Showing its progress.',
+      fetching: 'Fetching GMGN history',
+      walletsProgress: (done: number, total: number) => `${done} / ${total} wallets`,
+      requestsMade: (count: number) => `${count} requests made`,
+    },
     copyingRisk: 'Copying risk',
     copyingRiskUnknown: 'Not enough data',
     copyingRiskLow: 'Looks copyable',
@@ -85,7 +98,7 @@ export const strings = {
       complete: 'Gate failed',
     },
     sourceSummary:
-      'Decision Lab is an exploratory, read-only ranking built from the last saved 30-day GMGN wallet data and saved Dune delayed-copy simulations. Live Evaluation fetches do not replace this report; use Reload saved evidence to recalculate it. It does not change the production verdict.',
+      'Decision Lab is an exploratory, read-only ranking built from the last saved 30-day GMGN wallet data. Dune is used only in Pattern Research and does not affect this ranking.',
     scoringTitle: 'How scoring works',
     scoringRule:
       'Each group receives a score from 0 to 100. The overall score is their weighted average; it is a comparison score, not a guaranteed profit forecast.',
@@ -94,10 +107,21 @@ export const strings = {
       edge: 'typical delayed-copy return',
       consistency: 'repeatability across saved periods',
       robustness: 'performance after removing the best token',
-      copyability: 'coverage, holding time, and validated copying penalties',
+      copyability: 'holding time and validated trading penalties',
     },
     candidateGates:
-      'Final-candidate gates are separate from the weighted score: complete evidence, positive delayed-copy median, a $100 portfolio ending above $100, and a passing out-of-sample stability check.',
+      'Final-candidate gates are separate from the weighted score: complete GMGN evidence and a positive GMGN median return.',
+    patternFallbackTitle: 'Pattern-based scoring adjustments are not active',
+    patternFallbackSummary:
+      'Decision Lab is using neutral 25/25/25/25 weights and no discovered-rule penalties.',
+    patternFallbackReasons: [
+      'Available promoted patterns did not qualify across multiple Decision Lab scoring categories.',
+      'Rules must repeat across the required coverage levels.',
+      'Rules must pass chronological validation and historical stability checks.',
+      'The supporting wallet minimum must be met.',
+    ],
+    patternFallbackAction:
+      'Run Pattern Discovery after new evidence is available. The saved result will be reused until the evidence changes.',
     missingEvidence:
       'Missing evidence stays unavailable—not zero—and prevents a raw overall score until all four components can be calculated.',
     weightsTitle: 'Weights currently in use',
@@ -1230,6 +1254,20 @@ export const strings = {
     },
   },
   patternDiscovery: {
+    duneWalletSelection: {
+      eyebrow: 'DUNE DIAGNOSTICS',
+      title: 'Choose wallets to fetch',
+      description:
+        'Select the wallets whose delayed-copy evidence should be refreshed. No fetch starts until you confirm.',
+      cancel: 'Cancel',
+      selected: (selected: number, total: number) => `${selected} of ${total} wallets selected`,
+      trades: 'GMGN trades',
+      selectAll: 'Select all',
+      wallet: 'Wallet',
+      totalTrades: 'Total trades',
+      empty: 'No GMGN wallet data is available. Load the GMGN roster first.',
+      confirm: 'Fetch selected wallets',
+    },
     summaryEyebrow: 'DISCOVERY SUMMARY',
     summaryTitle: 'What the run found',
     promotedPatterns: 'promoted patterns',

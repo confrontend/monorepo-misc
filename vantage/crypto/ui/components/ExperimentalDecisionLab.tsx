@@ -3,6 +3,8 @@ import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import { GmgnTag } from './GmgnTag.js';
 import { strings } from '../strings.js';
+import type { ApiClient } from '../httpClient.js';
+import type { GmgnStatsFetchStatus } from '../types.js';
 
 type LabWallet = {
   walletAddress: string;
@@ -23,7 +25,14 @@ type LabWallet = {
     { label: string; detail: string }
   >;
   facts: {
+    gmgnPeriod?: string | null;
+    gmgnFetchedAt?: string | null;
+    gmgnTrades?: number | null;
+    gmgnBuyCount?: number | null;
+    gmgnSellCount?: number | null;
     gmgnMedianPercent: number | null;
+    gmgnWinRatePercent?: number | null;
+    gmgnRealizedProfitUsd?: number | null;
     copyMedianPercent: number | null;
     copyCapitalUsd: number | null;
     duneCoveragePercent: number | null;
@@ -72,6 +81,155 @@ type LabResponse = {
   };
   wallets: LabWallet[];
 };
+
+function DecisionLabGmgnControls({ api }: { api: ApiClient }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [fetchStatus, setFetchStatus] = useState<GmgnStatsFetchStatus | null>(null);
+  const importRoster = async (file: File) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api('/api/copytrade/roster/import', {
+        method: 'POST',
+        body: JSON.stringify({ name: file.name, content: await file.text() }),
+      });
+      setMessage('Roster imported. Reload the report to score it.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const fetchStats = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api('/api/copytrade/stats/fetch', {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100 }),
+      });
+      // The worker updates its shared status asynchronously. Show progress immediately so a
+      // fast status read returning `idle` cannot make a successfully-started job disappear.
+      setFetchStatus({
+        running: true,
+        status: 'running',
+        walletDone: 0,
+        walletTotal: 100,
+        periods: [],
+        requestsMade: 0,
+        skippedFresh: 0,
+        error: null,
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+      });
+      setMessage(strings.decisionLab.dataControls.fetchStarted);
+    } catch (error) {
+      // A second click returns 409 while the original job is still healthy. Reconnect to it
+      // instead of presenting the conflict as a failed fetch.
+      if (error instanceof Error && error.message.includes('409')) {
+        try {
+          const status = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
+          setFetchStatus(status);
+          setMessage(strings.decisionLab.dataControls.fetchAlreadyRunning);
+          return;
+        } catch {
+          // Preserve the original conflict message if the status endpoint is unavailable.
+        }
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    let disposed = false;
+    void api<GmgnStatsFetchStatus>('/api/copytrade/stats/status')
+      .then((status) => {
+        if (!disposed) {
+          setFetchStatus(status);
+          setBusy(status.running);
+        }
+      })
+      .catch(() => {
+        // Status is supplemental; the controls remain usable if it cannot be read.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [api]);
+  useEffect(() => {
+    if (!fetchStatus?.running) return;
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const next = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
+        if (!disposed) {
+          setFetchStatus(next);
+          if (!next.running) setBusy(false);
+        }
+      } catch (error) {
+        if (!disposed) setMessage(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [api, fetchStatus?.running]);
+  const walletDone = fetchStatus?.walletDone ?? 0;
+  const walletTotal = fetchStatus?.walletTotal ?? 0;
+  const progressPercent = walletTotal > 0 ? Math.min(100, (walletDone / walletTotal) * 100) : 0;
+  return (
+    <div className="experimental-gmgn-controls">
+      <div>
+        <strong>{strings.decisionLab.dataControls.title}</strong>
+        <small>{strings.decisionLab.dataControls.hint}</small>
+      </div>
+      <div className="experimental-gmgn-control-actions">
+        <label className="secondary">
+          {strings.decisionLab.dataControls.importRoster}
+          <input
+            type="file"
+            accept="application/json,.json"
+            hidden
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importRoster(file);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
+        <button type="button" className="primary" disabled={busy} onClick={() => void fetchStats()}>
+          {busy
+            ? strings.decisionLab.dataControls.working
+            : strings.decisionLab.dataControls.fetchStats}
+        </button>
+      </div>
+      {message && <small role="status">{message}</small>}
+      {fetchStatus?.running && (
+        <div className="experimental-gmgn-progress" role="status" aria-live="polite">
+          <div className="experimental-gmgn-progress-head">
+            <span>{strings.decisionLab.dataControls.fetching}</span>
+            <strong>
+              {strings.decisionLab.dataControls.walletsProgress(walletDone, walletTotal || 100)}
+            </strong>
+          </div>
+          <progress
+            value={progressPercent}
+            max={100}
+            aria-label={strings.decisionLab.dataControls.fetching}
+          />
+          <small>{strings.decisionLab.dataControls.requestsMade(fetchStatus.requestsMade)}</small>
+        </div>
+      )}
+      {fetchStatus?.error && <small className="error-text">{fetchStatus.error}</small>}
+    </div>
+  );
+}
 type LabSortKey =
   | 'rank'
   | 'wallet'
@@ -179,39 +337,42 @@ const TableTooltip = ({
 const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
   <span className="experimental-tooltip-cell experimental-facts-cell" tabIndex={0}>
     <span>
-      {pct(wallet.facts.copyMedianPercent)} · {usd(wallet.facts.copyCapitalUsd)}
-      <small>
-        {wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered} round trips
-      </small>
+      {pct(wallet.facts.gmgnMedianPercent)} · {usd(wallet.facts.gmgnRealizedProfitUsd ?? null)}
+      <small>{wallet.facts.gmgnTrades ?? '—'} GMGN trades</small>
     </span>
     <span className="experimental-table-tooltip experimental-facts-tooltip" role="tooltip">
       <b>Saved facts</b>
       <span>
-        <strong>Copy median</strong>
-        <small>Typical delayed-copy return per copied trade.</small>
-        <em>{pct(wallet.facts.copyMedianPercent)}</em>
+        <strong>GMGN median return</strong>
+        <small>Wallet-reported median return for the saved 30-day period.</small>
+        <em>{pct(wallet.facts.gmgnMedianPercent)}</em>
       </span>
       <span>
-        <strong>$100 after copy</strong>
-        <small>Ending value of a $100 delayed-copy portfolio after costs.</small>
-        <em>{usd(wallet.facts.copyCapitalUsd)}</em>
+        <strong>Realized profit</strong>
+        <small>Wallet-reported realized profit in the saved 30-day period.</small>
+        <em>{usd(wallet.facts.gmgnRealizedProfitUsd ?? null)}</em>
       </span>
       <span>
-        <strong>Round trips</strong>
-        <small>Matched copied round trips out of eligible round trips.</small>
+        <strong>Trade activity</strong>
+        <small>Saved GMGN trades and buy/sell counts.</small>
         <em>
-          {wallet.facts.matchedRoundTrips}/{wallet.facts.roundTripsConsidered}
+          {wallet.facts.gmgnTrades ?? '—'} · {wallet.facts.gmgnBuyCount ?? '—'} /{' '}
+          {wallet.facts.gmgnSellCount ?? '—'}
         </em>
       </span>
       <span>
-        <strong>Dune coverage</strong>
-        <small>Eligible trades with usable delayed-copy pricing.</small>
-        <em>{pct(wallet.facts.duneCoveragePercent)}</em>
+        <strong>Win rate</strong>
+        <small>Saved GMGN winning-trade percentage.</small>
+        <em>{pct(wallet.facts.gmgnWinRatePercent ?? null)}</em>
       </span>
       <span>
-        <strong>GMGN median</strong>
-        <small>Wallet-reported median return before copy delay and costs.</small>
-        <em>{pct(wallet.facts.gmgnMedianPercent)}</em>
+        <strong>Median hold</strong>
+        <small>Typical holding time from saved GMGN activity.</small>
+        <em>
+          {wallet.facts.medianHoldSeconds === null
+            ? '—'
+            : `${Math.round(wallet.facts.medianHoldSeconds)}s`}
+        </em>
       </span>
     </span>
   </span>
@@ -328,7 +489,7 @@ const exportDecisionLab = (response: LabResponse) => {
   URL.revokeObjectURL(url);
 };
 
-export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Promise<T> }) {
+export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   const [response, setResponse] = useState<LabResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -538,6 +699,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
           </button>
         </div>
       </div>
+      <DecisionLabGmgnControls api={api} />
       <p className="muted">{strings.decisionLab.sourceSummary}</p>
       {loading && (
         <p className="copytrade-analysis-status running">
@@ -579,9 +741,8 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                 <strong>Final candidate gates</strong>
                 <div className="experimental-gate-pills">
                   <span>Complete evidence</span>
-                  <span>Copy median &gt; 0</span>
-                  <span>Portfolio &gt; $100</span>
-                  <span>OOS stability pass</span>
+                  <span>GMGN median &gt; 0</span>
+                  <span>All GMGN scores available</span>
                 </div>
               </div>
             </section>
@@ -596,7 +757,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                     ? `Promoted rules active · ${response.weighting.supportingThresholds.length ? `${Math.min(...response.weighting.supportingThresholds)}–${Math.max(...response.weighting.supportingThresholds)}% coverage` : 'validated coverage'} · ${response.weighting.supportingWallets} supporting wallets`
                     : 'Fallback / insufficient pattern support'}
                 </p>
-                <small>Evidence: saved 30-day GMGN + Dune delayed-copy data</small>
+                <small>Evidence: saved 30-day GMGN data</small>
               </div>
             </section>
             <button
@@ -609,6 +770,21 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
               <span aria-hidden="true">i</span> Scoring details
             </button>
           </div>
+          {response.weighting?.mode !== 'validated-patterns' && (
+            <aside className="experimental-pattern-fallback" role="status">
+              <div className="experimental-pattern-fallback-title">
+                <span aria-hidden="true">!</span>
+                <strong>{strings.decisionLab.patternFallbackTitle}</strong>
+              </div>
+              <p>{strings.decisionLab.patternFallbackSummary}</p>
+              <ul>
+                {strings.decisionLab.patternFallbackReasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+              <small>{strings.decisionLab.patternFallbackAction}</small>
+            </aside>
+          )}
           {scoringInfoOpen && (
             <Modal
               onClose={() => setScoringInfoOpen(false)}
@@ -647,8 +823,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                   Robustness uses return after removing the best token; concentration is neutral.
                 </li>
                 <li>
-                  Copyability uses coverage and holding time, less validated fast-trading and
-                  activity penalties.
+                  Copyability uses holding time, less validated fast-trading and activity penalties.
                 </li>
                 <li>
                   Pattern rules:{' '}
@@ -656,10 +831,7 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                     ? 'promoted patterns only, repeated across validated coverage levels.'
                     : 'none active; neutral fallback is in use.'}
                 </li>
-                <li>
-                  Final gates: complete evidence, positive delayed-copy median, portfolio above
-                  $100, and passing out-of-sample stability.
-                </li>
+                <li>Final gate: complete GMGN evidence and a positive GMGN median return.</li>
               </ul>
               <h4>Final candidate gates</h4>
               <p>
@@ -835,48 +1007,6 @@ export function ExperimentalDecisionLab({ api }: { api: <T>(path: string) => Pro
                 key: 'facts',
                 header: sortableHeader('facts', 'Saved facts'),
                 render: (wallet) => <SavedFactsCell wallet={wallet} />,
-              },
-              {
-                key: 'scrutiny',
-                header: sortableHeader('scrutiny', 'Scrutiny'),
-                render: (wallet) =>
-                  wallet.scrutiny ? (
-                    <TableTooltip
-                      className="experimental-scrutiny-tooltip"
-                      label="Scrutiny checks"
-                      detail={`${wallet.scrutiny.pass} pass · ${wallet.scrutiny.fail} fail · ${wallet.scrutiny.insufficient} insufficient. Open the row for check details.`}
-                    >
-                      {wallet.scrutiny.pass} pass · {wallet.scrutiny.fail} fail
-                      <small>{wallet.scrutiny.insufficient} insufficient</small>
-                    </TableTooltip>
-                  ) : (
-                    '—'
-                  ),
-              },
-              {
-                key: 'liquidity',
-                header: sortableHeader('liquidity', strings.decisionLab.copyingRisk),
-                render: (wallet) =>
-                  wallet.liquidityBands ? (
-                    <TableTooltip
-                      label="Copying risk"
-                      detail={strings.decisionLab.copyingRiskTitle}
-                    >
-                      <span
-                        className={
-                          copyingRisk(wallet) === 'low'
-                            ? 'change-positive'
-                            : copyingRisk(wallet) === 'unknown'
-                              ? 'muted'
-                              : 'change-negative'
-                        }
-                      >
-                        {copyingRiskLabel(wallet)}
-                      </span>
-                    </TableTooltip>
-                  ) : (
-                    '—'
-                  ),
               },
               {
                 key: 'risk',

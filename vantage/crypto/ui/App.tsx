@@ -7,9 +7,11 @@ import { StatusBanner } from './components/StatusBanner.js';
 import { Collapsible } from './components/Collapsible.js';
 import { WorkflowStep } from './components/WorkflowStep.js';
 import { PanelHeading } from './components/PanelHeading.js';
+import { AppHeader } from './components/AppHeader.js';
+import { AppNavigation } from './components/AppNavigation.js';
+import { OverviewSection } from './components/OverviewSection.js';
 import { useSortState } from './components/useSortState.js';
-import { ExperimentalDecisionLab } from './components/ExperimentalDecisionLab.js';
-import { LiveEvaluation } from './components/LiveEvaluation.js';
+import { CopyTradeSubTabContent } from './components/CopyTradeSubTabContent.js';
 import { GmgnTag, gmgnTagInfo } from './components/GmgnTag.js';
 import { CriteriaChecklist, type CriteriaChecklistItem } from './components/CriteriaChecklist.js';
 import { assessWalletRiskGuardrails } from '../src/copytrade/scrutiny/walletRiskGuardrails.js';
@@ -24,7 +26,6 @@ import {
   DECISION_STATES,
   decisionStateFor,
 } from './copytradeDecisionPresentation.js';
-import { ApiReference } from './components/ApiReference.js';
 import {
   PatternDiscoveryRuleDialog,
   type PatternDiscoveryRule,
@@ -32,6 +33,7 @@ import {
 import { PatternDiscoveryPromotedPatterns } from './components/PatternDiscoveryPromotedPatterns.js';
 import { PatternDiscoveryProgressPanel } from './components/PatternDiscoveryProgressPanel.js';
 import { PatternDiscoveryRunSummary } from './components/PatternDiscoveryRunSummary.js';
+import { DuneWalletSelectionDialog } from './components/DuneWalletSelectionDialog.js';
 import { UI_STRINGS } from './strings.js';
 import { ArchivesRoute } from './routes/ArchivesRoute.js';
 import { DiagnosticsRoute } from './routes/DiagnosticsRoute.js';
@@ -773,9 +775,10 @@ const DECISION_COLUMNS: Array<{ key: DecisionColumnKey; label: string }> = [
   { key: 'gmgnTags', label: 'GMGN tags' },
 ];
 const decisionColumnsStorageKey = 'vantage.crypto.decision-columns.v1';
-// Lightweight deployment mode: keep the other workflows and routes in source, but expose only
-// the aggregate GMGN wallet-stats reader until the broader research workspace is needed again.
-const WALLET_STATS_ONLY = true;
+// The copy-trading workspace is now organized around Decision Engine, Pattern Research, and
+// Live Evaluation. Wallet Data remains an implementation detail used by the data controls rather
+// than a standalone user-facing tab.
+const WALLET_STATS_ONLY = false;
 const parseCopyTradeRoute = (route: string): { menu: string; subTab: CopyTradeSubTab } => {
   const [rawMenu, rawSubTab] = route.split('/');
   const subTab: CopyTradeSubTab =
@@ -784,7 +787,9 @@ const parseCopyTradeRoute = (route: string): { menu: string; subTab: CopyTradeSu
     rawSubTab === 'experimental-decision' ||
     rawSubTab === 'live-evaluation'
       ? rawSubTab
-      : 'wallet-stats';
+      : 'experimental-decision';
+  if (rawSubTab === 'wallet-stats')
+    return { menu: normalizeRoute(rawMenu || 'dune-capture'), subTab: 'experimental-decision' };
   return { menu: normalizeRoute(rawMenu || 'dune-capture'), subTab };
 };
 const copyAddress = async (address: string) => {
@@ -1070,7 +1075,9 @@ export function App() {
     }
   }, [themeMode]);
   const initialRoute = (() => {
-    const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
+    const parsed = parseCopyTradeRoute(
+      window.location.hash.slice(1) || 'copytrade/experimental-decision',
+    );
     return { menu: 'copytrade', subTab: parsed.subTab };
   })();
   const [activeMenu, setActiveMenu] = useState(initialRoute.menu);
@@ -1255,6 +1262,9 @@ export function App() {
   const [copySimulationStopBusy, setCopySimulationStopBusy] = useState(false);
   const [copySimulationRunStatus, setCopySimulationRunStatus] =
     useState<CopySimulationRunStatus | null>(null);
+  const [duneWalletSelectionOpen, setDuneWalletSelectionOpen] = useState(false);
+  const [duneWalletSelectionRows, setDuneWalletSelectionRows] = useState<CopyTradeRow[]>([]);
+  const [selectedDuneWallets, setSelectedDuneWallets] = useState<Set<string>>(new Set());
   const [copySimulationRunReportOpen, setCopySimulationRunReportOpen] = useState(false);
   const [wideRetryWallet, setWideRetryWallet] = useState<string | null>(null);
   const [wideRetryWindowMinutes, setWideRetryWindowMinutes] = useState(15);
@@ -2277,13 +2287,14 @@ export function App() {
   }, [copySimulationRunStatus?.running, copySimulationRunStatus?.outcome]);
   useEffect(() => {
     if (WALLET_STATS_ONLY) return;
+    if (activeMenu === 'copytrade' && copyTradeSubTab !== 'wallet-stats') return;
     void loadCopyTradeStatus();
-  }, []);
+  }, [activeMenu, copyTradeSubTab]);
 
   useEffect(() => {
     if (WALLET_STATS_ONLY) return;
     if (activeMenu !== 'copytrade') return;
-    if (copyTradeSubTab === 'wallet-stats') return;
+    if (copyTradeSubTab !== 'pattern-discovery') return;
     void loadCopyTradePage();
     const snapshotForStats =
       selectedRosterSnapshotId ?? copyTradeRosters?.selectedByDefault ?? null;
@@ -2301,7 +2312,7 @@ export function App() {
     if (
       activeMenu !== 'copytrade' ||
       selectedRosterSnapshotId === null ||
-      copyTradeSubTab === 'wallet-stats'
+      copyTradeSubTab !== 'pattern-discovery'
     )
       return;
     void loadCopyTradePage();
@@ -2334,6 +2345,7 @@ export function App() {
     // The estimate is advisory and can never improve the first render. On the wallet-stats
     // tab, let the database-backed results table render first; otherwise a slow estimate request can
     // compete with the initial report read and make the page look stuck.
+    if (activeMenu === 'copytrade' && copyTradeSubTab !== 'wallet-stats') return;
     if (WALLET_STATS_ONLY && copyTradeSubTab === 'wallet-stats' && !walletStatsReady) return;
     const timer = window.setTimeout(
       () => {
@@ -2342,7 +2354,7 @@ export function App() {
       WALLET_STATS_ONLY ? 1200 : 0,
     );
     return () => window.clearTimeout(timer);
-  }, [copyTradeLimit, copyTradePeriodDays, copyTradeSubTab, walletStatsReady]);
+  }, [activeMenu, copyTradeLimit, copyTradePeriodDays, copyTradeSubTab, walletStatsReady]);
   // Load only data used by the three active CopyTrade tabs.
   useEffect(() => {
     if (copyTradeSubTab === 'wallet-stats') {
@@ -2408,13 +2420,18 @@ export function App() {
             if (progress.startedAt) setPatternDiscoveryStartedAt(Date.parse(progress.startedAt));
           }
         } else {
-          const completionKey =
-            progress.status === 'complete'
-              ? `${progress.runId ?? 'legacy'}:${progress.completedAt ?? 'unknown'}`
-              : null;
+          // A server restart can leave a run as `stopped` after saving several coverage levels.
+          // Those saved results are still useful and the result endpoint can return them (with a
+          // stale marker when the current evidence fingerprint differs). Load every terminal
+          // result state once, not only the ideal `complete` state.
+          const savedResultKey = ['idle', 'complete', 'stopped', 'cancelled'].includes(
+            progress.status,
+          )
+            ? `${progress.status}:${progress.runId ?? 'legacy'}:${progress.completedAt ?? progress.heartbeatAt ?? 'unknown'}`
+            : null;
           if (
-            progress.status === 'complete' &&
-            completionKey !== lastLoadedPatternDiscoveryCompletionKey.current
+            savedResultKey &&
+            savedResultKey !== lastLoadedPatternDiscoveryCompletionKey.current
           ) {
             try {
               // The completed sensitivity result already contains the grid summaries and is
@@ -2425,9 +2442,9 @@ export function App() {
                 'Discovery finished. Loading the saved grid result…',
               );
               await loadCompletedPatternDiscovery();
-              lastLoadedPatternDiscoveryCompletionKey.current = completionKey;
+              lastLoadedPatternDiscoveryCompletionKey.current = savedResultKey;
             } catch (error: unknown) {
-              if (!disposed)
+              if (!disposed && progress.status === 'complete')
                 setPatternDiscoveryRunError(error instanceof Error ? error.message : String(error));
             }
           } else if (progress.status === 'error') {
@@ -2573,7 +2590,7 @@ export function App() {
     }
   }, [includedScreeningWallets]);
   useEffect(() => {
-    if (!WALLET_STATS_ONLY && copyTradeSubTab !== 'wallet-stats') {
+    if (!WALLET_STATS_ONLY && copyTradeSubTab === 'pattern-discovery') {
       void loadCopySimulation(selectedRosterSnapshotId ?? undefined);
       void loadLiquidityImpact(selectedRosterSnapshotId ?? undefined);
     }
@@ -2581,8 +2598,9 @@ export function App() {
 
   useEffect(() => {
     if (WALLET_STATS_ONLY) return;
+    if (activeMenu === 'copytrade') return;
     void refresh().catch((error: unknown) => setMessage(String(error)));
-  }, []);
+  }, [activeMenu]);
   useEffect(() => {
     const intro = document.querySelector<HTMLElement>(
       '.signal-outcome-batch-panel .outcome-inner > p',
@@ -2805,7 +2823,7 @@ export function App() {
 
   const navigateTo = (section: string) => {
     setActiveMenu(section);
-    if (section === 'copytrade') setCopyTradeSubTab('wallet-stats');
+    if (section === 'copytrade') setCopyTradeSubTab('experimental-decision');
     window.history.pushState({}, '', `#${section}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -2822,7 +2840,9 @@ export function App() {
 
   useEffect(() => {
     if (WALLET_STATS_ONLY) {
-      const parsed = parseCopyTradeRoute(window.location.hash.slice(1) || 'copytrade/wallet-stats');
+      const parsed = parseCopyTradeRoute(
+        window.location.hash.slice(1) || 'copytrade/experimental-decision',
+      );
       const allowedSubTab = parsed.subTab;
       const canonicalHash = `#copytrade/${allowedSubTab}`;
       if (window.location.hash !== canonicalHash)
@@ -2831,7 +2851,7 @@ export function App() {
     const onLocationChange = () => {
       if (WALLET_STATS_ONLY) {
         const parsed = parseCopyTradeRoute(
-          window.location.hash.slice(1) || 'copytrade/wallet-stats',
+          window.location.hash.slice(1) || 'copytrade/experimental-decision',
         );
         const allowedSubTab = parsed.subTab;
         setActiveMenu('copytrade');
@@ -3318,6 +3338,36 @@ export function App() {
               : String(leftValue).localeCompare(String(rightValue));
     return (gmgnStatsSort.direction === 'asc' ? 1 : -1) * comparison;
   });
+  const openDuneWalletSelection = () => {
+    const rows = [...sortedGmgnStatsRows];
+    setDuneWalletSelectionRows(rows);
+    setSelectedDuneWallets(new Set(rows.map((row) => row.walletAddress)));
+    setDuneWalletSelectionOpen(true);
+  };
+  const toggleDuneWallet = (walletAddress: string) => {
+    setSelectedDuneWallets((current) => {
+      const next = new Set(current);
+      if (next.has(walletAddress)) next.delete(walletAddress);
+      else next.add(walletAddress);
+      return next;
+    });
+  };
+  const toggleAllDuneWallets = () => {
+    setSelectedDuneWallets((current) =>
+      duneWalletSelectionRows.length > 0 &&
+      duneWalletSelectionRows.every((row) => current.has(row.walletAddress))
+        ? new Set()
+        : new Set(duneWalletSelectionRows.map((row) => row.walletAddress)),
+    );
+  };
+  const confirmDuneWalletSelection = () => {
+    const walletAddresses = duneWalletSelectionRows
+      .map((row) => row.walletAddress)
+      .filter((walletAddress) => selectedDuneWallets.has(walletAddress));
+    if (walletAddresses.length === 0) return;
+    setDuneWalletSelectionOpen(false);
+    void runCopySimulationBatch(walletAddresses, 30);
+  };
   const copySimulationByWallet = new Map(
     (copySimulation?.wallets ?? []).map((wallet) => [wallet.walletAddress, wallet]),
   );
@@ -4921,148 +4971,20 @@ export function App() {
     <main
       className={`shell routed-view page-${activeMenu} ${WALLET_STATS_ONLY ? 'wallet-stats-only' : ''} ${WALLET_STATS_ONLY && copyTradeSubTab === 'pattern-discovery' ? 'lightweight-pattern-discovery' : ''} ${WALLET_STATS_ONLY && copyTradeSubTab === 'api-reference' ? 'lightweight-api-reference' : ''} ${WALLET_STATS_ONLY && copyTradeSubTab === 'experimental-decision' ? 'lightweight-experimental-decision' : ''} ${WALLET_STATS_ONLY && copyTradeSubTab === 'live-evaluation' ? 'lightweight-live-evaluation' : ''}`}
     >
-      <header className="hero">
-        <div>
-          <p className="eyebrow">GMGN / DUNE · BACKTEST</p>
-          <h1>GMGN/Dune Backtest</h1>
-          <p className="lede">
-            Find promising Solana wallets by comparing GMGN performance with realistic delayed-copy
-            backtests.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="theme-toggle"
-          aria-pressed={themeMode === 'light'}
-          onClick={() => setThemeMode((mode) => (mode === 'dark' ? 'light' : 'dark'))}
-        >
-          <span aria-hidden="true">{themeMode === 'dark' ? '☀' : '☾'}</span>
-          {themeMode === 'dark' ? UI_STRINGS.header.themeLight : UI_STRINGS.header.themeDark}
-        </button>
-      </header>
+      <AppHeader
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((mode) => (mode === 'dark' ? 'light' : 'dark'))}
+      />
 
-      <nav className="section-nav" aria-label="Research sections">
-        <button
-          className={`nav-button ${copyTradeSubTab === 'wallet-stats' ? 'active' : ''}`}
-          onClick={() => navigateCopyTradeSubTab('wallet-stats')}
-        >
-          Wallet Data
-        </button>
-        <button
-          className={`nav-button ${copyTradeSubTab === 'pattern-discovery' ? 'active' : ''}`}
-          onClick={() => navigateCopyTradeSubTab('pattern-discovery')}
-        >
-          Pattern Research
-        </button>
-        <button
-          className={`nav-button ${copyTradeSubTab === 'experimental-decision' ? 'active' : ''}`}
-          onClick={() => navigateCopyTradeSubTab('experimental-decision')}
-        >
-          Decision Engine
-        </button>
-        <button
-          className={`nav-button ${copyTradeSubTab === 'live-evaluation' ? 'active' : ''}`}
-          onClick={() => navigateCopyTradeSubTab('live-evaluation')}
-        >
-          Live Evaluation
-        </button>
-        <button
-          className={`nav-button ${copyTradeSubTab === 'api-reference' ? 'active' : ''}`}
-          onClick={() => navigateCopyTradeSubTab('api-reference')}
-        >
-          API Docs
-        </button>
-      </nav>
-      {!WALLET_STATS_ONLY && signalMenuActive && (
-        <nav className="subsection-nav" aria-label="Signal workspace">
-          <span className="subsection-label">Signal</span>
-          <button
-            className={`nav-button ${activeMenu === 'imports' ? 'active' : ''}`}
-            onClick={() => navigateTo('imports')}
-          >
-            Imports
-          </button>
-          <button
-            className={`nav-button ${activeMenu === 'capture' ? 'active' : ''}`}
-            onClick={() => navigateTo('capture')}
-          >
-            GMGN Capture
-          </button>
-          <button
-            className={`nav-button ${activeMenu === 'dune-capture' ? 'active' : ''}`}
-            onClick={() => navigateTo('dune-capture')}
-          >
-            Dune Capture
-          </button>
-          <button
-            className={`nav-button ${activeMenu === 'patterns' ? 'active' : ''}`}
-            onClick={() => navigateTo('patterns')}
-          >
-            Patterns
-          </button>
-        </nav>
-      )}
+      <AppNavigation
+        copyTradeSubTab={copyTradeSubTab}
+        activeMenu={activeMenu}
+        signalMenuActive={!WALLET_STATS_ONLY && signalMenuActive}
+        onCopyTradeTabChange={navigateCopyTradeSubTab}
+        onMenuChange={navigateTo}
+      />
 
-      <section id="overview" className="menu-section">
-        <ol className="workflow-strip">
-          <li className={stats.tokenCount > 0 ? 'done' : 'active'}>
-            <span>1</span>
-            <div>
-              <strong>Import a Dune cohort</strong>
-              <small>
-                {stats.tokenCount > 0
-                  ? `${stats.tokenCount.toLocaleString()} tokens stored`
-                  : 'Not started'}
-              </small>
-            </div>
-          </li>
-          <li
-            className={
-              gmgnStatus?.configured ? (stats.gmgnSignalCount > 0 ? 'done' : 'active') : ''
-            }
-          >
-            <span>2</span>
-            <div>
-              <strong>Capture GMGN signals</strong>
-              <small>
-                {stats.gmgnSignalCount > 0
-                  ? `${stats.gmgnSignalCount.toLocaleString()} signals captured`
-                  : 'Import a browser export, fetch once, or start watching'}
-              </small>
-            </div>
-          </li>
-          <li>
-            <span>3</span>
-            <div>
-              <strong>Review evidence &amp; diagnostics</strong>
-              <small>Archives, coverage, activity, and logs below</small>
-            </div>
-          </li>
-        </ol>
-
-        <section className="stats-grid">
-          <article className="stat-card">
-            <span>Tokens</span>
-            <strong>{stats.tokenCount.toLocaleString()}</strong>
-            <small>unique addresses</small>
-          </article>
-          <article className="stat-card">
-            <span>GMGN signals</span>
-            <strong>{stats.gmgnSignalCount.toLocaleString()}</strong>
-            <small>raw observations</small>
-          </article>
-          <article className="stat-card">
-            <span>First trade range</span>
-            <strong>{formatTime(stats.tokenFirstTrade.earliest)}</strong>
-            <small>to {formatTime(stats.tokenFirstTrade.latest)}</small>
-          </article>
-          <article className="stat-card">
-            <span>Observed range</span>
-            <strong>{formatTime(stats.gmgnObserved.earliest)}</strong>
-            <small>to {formatTime(stats.gmgnObserved.latest)}</small>
-          </article>
-        </section>
-      </section>
+      <OverviewSection stats={stats} gmgnStatus={gmgnStatus} />
 
       <section id="imports" className="menu-section work-grid">
         <article className="panel upload-panel">
@@ -6579,9 +6501,7 @@ export function App() {
       </Collapsible>
 
       <section id="copytrade" className="menu-section panel copytrade-panel">
-        {copyTradeSubTab === 'api-reference' && <ApiReference api={api} />}
-        {copyTradeSubTab === 'experimental-decision' && <ExperimentalDecisionLab api={api} />}
-        {copyTradeSubTab === 'live-evaluation' && <LiveEvaluation api={api} />}
+        <CopyTradeSubTabContent activeTab={copyTradeSubTab} api={api} />
       </section>
       {copyTradeSubTab === 'wallet-stats' && (
         <section
@@ -8937,6 +8857,20 @@ export function App() {
             title="Pattern Discovery"
             tag="POINT-IN-TIME FEATURES"
           />
+          <div className="pattern-discovery-dune-controls">
+            <div>
+              <strong>Dune diagnostics</strong>
+              <small>Optional delayed-copy evidence used only for Pattern Research.</small>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              disabled={copySimulationRunBusy || patternDiscoveryRunLoading}
+              onClick={openDuneWalletSelection}
+            >
+              {copySimulationRunBusy ? 'Dune diagnostics running…' : 'Fetch Dune diagnostics'}
+            </button>
+          </div>
           <div className="copytrade-coverage-controls">
             <label>
               Selected period (days)
@@ -8957,29 +8891,6 @@ export function App() {
                 {PATTERN_DISCOVERY_COVERAGE_GRID.map((value) => `${value}%`).join(' · ')}
               </small>
             </span>
-            {patternDiscoveryExport ? (
-              <button
-                type="button"
-                className="secondary"
-                onClick={() =>
-                  saveJson(
-                    patternDiscoveryExport,
-                    `crypto-pattern-discovery-${patternDiscoveryExport.metadata.period_days}d-${patternDiscoveryExport.metadata.minimum_coverage_percent}pct.json`,
-                  )
-                }
-              >
-                Download 100% coverage-level export
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="secondary"
-                disabled={patternDiscoveryRunLoading || patternDiscoveryExportLoading}
-                onClick={() => void loadPatternDiscoveryExport(copyTradePeriodDays, 100)}
-              >
-                {patternDiscoveryExportLoading ? 'Loading source data…' : 'Load 100% source data'}
-              </button>
-            )}
             <button
               type="button"
               className="secondary"
@@ -9216,6 +9127,16 @@ export function App() {
                 )}
               </div>
             )}
+          {duneWalletSelectionOpen && (
+            <DuneWalletSelectionDialog
+              rows={duneWalletSelectionRows}
+              selectedWallets={selectedDuneWallets}
+              onToggleWallet={toggleDuneWallet}
+              onToggleAll={toggleAllDuneWallets}
+              onClose={() => setDuneWalletSelectionOpen(false)}
+              onConfirm={confirmDuneWalletSelection}
+            />
+          )}
         </section>
       )}
 

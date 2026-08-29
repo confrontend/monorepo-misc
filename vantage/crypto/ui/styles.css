@@ -278,6 +278,9 @@ h2 {
 .routed-view.page-dune-capture .outcome-results-details,
 .routed-view.page-patterns #patterns,
 .routed-view.page-copytrade #copytrade,
+.routed-view.page-copytrade #copytrade > .experimental-decision-panel,
+.routed-view.page-copytrade #copytrade > .live-evaluation-panel,
+.routed-view.page-copytrade #copytrade > .api-reference-panel,
 .routed-view.page-copytrade #copytrade-wallet-stats,
 .routed-view.page-copytrade #copytrade-pattern-discovery,
 .routed-view.page-evidence #evidence,
@@ -1821,6 +1824,49 @@ html[data-theme='light'] .live-evaluation-score-difference {
 }
 .copytrade-stats-modal {
   width: min(1080px, 100%);
+}
+.dune-wallet-selection-modal {
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+}
+.dune-wallet-selection-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #a9c8b9;
+}
+.dune-wallet-selection-summary strong {
+  color: #72d8af;
+}
+.dune-wallet-selection-table {
+  max-height: 52vh;
+  overflow: auto;
+}
+.dune-wallet-selection-table table {
+  width: 100%;
+}
+.dune-wallet-selection-table th:first-child,
+.dune-wallet-selection-table td:first-child {
+  width: 6.5rem;
+  white-space: nowrap;
+}
+.dune-wallet-selection-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.dune-wallet-selection-address {
+  display: block;
+  margin-top: 0.2rem;
+  color: #91aa9e;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.dune-wallet-selection-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
 }
 .copytrade-modal > .copytrade-modal-block {
   order: 10;
@@ -6202,6 +6248,49 @@ footer {
 .experimental-decision-panel {
   overflow: visible;
 }
+.experimental-gmgn-controls {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.9rem 0;
+  padding: 0.8rem;
+  border: 1px solid rgba(114, 216, 170, 0.28);
+  border-radius: 0.65rem;
+  background: rgba(28, 61, 49, 0.28);
+}
+.experimental-gmgn-controls > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+.experimental-gmgn-controls > div:first-child small,
+.experimental-gmgn-controls > small {
+  color: #91b6a1;
+}
+.experimental-gmgn-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.experimental-gmgn-progress {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.35rem;
+}
+.experimental-gmgn-progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #dff8ea;
+  font-size: 0.8rem;
+}
+.experimental-gmgn-progress progress {
+  width: 100%;
+  height: 0.55rem;
+  accent-color: #72d8aa;
+}
+.experimental-gmgn-progress small {
+  color: #91b6a1;
+  font-size: 0.7rem;
+}
 .experimental-actions {
   display: flex;
   flex-wrap: wrap;
@@ -6227,6 +6316,46 @@ footer {
   border-radius: 0.75rem;
   background: linear-gradient(135deg, rgba(28, 61, 49, 0.78), rgba(16, 31, 27, 0.92));
   color: #e4f4e9;
+}
+.experimental-pattern-fallback {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding: 0.8rem 0.95rem;
+  border: 1px solid rgba(240, 200, 117, 0.65);
+  border-left: 4px solid #f0c875;
+  border-radius: 0.65rem;
+  background: rgba(240, 200, 117, 0.1);
+  color: #f4ead0;
+}
+.experimental-pattern-fallback-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.experimental-pattern-fallback-title span {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border: 1px solid #f0c875;
+  border-radius: 50%;
+  color: #f0c875;
+  font-weight: 800;
+}
+.experimental-pattern-fallback p,
+.experimental-pattern-fallback ul,
+.experimental-pattern-fallback small {
+  margin: 0;
+}
+.experimental-pattern-fallback ul {
+  padding-left: 1.15rem;
+  color: #e8dcc0;
+  font-size: 0.78rem;
+}
+.experimental-pattern-fallback small {
+  color: #d8c99f;
+  font-size: 0.72rem;
 }
 .experimental-model-block {
   display: flex;

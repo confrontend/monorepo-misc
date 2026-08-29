@@ -9,7 +9,7 @@ test('persisted report cache keys derive from the centralized version registry',
   );
   assert.equal(
     versionedCacheKey('decisionLab', 100, 'latest', 'fingerprint:updated'),
-    'experimental-decision:decision-lab-scoring-v8-risk-evidence-snapshot:100:latest:fingerprint:updated',
+    'experimental-decision:decision-lab-scoring-v9-gmgn-only:100:latest:fingerprint:updated',
   );
   assert.equal(
     versionedCacheKey('copySimulation', 30, 'scope-hash'),
