@@ -29,3 +29,44 @@ standalone tab.
    from Decision Lab, while Dune refresh controls are available from Pattern Research.
 7. Pattern Research shows the age of the last completed discovery run and warns when stale.
 8. Build, tests, architecture checks, and browser smoke checks pass.
+
+## Amendment: authoritative-only Decision Lab
+
+The Decision Lab exposes only the fixed `winner-policy-v2` evaluation. The experimental
+Discovered Rules mode, its selector, request parameter, response mode fields, and adaptation
+helpers are removed from the Decision Engine surface. Pattern Discovery remains available as
+research input for analytical context, but it cannot be selected as an alternate Winner Policy.
+
+Additional acceptance criteria:
+
+9. Decision Lab has no Discovered Rules selector or mode-dependent loading path.
+10. The Decision Lab endpoint accepts no `winnerPolicyMode` parameter and always returns the
+    authoritative Winner Policy result.
+11. Shared Winner Policy results no longer carry an experimental mode branch; existing
+    authoritative gates and scores remain unchanged.
+12. Tests, API documentation, and persisted-report adaptation code contain no active
+    Discovered Rules Decision Engine path.
+
+## Amendment: Winner Policy v2.1 wallet maturity risk
+
+Winner Policy v2.1 preserves the v2 hard gates and Dune profitability calculation. It adds a
+bounded GMGN wallet-age deduction (maximum 5 points) using the provider's `common.created_at`
+value persisted as `copytrade_wallet_stats.created_at_ts`. Age is calculated point-in-time relative
+to the evaluation timestamp and compared with the selected Decision Lab period.
+
+13. `created_at_ts` provenance is verified as provider wallet-age context before scoring.
+14. Wallet maturity deducts 5 points below 7 days, 4 points below half the selected period, 2
+    points below the selected period, and 0 points at or above the selected period; missing age
+    is neutral.
+15. Decision Lab and Live Evaluation pass point-in-time wallet age into the same shared policy;
+    the three hard gates and 70-point Dune profitability calculation remain unchanged.
+
+## Amendment: Winner Policy v3 all-history recency model
+
+Winner Policy v3 provides one operational winner view shared by Decision Lab and Live Evaluation.
+All valid historical evidence is included; metrics that support recency weighting use a centralized
+45-day exponential half-life. The 20 completed copied-buy gate remains the actual unweighted count,
+and the canonical chronological $100 portfolio gate remains unweighted and must end above $100.
+The delayed-copy median gate and profitability score use a robust recency-weighted median. GMGN risk
+signals use the same decay where historical observations are available. Fixed 30/60/90-day scopes
+remain diagnostic/research inputs only and do not create competing winner views.

@@ -5,7 +5,6 @@ import type { CopyTradeRow } from '../src/copytrade/scrutiny/evaluate.js';
 import { storeActivityPage } from '../src/copytrade/screening/fetch.js';
 import { syncCopyTradeRoster } from '../src/copytrade/screening/roster.js';
 import {
-  applyExperimentalDecisionWinnerPolicyMode,
   computeCopyabilityScore,
   computeExperimentalDecisionReport,
   computeFastTradingPenalty,
@@ -298,40 +297,10 @@ test('Decision Lab keeps the selected horizon in the report and reads matching p
   }
 });
 
-test('Decision Lab changes Winner Policy mode without rebuilding report evidence', () => {
-  const database = openDatabase(':memory:');
-  try {
-    const report = computeExperimentalDecisionReport(database, {
-      periodDays: 60,
-      winnerPolicyMode: 'authoritative',
-    });
-    const evidence = emptyWinnerPolicyEvidence(60);
-    const source = {
-      ...report,
-      wallets: [
-        {
-          winnerPolicy: evaluateWinnerPolicy(evidence, { mode: 'authoritative' }),
-        } as ExperimentalDecisionWallet,
-      ],
-    };
-
-    assert.equal(applyExperimentalDecisionWinnerPolicyMode(source, 'authoritative'), source);
-    const adapted = applyExperimentalDecisionWinnerPolicyMode(source, 'discovered_rules');
-    assert.equal(adapted.winnerPolicyMode, 'discovered_rules');
-    assert.equal(adapted.wallets[0]?.winnerPolicy.mode, 'discovered_rules');
-    assert.match(adapted.wallets[0]?.winnerPolicy.warnings.at(-1) ?? '', /experimental context/);
-    assert.equal(source.wallets[0]?.winnerPolicy.mode, 'authoritative');
-    assert.equal(adapted.wallets[0]?.winnerPolicy.evidence, evidence);
-  } finally {
-    database.close();
-  }
-});
-
-test('REGRESSION: a wallet under the minimum-trade evidence gate never gets an overall score', () => {
+test('REGRESSION: a wallet with incomplete component evidence never gets an overall score', () => {
   // A real production export showed 2-trade wallets scoring 100 overall -- tied for the top of
-  // the leaderboard alongside wallets with a real (100+ trade) track record -- because the four
-  // component scores can all compute from a tiny sample even though evidence.level correctly
-  // reports 'insufficient'. Overall must be withheld the same way candidateStatus already is.
+  // the leaderboard alongside wallets with a real track record. Overall remains unavailable when
+  // a component input is missing; the legacy candidateStatus no longer adds a 100-trade gate.
   const database = openDatabase(':memory:');
   try {
     database

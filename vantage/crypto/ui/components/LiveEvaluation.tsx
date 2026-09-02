@@ -49,12 +49,15 @@ type WinnerPolicy = {
   gmgnRiskScore: {
     score: number;
     max: number;
+    walletAgeDays: number | null;
     deductions: {
       executionSpeed: number;
       hyperactivity: number;
       tradeQuality: number;
       tokenRisk: number;
       costs: number;
+      walletAge: number;
+      walletAge: number;
     };
   } | null;
   gates: Array<{ label: string; status: string; detail: string }>;
@@ -145,6 +148,8 @@ const directionLabel = (trend: HistoryTrend) =>
         : trend.direction === 'unchanged'
           ? '— 0.0'
           : '—';
+const hasWinnerPolicy = (value: unknown): value is Result['winnerPolicy'] =>
+  Boolean(value && typeof value === 'object' && 'finalScore' in value && 'status' in value);
 const TagList = ({ tags }: { tags: string[] | null | undefined }) =>
   tags?.length ? (
     <span className="experimental-tag-list">
@@ -172,6 +177,10 @@ export function LiveEvaluation({
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (!saved) return;
       const parsed = JSON.parse(saved) as { walletAddress: string; result: Result };
+      if (!parsed.result || !hasWinnerPolicy(parsed.result.winnerPolicy)) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
       setWalletAddress(parsed.walletAddress);
       setResult(parsed.result);
       void loadHistory(parsed.walletAddress);
@@ -191,6 +200,11 @@ export function LiveEvaluation({
   };
   const finishEvaluation = (address: string, response: ApiResponse) => {
     if (response.status !== 'result') return;
+    if (!hasWinnerPolicy(response.result?.winnerPolicy)) {
+      setError('Live Evaluation returned an outdated result. Restart the server and try again.');
+      setLoading(false);
+      return;
+    }
     setResult(response.result);
     setLoading(false);
     try {

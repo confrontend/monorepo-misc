@@ -16,6 +16,7 @@ import type {
   WinnerPolicyHoldout,
   WinnerPolicyTradeQualitySignals,
 } from './winnerPolicy.js';
+import { WINNER_POLICY_RECENCY_HALF_LIFE_DAYS } from './winnerPolicy.js';
 
 type DatedCanonicalOutcome = {
   buyTradeId: number;
@@ -31,6 +32,31 @@ const timestamp = (value: string | undefined): number | null => {
 
 const medianReturn = (outcomes: readonly DatedCanonicalOutcome[]): number | null =>
   median(outcomes.map((outcome) => outcome.returnPercent));
+
+const weightedMedianReturn = (
+  outcomes: readonly DatedCanonicalOutcome[],
+  evaluationSeconds: number,
+): number | null => {
+  if (!outcomes.length) return null;
+  const ordered = outcomes
+    .map((outcome) => ({
+      value: outcome.returnPercent,
+      weight: Math.pow(
+        0.5,
+        Math.max(0, evaluationSeconds - outcome.timestamp) /
+          86_400 /
+          WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+      ),
+    }))
+    .sort((a, b) => a.value - b.value);
+  const total = ordered.reduce((sum, item) => sum + item.weight, 0);
+  let cumulative = 0;
+  for (const item of ordered) {
+    cumulative += item.weight;
+    if (cumulative >= total / 2) return item.value;
+  }
+  return ordered[ordered.length - 1]?.value ?? null;
+};
 
 const holdoutFor = (
   index: number,
@@ -185,6 +211,7 @@ export const buildWinnerPolicyEvidence = (
     riskBundle?: GmgnRiskBundleEvidence | null;
   } = {},
 ): WinnerPolicyEvidence => {
+  const evaluationSeconds = Math.floor(Date.now() / 1000);
   const outcomes = (wallet.canonicalCopiedBuyOutcomes ?? [])
     .filter((outcome) => outcome.simulatedReturnRatio !== null)
     .flatMap((outcome) => {
@@ -211,8 +238,19 @@ export const buildWinnerPolicyEvidence = (
   return {
     source: 'persisted_copy_simulation',
     periodDays,
+    recency: {
+      halfLifeDays: WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+      evaluationTimestamp: new Date(evaluationSeconds * 1000).toISOString(),
+      oldestEvidenceTimestamp: outcomes.length
+        ? new Date(outcomes[0].timestamp * 1000).toISOString()
+        : null,
+      newestEvidenceTimestamp: outcomes.length
+        ? new Date(outcomes[outcomes.length - 1].timestamp * 1000).toISOString()
+        : null,
+    },
     completedCopiedBuyOutcomes: outcomes.length,
     medianReturnPercent: medianReturn(outcomes),
+    recencyWeightedMedianReturnPercent: weightedMedianReturn(outcomes, evaluationSeconds),
     startingCapitalUsd: wallet.portfolio.startingCapitalUsd,
     endingCapitalUsd: wallet.portfolio.endingCapitalUsd,
     holdouts,
@@ -243,8 +281,15 @@ export const emptyWinnerPolicyEvidence = (
 ): WinnerPolicyEvidence => ({
   source: 'persisted_copy_simulation',
   periodDays,
+  recency: {
+    halfLifeDays: WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+    evaluationTimestamp: new Date().toISOString(),
+    oldestEvidenceTimestamp: null,
+    newestEvidenceTimestamp: null,
+  },
   completedCopiedBuyOutcomes: 0,
   medianReturnPercent: null,
+  recencyWeightedMedianReturnPercent: null,
   startingCapitalUsd: 100,
   endingCapitalUsd: null,
   holdouts: [],

@@ -44,7 +44,6 @@ export type WalletDataCoverageResponse = {
   rows: WalletDataCoverageRow[];
 };
 
-const ENDPOINT = '/api/copytrade/feature-coverage?periodDays=30&limit=100';
 const COPY = {
   title: 'Wallet data coverage',
   description: 'Read-only inventory of locally available wallet evidence.',
@@ -86,7 +85,13 @@ const assessmentTone = (assessment: WalletDataCoverageAssessment): string => {
   return 'missing';
 };
 
-export const WalletDataCoveragePanel = ({ api }: { api: ApiClient }) => {
+export const WalletDataCoveragePanel = ({
+  api,
+  periodDays,
+}: {
+  api: ApiClient;
+  periodDays: 30 | 60 | 90;
+}) => {
   const [response, setResponse] = useState<WalletDataCoverageResponse | null>(null);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +99,9 @@ export const WalletDataCoveragePanel = ({ api }: { api: ApiClient }) => {
   useEffect(() => {
     let isMounted = true;
 
-    void api<WalletDataCoverageResponse>(ENDPOINT)
+    void api<WalletDataCoverageResponse>(
+      `/api/copytrade/feature-coverage?periodDays=${periodDays}&limit=100`,
+    )
       .then((result) => {
         if (!isMounted) return;
         setResponse(result);
@@ -108,7 +115,7 @@ export const WalletDataCoveragePanel = ({ api }: { api: ApiClient }) => {
     return () => {
       isMounted = false;
     };
-  }, [api]);
+  }, [api, periodDays]);
 
   const rows = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();

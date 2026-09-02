@@ -156,15 +156,15 @@ export const API_CATALOG: ApiDoc[] = [
     'GET',
     '/api/copytrade/experimental-decision',
     'Experimental Decision Lab',
-    'Read-only Decision Lab evaluation. Analytical GMGN scores remain exploratory; the versioned Winner Policy uses persisted canonical Dune evidence and returns WINNER, REJECTED, or UNPROVEN without provider calls. Use winnerPolicyMode=discovered_rules only for explicitly experimental context.',
+    'Read-only Decision Lab evaluation. Analytical GMGN scores remain exploratory; the authoritative winner-policy-v2.1 uses persisted canonical Dune evidence and returns WINNER, REJECTED, or UNPROVEN without provider calls.',
     {
       generatedAt: '2026-08-23T00:00:00.000Z',
       readOnly: true,
       noProviderFetch: true,
-      winnerPolicyVersion: 'winner-policy-v2',
+      winnerPolicyVersion: 'winner-policy-v2.1',
       wallets: [],
     },
-    ['limit', 'snapshotId', 'refresh', 'periodDays', 'winnerPolicyMode'],
+    ['limit', 'snapshotId', 'refresh', 'periodDays'],
   ),
   route(
     'GET',
@@ -196,7 +196,7 @@ export const API_CATALOG: ApiDoc[] = [
         evidenceLevel: 'complete',
         verdict: 'pass',
         winnerPolicyStatus: 'UNPROVEN',
-        winnerPolicy: { policyVersion: 'winner-policy-v2', status: 'UNPROVEN', finalScore: null },
+        winnerPolicy: { policyVersion: 'winner-policy-v2.1', status: 'UNPROVEN', finalScore: null },
         estimatedOverallScore: 0,
         componentScores: {
           historicalProfitability: null,

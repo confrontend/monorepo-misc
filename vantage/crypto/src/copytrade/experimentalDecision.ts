@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { computeCopyTradeReport, RULES, type CopyTradeRow } from './scrutiny/evaluate.js';
+import { computeCopyTradeReport, type CopyTradeRow } from './scrutiny/evaluate.js';
 import { readGmgnRiskResults } from './scrutiny/gmgnRisk.js';
 import {
   MAX_PATTERN_DISCOVERY_WALLETS,
@@ -25,7 +25,6 @@ import { buildWinnerPolicyEvidence, emptyWinnerPolicyEvidence } from './winnerPo
 import {
   evaluateWinnerPolicy,
   WINNER_POLICY_VERSION,
-  type WinnerPolicyMode,
   type WinnerPolicyResult,
 } from './winnerPolicy.js';
 
@@ -144,30 +143,9 @@ export type ExperimentalDecisionReport = {
   noProviderFetch: true;
   source: 'saved SQLite evidence';
   winnerPolicyVersion: typeof WINNER_POLICY_VERSION;
-  winnerPolicyMode: WinnerPolicyMode;
   methodology: string[];
   weighting: ExperimentalDecisionWeighting;
   wallets: ExperimentalDecisionWallet[];
-};
-
-/**
- * Change the policy presentation without rebuilding the expensive saved-evidence report.
- * Winner Policy modes share the same authoritative gates; the experimental mode only adds
- * context to the pure policy result.
- */
-export const applyExperimentalDecisionWinnerPolicyMode = (
-  report: ExperimentalDecisionReport,
-  mode: WinnerPolicyMode,
-): ExperimentalDecisionReport => {
-  if (report.winnerPolicyMode === mode) return report;
-  return {
-    ...report,
-    winnerPolicyMode: mode,
-    wallets: report.wallets.map((wallet) => ({
-      ...wallet,
-      winnerPolicy: evaluateWinnerPolicy(wallet.winnerPolicy.evidence, { mode }),
-    })),
-  };
 };
 
 export const clamp = (value: number): number =>
@@ -618,11 +596,6 @@ const evidenceFor = (
   >,
   periodDays: 30 | 60 | 90,
 ): ExperimentalDecisionWallet['evidence'] => {
-  if (row.trades < RULES.minTrades)
-    return {
-      level: 'insufficient',
-      detail: `Unrankable: only ${row.trades} GMGN trades; at least ${RULES.minTrades} are required for comparison.`,
-    };
   if (Object.values(scores).some((score) => score === null))
     return {
       level: 'partial',
@@ -654,16 +627,15 @@ export const computeExperimentalDecisionReport = (
     limit?: number;
     rosterSnapshotId?: number;
     now?: Date;
-    periodDays?: 30 | 60 | 90;
-    winnerPolicyMode?: WinnerPolicyMode;
+    periodDays?: 30 | 60 | 90 | null;
   } = {},
 ): ExperimentalDecisionReport => {
   const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 100)));
-  const periodDays = options.periodDays ?? 30;
-  const winnerPolicyMode = options.winnerPolicyMode ?? 'authoritative';
+  const periodDays = options.periodDays === undefined ? null : options.periodDays;
+  const selectedPeriodDays = periodDays ?? 90;
   const now = options.now ?? new Date();
   const screen = computeCopyTradeReport(database, {
-    periodDays,
+    periodDays: null,
     traderLimit: limit,
     rosterSnapshotId: options.rosterSnapshotId,
     now,
@@ -671,7 +643,7 @@ export const computeExperimentalDecisionReport = (
   const featureSnapshots = readWalletFeatureSnapshotsBatch(database, {
     walletAddresses: screen.rows.map((row) => row.walletAddress),
     asOfTimestamp: now.toISOString(),
-    lookbackDays: periodDays,
+    lookbackDays: 3650,
     includePreWindowContext: false,
     trigger: 'current',
     chain: 'sol',
@@ -683,12 +655,12 @@ export const computeExperimentalDecisionReport = (
   const weighting = readExperimentalDecisionWeighting(
     database,
     patternDiscoveryFingerprint,
-    periodDays,
+    selectedPeriodDays,
   );
   const promotedRules = readExperimentalDecisionPromotedRules(
     database,
     patternDiscoveryFingerprint,
-    periodDays,
+    selectedPeriodDays,
   );
   const riskByWallet = new Map(
     readGmgnRiskResults(
@@ -702,7 +674,7 @@ export const computeExperimentalDecisionReport = (
     computeCopySimulationReport(database, {
       walletAddresses: screen.rows.map((row) => row.walletAddress),
       chain: 'sol',
-      periodDays,
+      periodDays: periodDays ?? undefined,
       now,
     }).wallets.map((wallet) => [wallet.walletAddress, wallet]),
   );
@@ -750,21 +722,22 @@ export const computeExperimentalDecisionReport = (
       medianHoldSeconds: holdSeconds,
       tradesPerActiveDay:
         featureSnapshots.get(row.walletAddress)?.features.priorWalletTradesPerActiveDay ?? null,
+      walletAgeDays: row.riskEvidence.walletAgeDays,
     };
     // Decision Lab evaluates historical periods; a current-only GMGN risk-bundle snapshot can
     // never be retroactively valid for a past evaluation window, so it is never populated here.
     const winnerPolicy = delayedCopy
       ? evaluateWinnerPolicy(
-          buildWinnerPolicyEvidence(delayedCopy, periodDays, { activitySignals, riskBundle: null }),
-          { mode: winnerPolicyMode },
+          buildWinnerPolicyEvidence(delayedCopy, null, { activitySignals, riskBundle: null }),
         )
-      : evaluateWinnerPolicy(emptyWinnerPolicyEvidence(periodDays), { mode: winnerPolicyMode });
-    const evidence = evidenceFor(row, { edge, consistency, robustness, copyability }, periodDays);
-    // A wallet under the minimum-trade threshold can still produce four non-null component
-    // scores (e.g. two lucky trades), but combining them into one overall number would let a
-    // near-zero sample rank alongside wallets with real evidence. candidateStatus below already
-    // withholds "eligible" status for exactly this reason; overall must be withheld the same way
-    // rather than bypassing that gate.
+      : evaluateWinnerPolicy(emptyWinnerPolicyEvidence(null));
+    const evidence = evidenceFor(
+      row,
+      { edge, consistency, robustness, copyability },
+      selectedPeriodDays,
+    );
+    // The legacy analytical score is descriptive only. It remains unavailable when one of its
+    // component inputs is missing, but it no longer applies an independent 100-GMGN-trade gate.
     const rawOverall =
       edge !== null &&
       consistency !== null &&
@@ -872,7 +845,7 @@ export const computeExperimentalDecisionReport = (
       scoreDetails,
       copyabilityDiagnostics,
       facts: {
-        activityPeriodDays: periodDays,
+        activityPeriodDays: selectedPeriodDays,
         activityTradeCount: row.trades,
         activityMedianReturnPercent: medianReturnPercent,
         activityUnder15SecondsPercent:
@@ -914,11 +887,11 @@ export const computeExperimentalDecisionReport = (
   return {
     generatedAt: now.toISOString(),
     featureEngineVersion: WALLET_FEATURE_ENGINE_VERSION,
-    periodDays,
+    periodDays: selectedPeriodDays,
     evidenceContext: createHistoricalEvidenceContext({
       chain: 'sol',
       asOf: now,
-      periodDays,
+      periodDays: selectedPeriodDays,
       completeness: { status: 'unknown' },
     }),
     calculationVersions: CALCULATION_VERSIONS,
@@ -927,10 +900,9 @@ export const computeExperimentalDecisionReport = (
     noProviderFetch: true,
     source: 'saved SQLite evidence',
     winnerPolicyVersion: WINNER_POLICY_VERSION,
-    winnerPolicyMode,
     methodology: [
       `${periodDays}-day saved GMGN report calculated through the shared point-in-time wallet feature engine; the analytical score is separate from the Winner Policy, which reads persisted canonical Dune evidence without fetching.`,
-      `Raw overall scores require all four selected-period activity components; thinner samples remain unavailable. Candidate status requires at least ${RULES.minTrades} activity trades and complete selected-period inputs.`,
+      'Raw overall scores require all four selected-period activity components; thinner samples remain unavailable. Candidate status is descriptive only; authoritative winner status uses the Winner Policy gates.',
       'Copyability is an execution-feasibility index, not a probability of success; its local activity inputs are hold duration, fast round trips, ultra-fast activity, supplementary promoted rules, and sample confidence.',
       'The hold contribution uses logarithmic interpolation from 15 seconds to an explicit four-hour cap so materially different execution speeds remain distinguishable.',
       `Direct Copyability penalties are ${COPYABILITY_CONFIG.fastRoundTripPenaltyPerPercent.toFixed(2)} points per fast-round-trip percentage point and ${COPYABILITY_CONFIG.under15SecondPenaltyPerPercent.toFixed(2)} points per under-15-second percentage point; ${COPYABILITY_CONFIG.minimumObservations} paired observations are required for a score.`,
@@ -945,7 +917,7 @@ export const computeExperimentalDecisionReport = (
       'Profit concentration is neutral in Robustness; the score uses performance after removing the best token until stronger evidence supports a reward or penalty.',
       'This tab does not replace or modify the production decision engine.',
       `Winner Policy ${WINNER_POLICY_VERSION} is authoritative for WINNER/REJECTED/UNPROVEN status. It uses persisted canonical delayed-copy evidence only: positive median, fixed-$100 portfolio growth, at least 20 completed copied-buy outcomes, and three chronological holdout windows with at least two profitable.`,
-      'Pattern Discovery and official GMGN aggregate snapshots are never used as Winner Policy proof; Discovered Rules mode is explanatory context only.',
+      'Pattern Discovery and official GMGN aggregate snapshots are never used as Winner Policy proof.',
     ],
     weighting,
     wallets,

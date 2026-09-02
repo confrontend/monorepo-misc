@@ -4621,6 +4621,18 @@ Errors or unresolved items: none introduced by this copy-only change.
 
 Next step: none required.
 
+2026-09-01 - Removed Discovered Rules (experimental) from the Decision Engine.
+
+Files changed: src/copytrade/experimentalDecision.ts, src/copytrade/winnerPolicy.ts, src/scripts/server.ts, src/apiCatalog.ts, ui/components/ExperimentalDecisionLab.tsx, tests/copytrade-experimental-decision.test.ts, tests/winner-policy.test.ts, and the amendment in specs/004-gmgn-only-decision. The Decision Lab is now authoritative-only: no mode selector/state, query parameter, report adaptation helper, shared mode type, evaluator branch, or experimental test path remains. Authoritative winner-policy-v2 gates and scoring are unchanged.
+
+Agent name and model: Codex GPT-5.
+
+Test result: npm test passed (503/503); npm run arch:check passed (161 modules, 474 dependencies).
+
+Errors or unresolved items: historical spec text retains the amendment's removal references as audit context; no active source/API/UI references remain.
+
+Next step: none required.
+
 2026-09-01 - Reduced Decision Lab scoring-card repetition after UI review.
 
 Files changed: ui/components/ExperimentalDecisionLab.tsx and ui/strings.ts. Consolidated the three authoritative gates into the Winner Policy block and removed the duplicate Authoritative gates block; combined score, holdout, and GMGN notes into one concise line.
@@ -4632,3 +4644,108 @@ Test result: npm run build passed (TypeScript server build and Vite UI build).
 Errors or unresolved items: none introduced.
 
 Next step: none required.
+2026-09-01 - Simplified Decision Lab wallet score dialog.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/styles.css. Added a compact Winner Policy score calculation showing the total, green delayed-copy profitability contribution, and red GMGN execution/risk deductions. Moved score cards, policy gates, holdouts, evidence, copyability, warnings, and scrutiny under a collapsed Advanced details disclosure. No scoring logic or API changed.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Removed the Pattern-based scoring fallback notice from Decision Lab.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/strings.ts, ui/styles.css. Removed the visible fallback explanation, its localized copy, and unused styles; scoring and Pattern Discovery behavior remain unchanged.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Removed the legacy 100-GMGN-trade threshold from Decision Lab candidateStatus.
+  Files changed: src/copytrade/experimentalDecision.ts, tests/copytrade-experimental-decision.test.ts. CandidateStatus now depends on available analytical components and positive GMGN median only; authoritative Winner Policy remains the sole hard-gate verdict and retains its 20 copied-buy evidence threshold.
+  Agent name/model: Codex GPT-5.
+  Test result: npm test passed (503/503).
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Removed the redundant Decision Lab source-summary sentence.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/strings.ts. Removed the visible explanatory paragraph distinguishing analytical GMGN scores from the authoritative Winner Policy; no behavior or scoring logic changed.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Bound Wallet data coverage to the selected Decision Lab evidence horizon.
+  Files changed: ui/components/WalletDataCoveragePanel.tsx, ui/components/ExperimentalDecisionLab.tsx. The panel now accepts the selected 30/60/90-day period, sends it to feature-coverage, and reloads when the dropdown changes.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Added a visual Winner Policy v2 explanation to the detailed wallet dialog.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/strings.ts, ui/styles.css. Added color-coded hard-gate cards, 70/30 score allocation panels, and a concise warnings-not-gates list, while retaining the existing detailed calculations below.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: wallet age remains listed as a future risk signal because no corresponding Winner Policy evidence field exists yet.
+  Next step: none.
+2026-09-01 - Added hard-gate status chips to the compact Winner Policy score summary.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/styles.css. The visible score block now shows the three gate statuses alongside the profitability contribution and GMGN deductions; advanced details remain available below.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Reworked the compact Winner Policy summary into a score ledger.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/styles.css. Added one table-like view listing each profitability contribution, every GMGN deduction (including zero/no-evidence rows), and rules that are not applied with reasons, alongside the hard-gate chips.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: wallet age remains explicitly marked unavailable because no evidence field exists.
+  Next step: none.
+2026-09-01 - Removed the two non-applied rule rows from the compact score ledger.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx, ui/styles.css. The visible table now contains only active score contributions and GMGN deductions; hard-gate statuses remain shown separately.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Increased score-ledger typography for readability.
+  Files changed: ui/styles.css. Enlarged rule, points, evidence, and table-header fonts while preserving the responsive table layout.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Hardened Live Evaluation against stale cached result payloads.
+  Files changed: ui/components/LiveEvaluation.tsx. Added runtime validation for winnerPolicy before rendering or restoring localStorage; outdated cached/API results now produce a clear restart message instead of crashing on finalScore.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: a stale backend process still requires restart to return the current response schema.
+  Next step: restart the dev server and hard-refresh the browser.
+2026-09-01 - Removed Live Evaluation's separate 100-GMGN-trade legacy branch.
+  Files changed: src/copytrade/liveEvaluation.ts. Live Evaluation now follows the shared Winner Policy v2 path for wallets with any stored history; only wallets with no stored row use the missing-evidence response. Removed the legacy 100-trade risk message and RULES dependency.
+  Agent name/model: Codex GPT-5.
+  Test result: npm test passed (503/503).
+  Errors/unresolved: stale running servers still require restart to load this code.
+  Next step: restart the dev server and hard-refresh the browser.
+2026-09-01 - Implemented Winner Policy v2.1 wallet maturity risk.
+  Files changed: src/copytrade/winnerPolicyV2Config.ts, winnerPolicy.ts, experimentalDecision.ts, liveEvaluation.ts, src/apiCatalog.ts, UI policy types, tests/winner-policy.test.ts, specs/004-gmgn-only-decision. Verified `created_at_ts` is populated from GMGN `common.created_at` and is distinct from local `fetched_at`; age is calculated against each evaluator's point-in-time timestamp and selected/effective period. Added bounded 5/4/2/0-day-band penalty and adjusted target GMGN budgets to execution 12, hyperactivity 3, trade quality 4, token 4, costs 2, wallet age 5. Dune profitability gates and 70-point calculation remain unchanged.
+  Agent name/model: Codex GPT-5.
+  Test result: npm test passed (504/504); npm run arch:check passed (161 modules, 474 dependencies).
+  Errors/unresolved: none.
+  Next step: restart any running dev server and hard-refresh to load winner-policy-v2.1.
+2026-09-01 - Added evaluated wallet age to the Winner Policy dialog ledger.
+  Files changed: src/copytrade/winnerPolicy.ts, ui/components/ExperimentalDecisionLab.tsx, ui/components/LiveEvaluation.tsx. The wallet-age deduction row now displays the PIT wallet age in days or explicitly says age unavailable.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: none.
+  Next step: none.
+2026-09-01 - Fixed stale Winner Policy wallet-age display fallback.
+  Files changed: ui/components/ExperimentalDecisionLab.tsx. Treats missing or undefined walletAgeDays as Age unavailable instead of rendering “undefined days old”; current v2.1 responses show the evaluated age.
+  Agent name/model: Codex GPT-5.
+  Test result: npm run build passed.
+  Errors/unresolved: running dev server must be restarted to receive the new walletAgeDays response field.
+  Next step: restart server and hard-refresh browser.
+2026-09-01 - Audited requested single-view all-history recency-weighted Winner Policy v3 refactor before implementation.
+  Files inspected: src/copytrade/experimentalDecision.ts, liveEvaluation.ts, winnerPolicy.ts, winnerPolicyEvidence.ts, simulation/copySimulation.ts, src/scripts/server.ts, UI Decision Lab/Coverage components, specs/004. Findings: Decision Lab selector/API/cache/report/features are 30/60/90-scoped; Live Evaluation uses 30d GMGN activity plus 90d delayed-copy proof; canonical $100 portfolio is chronological/unweighted; shared v2.1 policy is the correct convergence point. Proposed v3: horizon-free authoritative all-history evidence with 45-day decay, preserve unweighted canonical portfolio gate, weighted robust median/rates for score/risk, fixed horizons retained only for diagnostics/research.
+  Agent name/model: Codex GPT-5.
+  Test result: not run (audit/specification only).
+  Errors/unresolved: recency-weighted portfolio score and all-history report API/cache migration require implementation and new contract tests.
+  Next step: implement the staged v3 contract after review of the proposed weighting semantics.
+### 2026-09-01 — Winner Policy v3 implementation
+
+- Promoted the shared policy version to `winner-policy-v3` and centralized a 45-day exponential recency half-life.
+- Added recency metadata and a robust recency-weighted delayed-copy median to authoritative evidence; the median gate and profitability component use it.
+- Preserved the actual completed copied-buy count gate and the chronological, unweighted canonical $100 portfolio gate.
+- Decision Lab's authoritative endpoint now ignores horizon selection and evaluates all stored delayed-copy history; its UI presents one all-history view with 45-day decay.
+- Live Evaluation now feeds all stored GMGN activity and all stored delayed-copy history into the same shared policy path.
+- Wallet maturity scoring is horizon-independent in v3 (<7d/-5, <30d/-4, <60d/-2).
+- `npm run build:server` and `npm run arch:check` pass. Existing v2.1 assertions that expect the old policy label/age bands need migration to v3 semantics.

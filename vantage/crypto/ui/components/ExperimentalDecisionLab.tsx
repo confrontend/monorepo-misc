@@ -16,9 +16,13 @@ type LabWallet = {
   candidateStatus: 'eligible' | 'rejected' | 'insufficient_evidence' | 'missing_evidence';
   winnerPolicy: {
     policyVersion: string;
-    mode: 'authoritative' | 'discovered_rules';
     status: 'WINNER' | 'REJECTED' | 'UNPROVEN';
     finalScore: number | null;
+    proofGates: {
+      completedCopiedTrades: { status: string; detail: string };
+      medianDelayedCopyPositive: { status: string; detail: string };
+      simulatedPortfolioPositive: { status: string; detail: string };
+    };
     profitabilityScore: {
       score: number;
       max: number;
@@ -29,12 +33,15 @@ type LabWallet = {
     gmgnRiskScore: {
       score: number;
       max: number;
+      walletAgeDays: number | null;
       deductions: {
         executionSpeed: number;
         hyperactivity: number;
         tradeQuality: number;
         tokenRisk: number;
         costs: number;
+        walletAge: number;
+        walletAge: number;
       };
     } | null;
     gates: Array<{ label: string; status: string; detail: string }>;
@@ -141,7 +148,6 @@ type LabResponse = {
   noProviderFetch: true;
   source: string;
   winnerPolicyVersion: string;
-  winnerPolicyMode: 'authoritative' | 'discovered_rules';
   methodology: string[];
   weighting?: {
     mode: 'fixed-fallback' | 'validated-patterns';
@@ -443,14 +449,11 @@ export function ExperimentalDecisionLab({
   const [riskImportInfoOpen, setRiskImportInfoOpen] = useState(false);
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [walletFilter, setWalletFilter] = useState('');
-  const [winnerPolicyMode, setWinnerPolicyMode] = useState<'authoritative' | 'discovered_rules'>(
-    'authoritative',
-  );
   const load = (refresh = false) => {
     setLoading(true);
     setError(null);
     void api<LabResponse>(
-      `/api/copytrade/experimental-decision?periodDays=${periodDays}&limit=100&winnerPolicyMode=${winnerPolicyMode}${refresh ? '&refresh=1' : ''}`,
+      `/api/copytrade/experimental-decision?limit=100${refresh ? '&refresh=1' : ''}`,
     )
       .then(setResponse)
       .catch((reason: unknown) =>
@@ -460,7 +463,7 @@ export function ExperimentalDecisionLab({
   };
   useEffect(() => {
     load();
-  }, [api, periodDays, winnerPolicyMode]);
+  }, [api, periodDays]);
   const sortedWallets = response
     ? [...response.wallets].sort((left, right) => {
         const leftHasValue = hasSortableValue(left, sort.key);
@@ -612,31 +615,7 @@ export function ExperimentalDecisionLab({
           <h2>Decision Lab</h2>
         </div>
         <div className="experimental-actions">
-          <label className="experimental-period-control">
-            Evidence horizon
-            <select
-              value={periodDays}
-              onChange={(event) => onPeriodDaysChange(Number(event.target.value) as 30 | 60 | 90)}
-            >
-              {[30, 60, 90].map((days) => (
-                <option key={days} value={days}>
-                  {days} days
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="experimental-period-control">
-            Winner policy
-            <select
-              value={winnerPolicyMode}
-              onChange={(event) =>
-                setWinnerPolicyMode(event.target.value as 'authoritative' | 'discovered_rules')
-              }
-            >
-              <option value="authoritative">Authoritative gates</option>
-              <option value="discovered_rules">Discovered Rules (experimental)</option>
-            </select>
-          </label>
+          <span className="experimental-period-control">All available history · 45-day decay</span>
           <button
             type="button"
             className="secondary"
@@ -670,10 +649,7 @@ export function ExperimentalDecisionLab({
         </div>
       </div>
       <DataStatusSummary api={api} targetDays={response?.periodDays ?? 30} />
-      <WalletDataCoveragePanel api={api} />
-      <p className="muted">
-        {strings.decisionLab.sourceSummary.replaceAll('30-day', `${periodDays}-day`)}
-      </p>
+      <WalletDataCoveragePanel api={api} periodDays={periodDays} />
       {loading && (
         <p className="copytrade-analysis-status running">
           <span className="loading-spinner" /> Reading saved SQLite evidence…
@@ -690,9 +666,7 @@ export function ExperimentalDecisionLab({
               </span>
               <div>
                 <strong>Analytical / research scores</strong>
-                <p className="muted">
-                  {strings.decisionLab.analyticalSummary}
-                </p>
+                <p className="muted">{strings.decisionLab.analyticalSummary}</p>
                 <div className="experimental-weight-bars">
                   {response.weighting &&
                     Object.entries(response.weighting.weights).map(([key, value]) => (
@@ -746,21 +720,6 @@ export function ExperimentalDecisionLab({
               <span aria-hidden="true">i</span> Scoring details
             </button>
           </div>
-          {response.weighting?.mode !== 'validated-patterns' && (
-            <aside className="experimental-pattern-fallback" role="status">
-              <div className="experimental-pattern-fallback-title">
-                <span aria-hidden="true">!</span>
-                <strong>{strings.decisionLab.patternFallbackTitle}</strong>
-              </div>
-              <p>{strings.decisionLab.patternFallbackSummary}</p>
-              <ul>
-                {strings.decisionLab.patternFallbackReasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-              <small>{strings.decisionLab.patternFallbackAction}</small>
-            </aside>
-          )}
           {scoringInfoOpen && (
             <Modal
               onClose={() => setScoringInfoOpen(false)}
@@ -807,7 +766,10 @@ export function ExperimentalDecisionLab({
                     ? 'promoted patterns only, repeated across validated coverage levels.'
                     : 'none active; neutral fallback is in use.'}
                 </li>
-                <li>Winner Policy gates: 20+ copied buys, positive delayed-copy median, and a $100 portfolio ending above $100.</li>
+                <li>
+                  Winner Policy gates: 20+ copied buys, positive delayed-copy median, and a $100
+                  portfolio ending above $100.
+                </li>
               </ul>
               <h4>Final candidate gates</h4>
               <p>
@@ -1072,183 +1034,363 @@ export function ExperimentalDecisionLab({
                 Exploratory only. This dialog explains the score inputs; it does not change the
                 production verdict or fetch anything.
               </p>
-              <div className="experimental-detail-score-grid">
-                {(['overall', 'edge', 'consistency', 'robustness', 'copyability'] as const).map(
-                  (key) => {
-                    const value = selectedWallet.scores[key];
-                    const details =
-                      selectedWallet.scoreDetails?.[key] ?? legacyScoreDetail(selectedWallet, key);
-                    return (
-                      <div className={`experimental-score-card ${key}`} key={key}>
-                        <div>
-                          <span>{details.label}</span>
-                          <strong>{score(value)}</strong>
-                        </div>
-                        <div className="experimental-score-track">
-                          <i style={{ width: `${value ?? 0}%` }} />
-                        </div>
-                        <small>{details.detail}</small>
-                      </div>
-                    );
-                  },
-                )}
-              </div>
-              <div className="experimental-detail-grid">
-                <section>
-                  <h4>Authoritative Winner Policy</h4>
-                  <p
-                    className={`experimental-evidence ${selectedWallet.winnerPolicy.status.toLowerCase()}`}
-                  >
-                    {selectedWallet.winnerPolicy.status}
-                  </p>
-                  <p className="muted">
-                    Policy {selectedWallet.winnerPolicy.policyVersion}; this status is independent
-                    of the exploratory score and Pattern Discovery rules.
-                  </p>
-                  {selectedWallet.winnerPolicy.finalScore !== null && (
-                    <div className="experimental-policy-score-breakdown">
-                      <strong>Final score: {selectedWallet.winnerPolicy.finalScore} / 100</strong>
-                      {selectedWallet.winnerPolicy.profitabilityScore && (
-                        <p>
-                          Profitability {selectedWallet.winnerPolicy.profitabilityScore.score} /{' '}
-                          {selectedWallet.winnerPolicy.profitabilityScore.max} (median return{' '}
-                          {selectedWallet.winnerPolicy.profitabilityScore.medianReturnScore},
-                          portfolio {selectedWallet.winnerPolicy.profitabilityScore.portfolioScore},
-                          confidence{' '}
-                          {selectedWallet.winnerPolicy.profitabilityScore.evidenceConfidenceScore})
-                        </p>
-                      )}
-                      {selectedWallet.winnerPolicy.gmgnRiskScore && (
-                        <p>
-                          GMGN risk/execution {selectedWallet.winnerPolicy.gmgnRiskScore.score} /{' '}
-                          {selectedWallet.winnerPolicy.gmgnRiskScore.max} (deductions: execution
-                          speed{' '}
-                          {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.executionSpeed},
-                          hyperactivity{' '}
-                          {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.hyperactivity},
-                          trade quality{' '}
-                          {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tradeQuality}, token
-                          risk {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tokenRisk},
-                          costs {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.costs})
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  <ul>
-                    {selectedWallet.winnerPolicy.gates.map((item) => (
-                      <li key={item.label}>
-                        <strong>{item.status}</strong> · {item.label}: {item.detail}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="experimental-policy-holdouts">
-                    <strong>Chronological holdouts (context only — no longer a gate)</strong>
-                    {selectedWallet.winnerPolicy.evidence.holdouts.map((holdout) => (
-                      <p key={holdout.index}>
-                        Window {holdout.index}: {holdout.completedCopiedBuyOutcomes} copied buys ·
-                        median {pct(holdout.medianReturnPercent)} · end{' '}
-                        {usd(holdout.endingCapitalUsd)} ·{' '}
-                        {holdout.profitable === null
-                          ? 'UNPROVEN'
-                          : holdout.profitable
-                            ? 'profitable'
-                            : 'not profitable'}
-                      </p>
-                    ))}
+              <section className="experimental-calculation-summary">
+                <div className="experimental-calculation-total">
+                  <span>Winner Policy score</span>
+                  <strong>{score(selectedWallet.winnerPolicy.finalScore)} / 100</strong>
+                </div>
+                {selectedWallet.winnerPolicy.profitabilityScore && (
+                  <div className="experimental-calculation-line">
+                    <strong className="calculation-positive">
+                      + {selectedWallet.winnerPolicy.profitabilityScore.score} / 70
+                    </strong>
+                    <span>Delayed-copy profitability</span>
                   </div>
-                </section>
-                <section>
-                  <h4>Evidence used</h4>
-                  <p className={`experimental-evidence ${selectedWallet.evidence.level}`}>
-                    {selectedWallet.evidence.level}
-                  </p>
-                  <p className="muted">{selectedWallet.evidence.detail}</p>
-                  <dl>
-                    <dt>GMGN median</dt>
-                    <dd>{pct(selectedWallet.facts.activityMedianReturnPercent)}</dd>
-                    <dt>Median hold</dt>
-                    <dd>
-                      {selectedWallet.facts.activityMedianHoldSeconds === null
-                        ? '—'
-                        : `${(selectedWallet.facts.activityMedianHoldSeconds / 3600).toFixed(1)}h`}
-                    </dd>
-                  </dl>
-                </section>
-                <section>
-                  <h4>Copyability trace</h4>
-                  <p className="muted">
-                    Execution-feasibility index from local {selectedWallet.facts.activityPeriodDays}
-                    -day activity; it is not a probability of success.
-                  </p>
-                  <dl>
-                    <dt>Hold contribution</dt>
-                    <dd>{score(selectedWallet.copyabilityDiagnostics.holdContribution)}</dd>
-                    <dt>Fast round trips</dt>
-                    <dd>
-                      {pct(selectedWallet.copyabilityDiagnostics.fastRoundTripPercent)} · −
-                      {selectedWallet.copyabilityDiagnostics.fastRoundTripPenalty.toFixed(1)}
-                    </dd>
-                    <dt>Under 15 seconds</dt>
-                    <dd>
-                      {pct(selectedWallet.copyabilityDiagnostics.under15SecondPercent)} · −
-                      {selectedWallet.copyabilityDiagnostics.under15SecondPenalty.toFixed(1)}
-                    </dd>
-                    <dt>Pattern adjustment</dt>
-                    <dd>{selectedWallet.copyabilityDiagnostics.patternAdjustment.toFixed(1)}</dd>
-                    <dt>Confidence</dt>
-                    <dd>
-                      {selectedWallet.copyabilityDiagnostics.confidence} ·{' '}
-                      {selectedWallet.copyabilityDiagnostics.sampleSize.pairedTrades} paired trades
-                    </dd>
-                  </dl>
-                </section>
-                <section>
-                  <h4>Warnings and context</h4>
-                  {selectedWallet.risks.length ? (
-                    <ul className="experimental-risk-list">
-                      {selectedWallet.risks.map((risk) => (
-                        <li key={risk}>{risk}</li>
+                )}
+                {selectedWallet.winnerPolicy.gmgnRiskScore && (
+                  <div className="experimental-calculation-line">
+                    <strong className="calculation-negative">
+                      −{' '}
+                      {selectedWallet.winnerPolicy.gmgnRiskScore.max -
+                        selectedWallet.winnerPolicy.gmgnRiskScore.score}{' '}
+                      points
+                    </strong>
+                    <span>GMGN execution and risk deductions</span>
+                  </div>
+                )}
+                {(selectedWallet.winnerPolicy.profitabilityScore ||
+                  selectedWallet.winnerPolicy.gmgnRiskScore) && (
+                  <div
+                    className="experimental-score-ledger"
+                    role="table"
+                    aria-label="Winner Policy score calculation"
+                  >
+                    <div className="score-ledger-row score-ledger-header" role="row">
+                      <span>Rule / component</span>
+                      <span>Points</span>
+                      <span>Evidence / application</span>
+                    </div>
+                    {selectedWallet.winnerPolicy.profitabilityScore && (
+                      <>
+                        <div className="score-ledger-row" role="row">
+                          <span>Median delayed-copy return</span>
+                          <strong className="calculation-positive">
+                            +{selectedWallet.winnerPolicy.profitabilityScore.medianReturnScore}
+                          </strong>
+                          <small>
+                            {pct(selectedWallet.winnerPolicy.evidence.medianReturnPercent)} · up to
+                            30
+                          </small>
+                        </div>
+                        <div className="score-ledger-row" role="row">
+                          <span>$100 portfolio growth</span>
+                          <strong className="calculation-positive">
+                            +{selectedWallet.winnerPolicy.profitabilityScore.portfolioScore}
+                          </strong>
+                          <small>
+                            {usd(selectedWallet.winnerPolicy.evidence.endingCapitalUsd)} ending · up
+                            to 25
+                          </small>
+                        </div>
+                        <div className="score-ledger-row" role="row">
+                          <span>Evidence / sample confidence</span>
+                          <strong className="calculation-positive">
+                            +
+                            {selectedWallet.winnerPolicy.profitabilityScore.evidenceConfidenceScore}
+                          </strong>
+                          <small>
+                            {selectedWallet.winnerPolicy.evidence.completedCopiedBuyOutcomes}{' '}
+                            completed copied buys · up to 15
+                          </small>
+                        </div>
+                      </>
+                    )}
+                    {selectedWallet.winnerPolicy.gmgnRiskScore && (
+                      <>
+                        {Object.entries(selectedWallet.winnerPolicy.gmgnRiskScore.deductions).map(
+                          ([rule, deduction]) => (
+                            <div className="score-ledger-row" role="row" key={rule}>
+                              <span>
+                                GMGN{' '}
+                                {rule.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)}
+                              </span>
+                              <strong
+                                className={
+                                  deduction > 0 ? 'calculation-negative' : 'calculation-neutral'
+                                }
+                              >
+                                {deduction > 0 ? `−${deduction}` : '0'}
+                              </strong>
+                              <small>
+                                {rule === 'walletAge'
+                                  ? typeof selectedWallet.winnerPolicy.gmgnRiskScore!
+                                      .walletAgeDays !== 'number'
+                                    ? 'Age unavailable'
+                                    : `${selectedWallet.winnerPolicy.gmgnRiskScore!.walletAgeDays} days old`
+                                  : deduction > 0
+                                    ? 'Applied deduction'
+                                    : 'No qualifying risk evidence'}
+                              </small>
+                            </div>
+                          ),
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                <div
+                  className="experimental-calculation-gates"
+                  aria-label="Winner Policy hard gates"
+                >
+                  {[
+                    ['completedCopiedTrades', strings.decisionLab.winnerPolicyGates[0]],
+                    ['medianDelayedCopyPositive', strings.decisionLab.winnerPolicyGates[1]],
+                    ['simulatedPortfolioPositive', strings.decisionLab.winnerPolicyGates[2]],
+                  ].map(([key, label]) => {
+                    const gate =
+                      selectedWallet.winnerPolicy.proofGates[
+                        key as keyof typeof selectedWallet.winnerPolicy.proofGates
+                      ];
+                    return (
+                      <span className={`calculation-gate ${gate.status}`} key={key}>
+                        {gate.status === 'pass' ? '✓' : '×'} {label}
+                      </span>
+                    );
+                  })}
+                </div>
+              </section>
+              <details className="experimental-advanced-details">
+                <summary>Advanced details</summary>
+                <div className="experimental-detail-score-grid">
+                  {(['overall', 'edge', 'consistency', 'robustness', 'copyability'] as const).map(
+                    (key) => {
+                      const value = selectedWallet.scores[key];
+                      const details =
+                        selectedWallet.scoreDetails?.[key] ??
+                        legacyScoreDetail(selectedWallet, key);
+                      return (
+                        <div className={`experimental-score-card ${key}`} key={key}>
+                          <div>
+                            <span>{details.label}</span>
+                            <strong>{score(value)}</strong>
+                          </div>
+                          <div className="experimental-score-track">
+                            <i style={{ width: `${value ?? 0}%` }} />
+                          </div>
+                          <small>{details.detail}</small>
+                        </div>
+                      );
+                    },
+                  )}
+                </div>
+                <div className="experimental-detail-grid">
+                  <section>
+                    <h4>Authoritative Winner Policy</h4>
+                    <p
+                      className={`experimental-evidence ${selectedWallet.winnerPolicy.status.toLowerCase()}`}
+                    >
+                      {selectedWallet.winnerPolicy.status}
+                    </p>
+                    <p className="muted">
+                      Policy {selectedWallet.winnerPolicy.policyVersion}; this status is independent
+                      of the exploratory score and Pattern Discovery rules.
+                    </p>
+                    <div className="experimental-policy-visual">
+                      <h5>{strings.decisionLab.winnerPolicyDetailHardGates}</h5>
+                      <div className="experimental-policy-gate-grid">
+                        {[
+                          ['completedCopiedTrades', strings.decisionLab.winnerPolicyGates[0]],
+                          ['medianDelayedCopyPositive', strings.decisionLab.winnerPolicyGates[1]],
+                          ['simulatedPortfolioPositive', strings.decisionLab.winnerPolicyGates[2]],
+                        ].map(([key, label]) => {
+                          const gate =
+                            selectedWallet.winnerPolicy.proofGates[
+                              key as keyof typeof selectedWallet.winnerPolicy.proofGates
+                            ];
+                          return (
+                            <div className={`experimental-policy-gate ${gate.status}`} key={key}>
+                              <strong>
+                                {gate.status === 'pass' ? '✓' : '×'} {label}
+                              </strong>
+                              <small>{gate.detail}</small>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <h5>Score allocation</h5>
+                      <div className="experimental-policy-allocation-grid">
+                        <div className="allocation-positive">
+                          <strong>+70</strong>
+                          <span>Dune delayed-copy profitability</span>
+                          <small>Median return · portfolio growth · evidence confidence</small>
+                        </div>
+                        <div className="allocation-negative">
+                          <strong>−30 max</strong>
+                          <span>GMGN risk / copyability deductions</span>
+                          <small>
+                            Execution speed · activity · trade quality · token risk · costs
+                          </small>
+                        </div>
+                      </div>
+                      <h5>Warnings, not gates</h5>
+                      <p className="experimental-policy-not-gates">
+                        100 GMGN trades · holdout windows · Pattern Discovery rules · Copyability
+                        score · best-token concentration · wallet age risk signal
+                      </p>
+                    </div>
+                    {selectedWallet.winnerPolicy.finalScore !== null && (
+                      <div className="experimental-policy-score-breakdown">
+                        <strong>Final score: {selectedWallet.winnerPolicy.finalScore} / 100</strong>
+                        {selectedWallet.winnerPolicy.profitabilityScore && (
+                          <p>
+                            Profitability {selectedWallet.winnerPolicy.profitabilityScore.score} /{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.max} (median return{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.medianReturnScore},
+                            portfolio{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.portfolioScore},
+                            confidence{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.evidenceConfidenceScore}
+                            )
+                          </p>
+                        )}
+                        {selectedWallet.winnerPolicy.gmgnRiskScore && (
+                          <p>
+                            GMGN risk/execution {selectedWallet.winnerPolicy.gmgnRiskScore.score} /{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.max} (deductions: execution
+                            speed{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.executionSpeed},
+                            hyperactivity{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.hyperactivity},
+                            trade quality{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tradeQuality},
+                            token risk{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tokenRisk}, costs{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.costs})
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <ul>
+                      {selectedWallet.winnerPolicy.gates.map((item) => (
+                        <li key={item.label}>
+                          <strong>{item.status}</strong> · {item.label}: {item.detail}
+                        </li>
                       ))}
                     </ul>
-                  ) : (
-                    <p className="change-positive">No recorded warnings.</p>
-                  )}
-                  <p>
-                    <strong>Tags:</strong> {selectedWallet.tags?.join(', ') || '—'}
-                  </p>
-                  <p>
-                    <strong>GMGN risk:</strong>{' '}
-                    {selectedWallet.riskDetails?.available ? 'Imported' : 'Not imported'}
-                  </p>
-                  {selectedWallet.liquidityBands && (
-                    <p>
-                      <strong>{strings.decisionLab.bandDetails}:</strong>{' '}
-                      {selectedWallet.liquidityBands
-                        .map(
-                          (band) =>
-                            `${band.band} $${band.minEntryTradeAmountUsd.toFixed(0)}–$${band.maxEntryTradeAmountUsd.toFixed(0)}, ${band.simulatedCount}/${band.tradeCount} copied, ${pct(band.medianSimulatedReturnPercent)} median`,
-                        )
-                        .join(' · ')}
+                    <div className="experimental-policy-holdouts">
+                      <strong>Chronological holdouts (context only — no longer a gate)</strong>
+                      {selectedWallet.winnerPolicy.evidence.holdouts.map((holdout) => (
+                        <p key={holdout.index}>
+                          Window {holdout.index}: {holdout.completedCopiedBuyOutcomes} copied buys ·
+                          median {pct(holdout.medianReturnPercent)} · end{' '}
+                          {usd(holdout.endingCapitalUsd)} ·{' '}
+                          {holdout.profitable === null
+                            ? 'UNPROVEN'
+                            : holdout.profitable
+                              ? 'profitable'
+                              : 'not profitable'}
+                        </p>
+                      ))}
+                    </div>
+                  </section>
+                  <section>
+                    <h4>Evidence used</h4>
+                    <p className={`experimental-evidence ${selectedWallet.evidence.level}`}>
+                      {selectedWallet.evidence.level}
                     </p>
-                  )}
-                </section>
-              </div>
-              {selectedWallet.scrutiny && (
-                <section className="experimental-detail-checks">
-                  <h4>Scrutiny checks</h4>
-                  <div>
-                    {selectedWallet.scrutiny.checks.map((check) => (
-                      <article className={`experimental-check ${check.verdict}`} key={check.label}>
-                        <strong>
-                          {check.verdict === 'pass' ? '✓' : check.verdict === 'fail' ? '×' : '…'}{' '}
-                          {check.label}
-                        </strong>
-                        <span>{check.detail}</span>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              )}
+                    <p className="muted">{selectedWallet.evidence.detail}</p>
+                    <dl>
+                      <dt>GMGN median</dt>
+                      <dd>{pct(selectedWallet.facts.activityMedianReturnPercent)}</dd>
+                      <dt>Median hold</dt>
+                      <dd>
+                        {selectedWallet.facts.activityMedianHoldSeconds === null
+                          ? '—'
+                          : `${(selectedWallet.facts.activityMedianHoldSeconds / 3600).toFixed(1)}h`}
+                      </dd>
+                    </dl>
+                  </section>
+                  <section>
+                    <h4>Copyability trace</h4>
+                    <p className="muted">
+                      Execution-feasibility index from local{' '}
+                      {selectedWallet.facts.activityPeriodDays}
+                      -day activity; it is not a probability of success.
+                    </p>
+                    <dl>
+                      <dt>Hold contribution</dt>
+                      <dd>{score(selectedWallet.copyabilityDiagnostics.holdContribution)}</dd>
+                      <dt>Fast round trips</dt>
+                      <dd>
+                        {pct(selectedWallet.copyabilityDiagnostics.fastRoundTripPercent)} · −
+                        {selectedWallet.copyabilityDiagnostics.fastRoundTripPenalty.toFixed(1)}
+                      </dd>
+                      <dt>Under 15 seconds</dt>
+                      <dd>
+                        {pct(selectedWallet.copyabilityDiagnostics.under15SecondPercent)} · −
+                        {selectedWallet.copyabilityDiagnostics.under15SecondPenalty.toFixed(1)}
+                      </dd>
+                      <dt>Pattern adjustment</dt>
+                      <dd>{selectedWallet.copyabilityDiagnostics.patternAdjustment.toFixed(1)}</dd>
+                      <dt>Confidence</dt>
+                      <dd>
+                        {selectedWallet.copyabilityDiagnostics.confidence} ·{' '}
+                        {selectedWallet.copyabilityDiagnostics.sampleSize.pairedTrades} paired
+                        trades
+                      </dd>
+                    </dl>
+                  </section>
+                  <section>
+                    <h4>Warnings and context</h4>
+                    {selectedWallet.risks.length ? (
+                      <ul className="experimental-risk-list">
+                        {selectedWallet.risks.map((risk) => (
+                          <li key={risk}>{risk}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="change-positive">No recorded warnings.</p>
+                    )}
+                    <p>
+                      <strong>Tags:</strong> {selectedWallet.tags?.join(', ') || '—'}
+                    </p>
+                    <p>
+                      <strong>GMGN risk:</strong>{' '}
+                      {selectedWallet.riskDetails?.available ? 'Imported' : 'Not imported'}
+                    </p>
+                    {selectedWallet.liquidityBands && (
+                      <p>
+                        <strong>{strings.decisionLab.bandDetails}:</strong>{' '}
+                        {selectedWallet.liquidityBands
+                          .map(
+                            (band) =>
+                              `${band.band} $${band.minEntryTradeAmountUsd.toFixed(0)}–$${band.maxEntryTradeAmountUsd.toFixed(0)}, ${band.simulatedCount}/${band.tradeCount} copied, ${pct(band.medianSimulatedReturnPercent)} median`,
+                          )
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </section>
+                </div>
+                {selectedWallet.scrutiny && (
+                  <section className="experimental-detail-checks">
+                    <h4>Scrutiny checks</h4>
+                    <div>
+                      {selectedWallet.scrutiny.checks.map((check) => (
+                        <article
+                          className={`experimental-check ${check.verdict}`}
+                          key={check.label}
+                        >
+                          <strong>
+                            {check.verdict === 'pass' ? '✓' : check.verdict === 'fail' ? '×' : '…'}{' '}
+                            {check.label}
+                          </strong>
+                          <span>{check.detail}</span>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </details>
             </Modal>
           )}
         </>

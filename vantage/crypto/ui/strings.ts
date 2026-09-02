@@ -73,8 +73,6 @@ export const strings = {
       insufficient: 'Insufficient evidence',
       complete: 'Gate failed',
     },
-    sourceSummary:
-      'Decision Lab is a read-only historical evaluation. Analytical GMGN scores are separate from the authoritative Winner Policy, which uses persisted canonical delayed-copy evidence.',
     analyticalSummary: 'Exploratory context only — these scores do not decide Winner Policy.',
     winnerPolicyIntro: 'Winner requires all three gates:',
     winnerPolicyGates: [
@@ -84,6 +82,7 @@ export const strings = {
     ],
     winnerPolicyScoreSummary:
       'Score: 70 delayed-copy points + 30 GMGN risk deductions. Holdouts are context only; GMGN can only lower the score.',
+    winnerPolicyDetailHardGates: 'Hard gates',
     scoringTitle: 'How scoring works',
     scoringRule:
       'Each group receives a score from 0 to 100. The overall score is their weighted average; it is a comparison score, not a guaranteed profit forecast.',
@@ -96,17 +95,6 @@ export const strings = {
     },
     candidateGates:
       '20+ completed copied-buy outcomes, a positive delayed-copy median, and a canonical $100 portfolio ending above $100.',
-    patternFallbackTitle: 'Pattern-based scoring adjustments are not active',
-    patternFallbackSummary:
-      'Decision Lab is using neutral 25/25/25/25 weights and no discovered-rule penalties.',
-    patternFallbackReasons: [
-      'Available promoted patterns did not qualify across multiple Decision Lab scoring categories.',
-      'Rules must repeat across the required coverage levels.',
-      'Rules must pass chronological validation and historical stability checks.',
-      'The supporting wallet minimum must be met.',
-    ],
-    patternFallbackAction:
-      'Run Pattern Discovery after new evidence is available. The saved result will be reused until the evidence changes.',
     missingEvidence:
       'Missing evidence stays unavailable—not zero—and prevents a raw overall score until all four components can be calculated.',
     weightsTitle: 'Weights currently in use',

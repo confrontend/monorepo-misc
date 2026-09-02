@@ -1,6 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  RULES,
   summarizeTrades,
   performanceByPeriod,
   computeProfitConcentration,
@@ -303,13 +302,13 @@ type LiveTradeRow = {
 export const buildLiveGmgnWalletRow = (
   database: DatabaseSync,
   walletAddress: string,
-  options: { chain?: string; periodDays?: number; now?: Date } = {},
+  options: { chain?: string; periodDays?: number | null; now?: Date } = {},
 ): CopyTradeRow | null => {
   const chain = options.chain ?? 'sol';
-  const periodDays = options.periodDays ?? 30;
+  const periodDays = options.periodDays === undefined ? 30 : options.periodDays;
   const now = options.now ?? new Date();
   const nowSeconds = Math.floor(now.getTime() / 1000);
-  const cutoffSeconds = nowSeconds - periodDays * 86_400;
+  const cutoffSeconds = periodDays === null ? null : nowSeconds - periodDays * 86_400;
 
   const rows = database
     .prepare(
@@ -318,10 +317,10 @@ export const buildLiveGmgnWalletRow = (
             cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
      FROM copytrade_trades
      WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell')
-       AND observed_timestamp >= ?
+       AND (? IS NULL OR observed_timestamp >= ?)
      ORDER BY observed_timestamp ASC, id ASC`,
     )
-    .all(chain, walletAddress, cutoffSeconds) as unknown as LiveTradeRow[];
+    .all(chain, walletAddress, cutoffSeconds, cutoffSeconds) as unknown as LiveTradeRow[];
   if (rows.length === 0) return null;
 
   const completed: Array<{
@@ -781,13 +780,13 @@ export const computeLiveEvaluation = (
   const chain = options.chain ?? 'sol';
   const now = options.now ?? new Date();
 
-  const row = buildLiveGmgnWalletRow(database, walletAddress, { chain, periodDays: 30, now });
+  const row = buildLiveGmgnWalletRow(database, walletAddress, { chain, periodDays: null, now });
   // Live Evaluation is read-only: this report consumes only already-persisted Dune matches.
   // The 90-day scope is explicit in the proof while the legacy GMGN reference fields remain 30d.
   const delayedCopyWallet = computeCopySimulationReport(database, {
     walletAddresses: [walletAddress],
     chain,
-    periodDays: 90,
+    periodDays: undefined,
     now,
   }).wallets[0];
   // Live Evaluation is current-context (not a historical replay), so a fresh GMGN risk-bundle
@@ -795,7 +794,7 @@ export const computeLiveEvaluation = (
   const liveActivitySnapshot = readWalletFeatureSnapshotsBatch(database, {
     walletAddresses: [walletAddress],
     asOfTimestamp: now.toISOString(),
-    lookbackDays: 30,
+    lookbackDays: 3650,
     includePreWindowContext: false,
     trigger: 'current',
     chain,
@@ -805,11 +804,12 @@ export const computeLiveEvaluation = (
     under15SecondsPercent: row?.riskEvidence.under15SecondsPercent ?? null,
     medianHoldSeconds: row?.riskEvidence.medianHoldSeconds ?? null,
     tradesPerActiveDay: liveActivitySnapshot?.features.priorWalletTradesPerActiveDay ?? null,
+    walletAgeDays: row?.riskEvidence.walletAgeDays ?? null,
   };
   const riskBundle = buildGmgnRiskBundleEvidence(readGmgnRiskResults(database, [walletAddress])[0]);
   const winnerPolicyEvidence = delayedCopyWallet
-    ? buildWinnerPolicyEvidence(delayedCopyWallet, 90, { activitySignals, riskBundle })
-    : emptyWinnerPolicyEvidence(90);
+    ? buildWinnerPolicyEvidence(delayedCopyWallet, null, { activitySignals, riskBundle })
+    : emptyWinnerPolicyEvidence(null);
   const winnerPolicy = evaluateWinnerPolicy(winnerPolicyEvidence);
 
   const profile = readPromotedProfile(database);
@@ -832,14 +832,14 @@ export const computeLiveEvaluation = (
     gmgnTags: row?.gmgnTags ?? null,
   };
 
-  if (!row || row.trades < RULES.minTrades) {
-    const evidenceLevel: LiveEvaluationResult['evidenceLevel'] = row ? 'partial' : 'missing';
+  if (!row) {
+    const evidenceLevel: LiveEvaluationResult['evidenceLevel'] = 'missing';
     const copyabilityDiagnostics = computeCopyabilityScore({
-      medianHoldSeconds: row?.riskEvidence.medianHoldSeconds ?? null,
-      fastRoundTripPercent: row?.riskEvidence.fastRoundTripPercent ?? null,
-      under15SecondPercent: row?.riskEvidence.under15SecondsPercent ?? null,
-      pairedTradeCount: row?.riskEvidence.pairedTradeCount ?? 0,
-      under15SecondCount: row?.riskEvidence.under15SecondsCount ?? null,
+      medianHoldSeconds: null,
+      fastRoundTripPercent: null,
+      under15SecondPercent: null,
+      pairedTradeCount: 0,
+      under15SecondCount: null,
     }).diagnostics;
     return {
       walletAddress,
@@ -885,11 +885,7 @@ export const computeLiveEvaluation = (
         detail: 'Not enough GMGN trade history to score this wallet.',
       },
       positiveReasons: [],
-      riskReasons: row
-        ? [
-            `Only ${row.trades} completed round trips in the last 30 days (need ${RULES.minTrades}).`,
-          ]
-        : ['No stored GMGN trade history for this wallet in the last 30 days.'],
+      riskReasons: ['No stored GMGN trade history for this wallet in the last 30 days.'],
       rulesApplied: [],
       rulesUnavailable: [],
       gmgnStatsUsed,

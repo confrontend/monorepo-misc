@@ -672,18 +672,18 @@ export const buildRiskNotes = (evidence: RiskEvidence, riskFlags: string[]): str
 export const computeCopyTradeReport = (
   database: DatabaseSync,
   options: {
-    periodDays?: number;
+    periodDays?: number | null;
     chain?: string;
     now?: Date;
     traderLimit?: number;
     rosterSnapshotId?: number;
   } = {},
 ): CopyTradeReport => {
-  const periodDays = options.periodDays ?? DEFAULT_PERIOD_DAYS;
+  const periodDays = options.periodDays === undefined ? DEFAULT_PERIOD_DAYS : options.periodDays;
   const chain = options.chain ?? 'sol';
   const now = options.now ?? new Date();
   const nowSeconds = Math.floor(now.getTime() / 1000);
-  const cutoffSeconds = nowSeconds - periodDays * 86_400;
+  const cutoffSeconds = periodDays === null ? null : nowSeconds - periodDays * 86_400;
 
   const roster = listRosterWallets(database, {
     chain,
@@ -727,10 +727,11 @@ export const computeCopyTradeReport = (
             token_symbol AS tokenSymbol,
             cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
      FROM copytrade_trades
-     WHERE chain = ? AND event_type IN ('buy', 'sell') AND observed_timestamp >= ?
+     WHERE chain = ? AND event_type IN ('buy', 'sell')
+       AND (? IS NULL OR observed_timestamp >= ?)
      ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
     )
-    .all(chain, cutoffSeconds) as unknown as TradeRow[];
+    .all(chain, cutoffSeconds, cutoffSeconds) as unknown as TradeRow[];
   // This is an analysis-only boundary. All rows remain in SQLite; the sample is computed
   // locally and therefore does not trigger any additional GMGN or Dune requests.
   const representative = selectRepresentativeTrades(storedRows);
@@ -998,7 +999,7 @@ export const computeCopyTradeReport = (
   return {
     computedAt: now.toISOString(),
     startingCapitalUsd: STARTING_CAPITAL_USD,
-    periodDays,
+    periodDays: periodDays ?? 0,
     rows: reportRows,
     overall: {
       trades: overallSummary.trades,

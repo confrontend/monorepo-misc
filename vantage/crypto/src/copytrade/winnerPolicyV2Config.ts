@@ -5,7 +5,8 @@
  * v2 implementation write-up and its stated limitations.
  */
 export const WINNER_POLICY_V2_CONFIG = Object.freeze({
-  policyVersion: 'winner-policy-v2' as const,
+  policyVersion: 'winner-policy-v3' as const,
+  recencyHalfLifeDays: 45,
 
   minimumCompletedCopiedTrades: 20,
   profitabilityWeight: 70,
@@ -15,11 +16,12 @@ export const WINNER_POLICY_V2_CONFIG = Object.freeze({
   portfolioReturnMaxPoints: 25,
   confidenceMaxPoints: 15,
 
-  maxExecutionSpeedPenalty: 15,
-  maxHyperactivityPenalty: 4,
-  maxTradeQualityPenalty: 5,
+  maxExecutionSpeedPenalty: 12,
+  maxHyperactivityPenalty: 3,
+  maxTradeQualityPenalty: 4,
   maxTokenRiskPenalty: 4,
   maxCostPenalty: 2,
+  maxWalletAgePenalty: 5,
 
   // Profitability curves: score = maxPoints * (1 - e^(-k * max(0, x))) -- gradual, capped, and
   // resistant to one extreme value dominating (median return is already outlier-resistant by

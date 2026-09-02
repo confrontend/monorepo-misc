@@ -19,12 +19,12 @@ export const WINNER_POLICY_VERSION = WINNER_POLICY_V2_CONFIG.policyVersion;
 export const WINNER_POLICY_STARTING_CAPITAL_USD = 100;
 export const WINNER_POLICY_MIN_COMPLETED_COPIED_BUYS =
   WINNER_POLICY_V2_CONFIG.minimumCompletedCopiedTrades;
+export const WINNER_POLICY_RECENCY_HALF_LIFE_DAYS = WINNER_POLICY_V2_CONFIG.recencyHalfLifeDays;
 /** Kept for the evidence builder, which still computes 3 chronological holdout windows for
  *  "Historical stability" display context -- v2 no longer gates WINNER status on them. */
 export const WINNER_POLICY_HOLDOUT_WINDOWS = 3;
 
 export type WinnerPolicyStatus = 'WINNER' | 'REJECTED' | 'UNPROVEN';
-export type WinnerPolicyMode = 'authoritative' | 'discovered_rules';
 export type WinnerPolicyGateStatus = 'pass' | 'fail' | 'unproven' | 'warning';
 
 export type WinnerPolicyHoldout = {
@@ -45,6 +45,7 @@ export type WinnerPolicyActivitySignals = {
   under15SecondsPercent: number | null;
   medianHoldSeconds: number | null;
   tradesPerActiveDay: number | null;
+  walletAgeDays: number | null;
 };
 
 /** Adapted from the optional, current-only Chrome-extension GMGN risk-bundle import
@@ -77,8 +78,15 @@ export type WinnerPolicyExecutionFrictionSignals = {
 export type WinnerPolicyEvidence = {
   source: 'persisted_copy_simulation';
   periodDays: number | null;
+  recency?: {
+    halfLifeDays: number;
+    evaluationTimestamp: string;
+    oldestEvidenceTimestamp: string | null;
+    newestEvidenceTimestamp: string | null;
+  };
   completedCopiedBuyOutcomes: number;
   medianReturnPercent: number | null;
+  recencyWeightedMedianReturnPercent?: number | null;
   startingCapitalUsd: number;
   endingCapitalUsd: number | null;
   holdouts: WinnerPolicyHoldout[];
@@ -125,18 +133,19 @@ export type WinnerPolicyProfitabilityScore = {
 export type WinnerPolicyGmgnRiskScore = {
   score: number;
   max: number;
+  walletAgeDays: number | null;
   deductions: {
     executionSpeed: number;
     hyperactivity: number;
     tradeQuality: number;
     tokenRisk: number;
     costs: number;
+    walletAge: number;
   };
 };
 
 export type WinnerPolicyResult = {
   policyVersion: typeof WINNER_POLICY_VERSION;
-  mode: WinnerPolicyMode;
   status: WinnerPolicyStatus;
   finalScore: number | null;
   proofGates: WinnerPolicyProofGates;
@@ -340,6 +349,23 @@ export const computeCostPenalty = (gasRatioPercent: number | null): number =>
         ),
       );
 
+export const computeWalletAgePenalty = (
+  ageDays: number | null,
+  periodDays: number | null,
+): number => {
+  if (ageDays === null || ageDays < 0) return 0;
+  if (periodDays === null || periodDays <= 0) {
+    if (ageDays < 7) return 5;
+    if (ageDays < 30) return 4;
+    if (ageDays < 60) return 2;
+    return 0;
+  }
+  if (ageDays < 7) return WINNER_POLICY_V2_CONFIG.maxWalletAgePenalty;
+  if (ageDays < periodDays * 0.5) return 4;
+  if (ageDays < periodDays) return 2;
+  return 0;
+};
+
 /**
  * Evaluate the fixed v2 policy. Only 3 hard gates (minimum evidence, positive median, profitable
  * $100 portfolio) decide WINNER/REJECTED/UNPROVEN; holdout stability and execution feasibility are
@@ -348,11 +374,7 @@ export const computeCostPenalty = (gasRatioPercent: number | null): number =>
  * discounted by transparent, capped GMGN execution/risk penalties -- GMGN data can only lower an
  * already-proven wallet's score, never grant winner status on its own.
  */
-export const evaluateWinnerPolicy = (
-  evidence: WinnerPolicyEvidence,
-  options: { mode?: WinnerPolicyMode } = {},
-): WinnerPolicyResult => {
-  const mode = options.mode ?? 'authoritative';
+export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPolicyResult => {
   const gates: WinnerPolicyGate[] = [];
   const positiveReasons: string[] = [];
   const rejectionReasons: string[] = [];
@@ -379,7 +401,7 @@ export const evaluateWinnerPolicy = (
   }
 
   // Gate B -- positive delayed-copy median.
-  const medianValue = evidence.medianReturnPercent;
+  const medianValue = evidence.recencyWeightedMedianReturnPercent ?? evidence.medianReturnPercent;
   const medianAvailable = medianValue !== null;
   const medianPositive = medianAvailable && medianValue! > 0;
   gates.push(
@@ -389,7 +411,7 @@ export const evaluateWinnerPolicy = (
       !medianAvailable ? 'unproven' : medianPositive ? 'pass' : 'fail',
       !medianAvailable
         ? 'No canonical delayed-copy median is available.'
-        : `Canonical delayed-copy median is ${medianValue!.toFixed(2)}%${medianPositive ? '' : ', not positive'}.`,
+        : `Recency-weighted delayed-copy median is ${medianValue!.toFixed(2)}%${medianPositive ? '' : ', not positive'}.`,
     ),
   );
   if (!medianAvailable) unprovenReasons.push('The canonical delayed-copy median is missing.');
@@ -457,7 +479,9 @@ export const evaluateWinnerPolicy = (
   let finalScore: number | null = null;
 
   if (!dataMissing) {
-    const medianReturnScore = computeMedianReturnScore(evidence.medianReturnPercent);
+    const medianReturnScore = computeMedianReturnScore(
+      evidence.recencyWeightedMedianReturnPercent ?? evidence.medianReturnPercent,
+    );
     const portfolioScore = computePortfolioReturnScore(
       evidence.startingCapitalUsd,
       evidence.endingCapitalUsd,
@@ -495,10 +519,14 @@ export const evaluateWinnerPolicy = (
     const tradeQuality = computeTradeQualityPenalty(evidence.tradeQualitySignals);
     const tokenRisk = computeTokenRiskPenalty(evidence.riskBundle);
     const costs = computeCostPenalty(evidence.executionFrictionSignals.gasRatioPercent);
+    const walletAge = computeWalletAgePenalty(
+      evidence.activitySignals?.walletAgeDays ?? null,
+      null,
+    );
     const gmgnTotal = roundScore(
       clamp(
         WINNER_POLICY_V2_CONFIG.gmgnRiskWeight -
-          (executionSpeed + hyperactivity + tradeQuality + tokenRisk + costs),
+          (executionSpeed + hyperactivity + tradeQuality + tokenRisk + costs + walletAge),
         0,
         WINNER_POLICY_V2_CONFIG.gmgnRiskWeight,
       ),
@@ -506,7 +534,8 @@ export const evaluateWinnerPolicy = (
     gmgnRiskScore = {
       score: gmgnTotal,
       max: WINNER_POLICY_V2_CONFIG.gmgnRiskWeight,
-      deductions: { executionSpeed, hyperactivity, tradeQuality, tokenRisk, costs },
+      walletAgeDays: evidence.activitySignals?.walletAgeDays ?? null,
+      deductions: { executionSpeed, hyperactivity, tradeQuality, tokenRisk, costs, walletAge },
     };
 
     finalScore = roundScore(clamp(profitTotal + gmgnTotal, 0, 100));
@@ -527,15 +556,8 @@ export const evaluateWinnerPolicy = (
     }
   }
 
-  if (mode === 'discovered_rules') {
-    warnings.push(
-      'Discovered Rules mode is experimental context only; Pattern Discovery cannot override the fixed Winner Policy gates or scores.',
-    );
-  }
-
   return {
     policyVersion: WINNER_POLICY_VERSION,
-    mode,
     status,
     finalScore,
     proofGates,

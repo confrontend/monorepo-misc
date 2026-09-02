@@ -127,13 +127,12 @@ import { readDuneOutcomeReadiness } from '../copytrade/discovery/duneOutcomeRead
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
 import {
-  applyExperimentalDecisionWinnerPolicyMode,
   computeExperimentalDecisionReport,
   readExperimentalDecisionCacheVersion,
   type ExperimentalDecisionReport,
 } from '../copytrade/experimentalDecision.js';
 import { computeLiveEvaluation, parseLiveEvaluationRequest } from '../copytrade/liveEvaluation.js';
-import { WINNER_POLICY_VERSION, type WinnerPolicyMode } from '../copytrade/winnerPolicy.js';
+import { WINNER_POLICY_VERSION } from '../copytrade/winnerPolicy.js';
 import {
   readHistoryDepthCoverage,
   readWalletFeatureCoverageInventory,
@@ -355,7 +354,7 @@ const readLatestPersistedResearch = <T>(keyPrefix: string): T | null => {
 // Only reuse a completed report produced by the current Decision Lab calculation version.
 // Older serialized reports remain in SQLite for audit, but their feature semantics must not be
 // silently reinterpreted by the current UI.
-const decisionLabLatestKeyPrefix = (limit: number, periodDays: 30 | 60 | 90): string =>
+const decisionLabLatestKeyPrefix = (limit: number, periodDays: 30 | 60 | 90 | null): string =>
   `${CACHE_VERSIONS.decisionLab}:${limit}:${periodDays}:latest:`;
 
 // Bump the v-suffix whenever CopySimulationReport/CopySimulationWalletReport's shape changes
@@ -2207,12 +2206,8 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       request.method === 'GET' &&
       requestUrl.pathname === '/api/copytrade/experimental-decision'
     ) {
-      const periodRaw = Number(requestUrl.searchParams.get('periodDays') ?? '30');
-      if (periodRaw !== 30 && periodRaw !== 60 && periodRaw !== 90) {
-        respond(400, { error: 'periodDays must be one of 30, 60, or 90.' });
-        return;
-      }
-      const periodDays = periodRaw as 30 | 60 | 90;
+      const periodDays = null;
+      const cachePeriodDays = 90 as const;
       const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
       const snapshotRaw = Number(requestUrl.searchParams.get('snapshotId') ?? '');
       const limit = Number.isFinite(limitRaw)
@@ -2220,20 +2215,14 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         : 100;
       const rosterSnapshotId =
         Number.isInteger(snapshotRaw) && snapshotRaw > 0 ? snapshotRaw : undefined;
-      const modeRaw = requestUrl.searchParams.get('winnerPolicyMode') ?? 'authoritative';
-      if (modeRaw !== 'authoritative' && modeRaw !== 'discovered_rules') {
-        respond(400, { error: 'winnerPolicyMode must be authoritative or discovered_rules.' });
-        return;
-      }
-      const winnerPolicyMode = modeRaw as WinnerPolicyMode;
       // This endpoint is intentionally not wired to any fetch runner. It only computes a
       // separately named experiment from saved SQLite evidence and cannot spend provider credits.
-      const weightingVersion = `${readExperimentalDecisionCacheVersion(database, periodDays)}:${WINNER_POLICY_VERSION}`;
+      const weightingVersion = `${readExperimentalDecisionCacheVersion(database, cachePeriodDays)}:${WINNER_POLICY_VERSION}`;
       const refresh = requestUrl.searchParams.get('refresh') === '1';
       const savedReportCandidate =
         !refresh && rosterSnapshotId === undefined
           ? readLatestPersistedResearch<ExperimentalDecisionReport>(
-              decisionLabLatestKeyPrefix(limit, periodDays),
+              decisionLabLatestKeyPrefix(limit, cachePeriodDays),
             )
           : null;
       const savedReport =
@@ -2246,7 +2235,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         readCachedResearch(
           versionedCacheKey(
             'decisionLab',
-            periodDays,
+            'all',
             limit,
             rosterSnapshotId ?? 'latest',
             weightingVersion,
@@ -2256,7 +2245,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
               limit,
               rosterSnapshotId,
               periodDays,
-              winnerPolicyMode: 'authoritative',
             });
             for (const wallet of computed.wallets) {
               recordEvaluationHistory(
@@ -2267,8 +2255,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
             return computed;
           },
         );
-      const report = applyExperimentalDecisionWinnerPolicyMode(baseReport, winnerPolicyMode);
-      respond(200, report);
+      respond(200, baseReport);
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/feature-coverage') {
