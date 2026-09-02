@@ -11,6 +11,13 @@ import {
   type CopySimulationTarget,
   type DunePollUpdate,
 } from './copySimulationDune.js';
+import type { WorkflowRunId } from '../data/workflowIds.js';
+import {
+  aggregateCanonicalCopiedBuyOutcomes,
+  type CanonicalCopiedBuyOutcome,
+  type CanonicalCopiedBuyDiagnostics,
+} from './canonicalCopiedBuyOutcome.js';
+import { CALCULATION_MANIFEST_VERSION, CALCULATION_VERSIONS } from '../calculationVersions.js';
 
 /**
  * Historical Copy Simulation: for the top qualifying wallets, estimate what a copier —
@@ -337,6 +344,7 @@ type RoundTrip = {
   sellTradeId: number;
   sellAt: number;
   walletReturnRatio: number | null;
+  buyCostUsd: number | null;
   buyGasUsd: number | null;
   sellGasUsd: number | null;
   copyFraction: number;
@@ -428,6 +436,7 @@ const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): R
         sellTradeId: row.id,
         sellAt: row.observedTimestamp,
         walletReturnRatio,
+        buyCostUsd: costBasis,
         buyGasUsd: buy.gasUsd,
         sellGasUsd: row.gasUsd === null ? null : parseAmount(row.gasUsd),
         copyFraction,
@@ -672,6 +681,7 @@ export const runCopySimulationBatch = async (
     shouldStop?: () => boolean;
     retryNoMatch?: boolean;
     searchWindowMinutes?: number;
+    workflowRunId?: WorkflowRunId;
     onPlan?: (plan: {
       targetsTotal: number;
       batchesTotal: number;
@@ -790,6 +800,7 @@ export const runCopySimulationBatch = async (
         shouldStop: options.shouldStop,
         searchWindowMinutes: options.searchWindowMinutes,
         matchSource: options.retryNoMatch ? 'wide_window' : 'precise',
+        workflowRunId: options.workflowRunId,
       });
       runIds.push(runId);
       options.onBatchEnd?.({
@@ -799,6 +810,10 @@ export const runCopySimulationBatch = async (
         error: null,
       });
     } catch (error) {
+      if (options.shouldStop?.()) {
+        cancelled = true;
+        break;
+      }
       const message = error instanceof Error ? error.message : String(error);
       failedBatches.push(message);
       options.onBatchEnd?.({
@@ -945,10 +960,19 @@ export type CopySimulationWalletReport = {
   pendingDuneTargets?: number;
   duneNoMatchTargets?: number;
   duneMatchedTargets?: number;
+  /** One auditable diagnostic contract for reducing multiple exits of one buy into one outcome. */
+  canonicalCopiedBuyOutcomes?: CanonicalCopiedBuyOutcome[];
+  canonicalCopiedBuyDiagnostics?: CanonicalCopiedBuyDiagnostics;
 };
 
 export type CopySimulationReport = {
   computedAt: string;
+  /** Versioned contract metadata makes the delayed-copy result auditable without changing its
+   * legacy assumptions or trade fields. */
+  calculationVersions?: typeof CALCULATION_VERSIONS;
+  calculationManifestVersion?: typeof CALCULATION_MANIFEST_VERSION;
+  /** Total current-period Dune target legs, including matched, no-match, unqueried, and in-flight targets. */
+  duneTargetsTotal?: number;
   /** Exact number of unplanned Dune targets from the same planner used by the fetch runner. */
   pendingDuneTargets?: number;
   /** Dune target legs that were actually queried and returned no usable match. */
@@ -1533,6 +1557,37 @@ export const computeCopySimulationReport = (
               ? `${notQueriedCount} trades still need Dune data.`
               : 'Every paired trade has a usable Dune match.';
 
+    // Keep the canonical one-buy aggregation beside the legacy per-fragment report fields. This
+    // is intentionally diagnostic-only for now: changing the existing medians would be a
+    // scoring/output behavior change. The shared contract makes the handling of partial exits,
+    // missing cost basis, and open positions available to future consumers without re-pairing.
+    const canonicalCopiedBuyAggregation = aggregateCanonicalCopiedBuyOutcomes(
+      [...new Set(trips.map((trip) => trip.buyTradeId))].map((tradeId) => ({ tradeId })),
+      trips.map((trip) => {
+        const trade = tradeResults.find(
+          (candidate) =>
+            candidate.buyTradeId === trip.buyTradeId && candidate.sellTradeId === trip.sellTradeId,
+        );
+        return {
+          sellTradeId: trip.sellTradeId,
+          buyTradeId: trip.buyTradeId,
+          copyFraction: trip.copyFraction,
+          entryMatched: trade?.status === 'simulated' || trade?.status === 'missing_exit_match',
+          exitMatched: trade?.status === 'simulated' || trade?.status === 'missing_entry_match',
+          simulatedReturnRatio:
+            trade?.simulatedReturnPercent === null || trade?.simulatedReturnPercent === undefined
+              ? null
+              : trade.simulatedReturnPercent / 100,
+          walletReturnRatio: trip.walletReturnRatio,
+          buyCostUsd: trip.buyCostUsd,
+        };
+      }),
+      walletOpenPositions.map((position) => ({
+        buyTradeId: position.buyTradeId,
+        remainingFraction: position.remainingFraction,
+      })),
+    );
+
     return {
       walletAddress,
       coverageRatePercent,
@@ -1571,11 +1626,19 @@ export const computeCopySimulationReport = (
       pendingDuneTargets: pendingByWallet.get(walletAddress) ?? 0,
       duneNoMatchTargets: walletNoMatchTargets,
       duneMatchedTargets: walletMatchedTargets,
+      canonicalCopiedBuyOutcomes: canonicalCopiedBuyAggregation.outcomes,
+      canonicalCopiedBuyDiagnostics: canonicalCopiedBuyAggregation.diagnostics,
     };
   });
 
   return {
     computedAt: now.toISOString(),
+    calculationVersions: CALCULATION_VERSIONS,
+    calculationManifestVersion: CALCULATION_MANIFEST_VERSION,
+    duneTargetsTotal: new Set([
+      ...pendingTargetPlan.allTargetIds,
+      ...openPositions.map((position) => -Math.abs(position.buyTradeId)),
+    ]).size,
     pendingDuneTargets: pendingTargetPlan.targets.length,
     duneNoMatchTargets,
     duneMatchedTargets,

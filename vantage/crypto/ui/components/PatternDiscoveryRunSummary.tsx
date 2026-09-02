@@ -30,6 +30,9 @@ export const PatternDiscoveryRunSummary = ({
   const copy = UI_STRINGS.patternDiscovery;
   const [selectedCoverage, setSelectedCoverage] = useState<number | null>(null);
   const available = sensitivity?.thresholds.filter((row) => row.reportAvailable) ?? [];
+  const noEligibleData = Boolean(
+    sensitivity && sensitivity.thresholds.length > 0 && available.length === 0,
+  );
   const stable = available.filter((row) => row.historicalStablePatterns > 0);
   const selected = sensitivity?.thresholds.find(
     (row) => row.minimumCoveragePercent === selectedCoverage,
@@ -50,9 +53,23 @@ export const PatternDiscoveryRunSummary = ({
               <h3>{copy.summaryTitle}</h3>
             </div>
             <span className="pattern-discovery-status">
-              {copy.gridStatus(stable.length, available.length)}
+              {noEligibleData
+                ? copy.noEligibleData
+                : copy.gridStatus(stable.length, available.length)}
             </span>
           </div>
+          {noEligibleData && (
+            <div className="copytrade-outcome-coverage-warning" role="status">
+              <strong>{copy.noEligibleData}</strong> — {copy.noEligibleDataDetail}
+              <div>
+                {sensitivity.thresholds
+                  .map((row) => row.error)
+                  .filter((error): error is string => Boolean(error))
+                  .filter((error, index, errors) => errors.indexOf(error) === index)
+                  .join(' ')}
+              </div>
+            </div>
+          )}
           <div className="pattern-discovery-cards">
             <div>
               <strong>{promotedCount}</strong>

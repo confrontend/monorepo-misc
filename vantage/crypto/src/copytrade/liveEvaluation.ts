@@ -1,7 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {
   RULES,
-  STARTING_CAPITAL_USD,
   summarizeTrades,
   performanceByPeriod,
   computeProfitConcentration,
@@ -17,15 +16,15 @@ import {
 import {
   clamp,
   positiveReturnScore,
-  holdScore,
-  consistencyScore,
-  robustnessScore,
+  computeCopyabilityScore,
   computeHistoricalHyperactivityPenalty,
   computeFastTradingPenalty,
   readExperimentalDecisionWeighting,
   HYPERACTIVITY_FEATURES,
   FAST_TRADING_FEATURE,
   type ExperimentalDecisionPromotedRules,
+  type CopyabilityDiagnostics,
+  type CopyabilityScoreInput,
 } from './experimentalDecision.js';
 import {
   readPatternDiscoveryDataFingerprint,
@@ -33,22 +32,46 @@ import {
   readLatestPatternDiscoveryCache,
   patternDiscoveryCacheKey,
   MAX_PATTERN_DISCOVERY_WALLETS,
-  readCurrentWalletFeatures,
-  type CurrentWalletFeatures,
 } from './discovery/patternDiscovery.js';
+import {
+  currentWalletFeatureValueMap,
+  type CurrentWalletFeatures,
+} from './features/walletFeatureEngine.js';
+import {
+  WALLET_FEATURE_ENGINE_VERSION,
+  walletFeaturesForApplication,
+} from './features/walletFeatureDefinitions.js';
+import { readWalletFeatureSnapshotsBatch } from './features/walletFeatureReader.js';
+import { readGmgnRiskResults } from './scrutiny/gmgnRisk.js';
+import { CALCULATION_VERSION_MANIFEST, CALCULATION_VERSIONS } from './calculationVersions.js';
+import {
+  createHistoricalEvidenceContext,
+  type HistoricalEvidenceContext,
+} from './evidence/historicalEvidenceContext.js';
+import { computeCopySimulationReport } from './simulation/copySimulation.js';
+import {
+  buildGmgnRiskBundleEvidence,
+  buildWinnerPolicyEvidence,
+  emptyWinnerPolicyEvidence,
+} from './winnerPolicyEvidence.js';
+import {
+  evaluateWinnerPolicy,
+  type WinnerPolicyResult,
+  type WinnerPolicyStatus,
+} from './winnerPolicy.js';
+import {
+  buildWalletEvidenceSnapshot,
+  type WalletEvidenceSnapshot,
+} from './evidence/walletEvidenceSnapshot.js';
 import type {
   PatternDiscoverySensitivity,
   PatternDiscoveryCrossCoveragePattern,
 } from './discovery/patternDiscoveryRunner.js';
 import { weightCategoryForFeature, type DecisionLabCategory } from './decisionCategories.js';
 import { SOL_ADDRESS_PATTERN } from './screening/roster.js';
-import {
-  hasActiveFetchRun,
-  createCopyTradeFetchRun,
-  runCopyTradeFetch,
-} from './screening/fetch.js';
 
-export const LIVE_EVALUATION_DISCLAIMER = 'GMGN-only estimate — no delayed-copy/Dune validation.';
+export const LIVE_EVALUATION_DISCLAIMER =
+  'Live Evaluation uses persisted GMGN and delayed-copy evidence; it never fetches Dune or uses a fallback verdict.';
 
 /** Every component score Live Evaluation can produce, named distinctly from Decision Lab's own
  *  category names ("edge" never appears here) so the two are never confused in output or UI. */
@@ -113,7 +136,17 @@ export type EvaluationTrend =
 export type LiveEvaluationResult = {
   walletAddress: string;
   generatedAt: string;
+  featureEngineVersion: string;
   periodDays: 30;
+  /** Explicit point-in-time and calculation provenance. Legacy fields remain for compatibility. */
+  evidenceContext: HistoricalEvidenceContext;
+  calculationVersions: typeof CALCULATION_VERSIONS;
+  calculationManifestVersion: typeof CALCULATION_VERSION_MANIFEST.manifestVersion;
+  evidenceSnapshot: WalletEvidenceSnapshot<
+    LiveActivityEvidence,
+    OfficialGmgnEvidence,
+    WinnerPolicyResult['evidence']
+  >;
   readOnly: true;
   noDuneFetch: true;
   disclaimer: string;
@@ -121,6 +154,8 @@ export type LiveEvaluationResult = {
   evidenceLevel: 'complete' | 'partial' | 'insufficient' | 'missing';
   confidence: 'high' | 'medium' | 'low' | 'none';
   verdict: 'pass' | 'reject' | 'insufficient_evidence';
+  winnerPolicy: WinnerPolicyResult;
+  winnerPolicyStatus: WinnerPolicyStatus;
   gmgnProfitabilityLanguage: string;
   estimatedOverallScore: number | null;
   componentScores: Record<LiveEvaluationCategory, number | null>;
@@ -136,7 +171,88 @@ export type LiveEvaluationResult = {
   rulesApplied: LiveEvaluationRuleApplied[];
   rulesUnavailable: LiveEvaluationRuleUnavailable[];
   gmgnStatsUsed: LiveEvaluationGmgnStatsUsed;
+  copyabilityDiagnostics: CopyabilityDiagnostics;
   trend?: EvaluationTrend;
+};
+
+type LiveActivityEvidence = {
+  tradeCount: number;
+  medianReturnPercent: number | null;
+  medianHoldSeconds: number | null;
+  fastRoundTripPercent: number | null;
+  under15SecondsPercent: number | null;
+};
+type OfficialGmgnEvidence = Omit<LiveEvaluationGmgnStatsUsed, 'gmgnTags'>;
+
+/** Build the shared evidence contract used by this read-only evaluator. Values remain in their
+ * source namespace: official 30-day GMGN aggregates are never presented as local activity or
+ * delayed-copy outcomes. */
+const buildLiveEvidenceSnapshot = (input: {
+  walletAddress: string;
+  chain: string;
+  now: Date;
+  row: CopyTradeRow | null;
+  gmgnStatsUsed: LiveEvaluationGmgnStatsUsed;
+  evidenceLevel: LiveEvaluationResult['evidenceLevel'];
+  winnerPolicyEvidence: WinnerPolicyResult['evidence'];
+}): WalletEvidenceSnapshot<
+  LiveActivityEvidence,
+  OfficialGmgnEvidence,
+  WinnerPolicyResult['evidence']
+> => {
+  const context = createHistoricalEvidenceContext({
+    chain: input.chain,
+    asOf: input.now,
+    periodDays: 30,
+    completeness: { status: input.evidenceLevel === 'complete' ? 'complete' : 'partial' },
+  });
+  const { gmgnTags: _informationalTags, ...officialGmgnStats } = input.gmgnStatsUsed;
+  return buildWalletEvidenceSnapshot<
+    LiveActivityEvidence,
+    OfficialGmgnEvidence,
+    WinnerPolicyResult['evidence']
+  >({
+    walletAddress: input.walletAddress,
+    context,
+    activity: {
+      status: input.row ? 'available' : 'missing',
+      value: input.row
+        ? {
+            tradeCount: input.row.trades,
+            medianReturnPercent: input.row.medianReturnPercent,
+            medianHoldSeconds: input.row.riskEvidence.medianHoldSeconds,
+            fastRoundTripPercent: input.row.riskEvidence.fastRoundTripPercent,
+            under15SecondsPercent: input.row.riskEvidence.under15SecondsPercent ?? null,
+          }
+        : null,
+    },
+    officialGmgn: {
+      status: input.row?.gmgnAggregate ? 'available' : 'missing',
+      value: input.row?.gmgnAggregate ? officialGmgnStats : null,
+    },
+    delayedCopy: {
+      status: input.winnerPolicyEvidence.endingCapitalUsd === null ? 'missing' : 'available',
+      value:
+        input.winnerPolicyEvidence.endingCapitalUsd === null ? null : input.winnerPolicyEvidence,
+    },
+    provenance: {
+      activity: {
+        source: 'copytrade_trades',
+        exact: true,
+        calculationVersion: CALCULATION_VERSIONS.walletFeatures,
+      },
+      officialGmgn: {
+        source: 'copytrade_wallet_stats',
+        exact: true,
+        calculationVersion: null,
+      },
+      delayedCopy: {
+        source: input.winnerPolicyEvidence.provenance.delayedCopy,
+        exact: true,
+        calculationVersion: CALCULATION_VERSIONS.delayedCopyOutcomes,
+      },
+    },
+  });
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -422,14 +538,8 @@ export const estimateHistoricalProfitabilityScore = (
   medianReturnPercent: number | null,
 ): number | null => positiveReturnScore(medianReturnPercent);
 
-export const estimateGmgnCopyabilityScore = (
-  holdSeconds: number | null,
-  fastTradingPenalty: number,
-  hyperactivityPenalty: number,
-): number | null =>
-  holdSeconds === null
-    ? null
-    : clamp((holdScore(holdSeconds) ?? 0) - fastTradingPenalty - hyperactivityPenalty);
+export const estimateGmgnCopyabilityScore = (input: CopyabilityScoreInput): number | null =>
+  computeCopyabilityScore(input).score;
 
 // ---------------------------------------------------------------------------------------------
 // Generic promoted-rule evaluator, for every cross-coverage-promoted pattern not already
@@ -494,56 +604,18 @@ const percentileRank = (value: number, values: number[]): number | null => {
 
 /** `prior_wallet_*` feature name -> the wallet's current value, from the same standing-wallet
  *  snapshot Pattern Discovery's own PIT accumulation produces (readCurrentWalletFeatures). */
-const featureMap = (features: CurrentWalletFeatures): Record<string, number | null> => ({
-  prior_wallet_trade_count: features.priorWalletTradeCount,
-  prior_wallet_buy_count: features.priorWalletBuyCount,
-  prior_wallet_sell_count: features.priorWalletSellCount,
-  prior_wallet_buy_volume_usd: features.priorWalletBuyVolumeUsd,
-  prior_wallet_sell_volume_usd: features.priorWalletSellVolumeUsd,
-  prior_wallet_realized_profit_usd: features.priorWalletRealizedProfitUsd,
-  prior_wallet_median_return_percent: features.priorWalletMedianReturnPercent,
-  prior_wallet_win_rate_percent: features.priorWalletWinRatePercent,
-  prior_wallet_positive_day_percent: features.priorWalletPositiveDayPercent,
-  prior_wallet_best_token_profit_share_percent: features.priorWalletBestTokenProfitSharePercent,
-  prior_wallet_median_hold_seconds: features.priorWalletMedianHoldSeconds,
-  prior_wallet_under_15_seconds_percent: features.priorWalletUnder15SecondsPercent,
-  prior_wallet_paired_trade_count: features.priorWalletPairedTradeCount,
-  prior_wallet_distinct_token_count: features.priorWalletDistinctTokenCount,
-  prior_wallet_trades_per_active_day: features.priorWalletTradesPerActiveDay,
-  prior_wallet_median_buy_size_usd: features.priorWalletMedianBuySizeUsd,
-  prior_wallet_return_volatility_percent: features.priorWalletReturnVolatilityPercent,
-  prior_wallet_top3_token_profit_share_percent: features.priorWalletTop3TokenProfitSharePercent,
-});
-
 /** The complete set of feature names Live Evaluation can resolve to a live value -- anything
  *  not in this set (every `prior_token_*`/`token_*`/`entry_*` name) has no standing-wallet
  *  equivalent and must be reported as unavailable, never silently skipped. Note some of these
  *  names share a substring with `weightCategoryForFeature`'s buckets (e.g. `prior_token_buy_count`
  *  also contains "buy_count"), so membership here -- not the category mapping -- is what decides
  *  whether a feature is GMGN-live-resolvable. */
-const SUPPORTED_LIVE_FEATURES = new Set<string>([
-  'prior_wallet_trade_count',
-  'prior_wallet_buy_count',
-  'prior_wallet_sell_count',
-  'prior_wallet_buy_volume_usd',
-  'prior_wallet_sell_volume_usd',
-  'prior_wallet_realized_profit_usd',
-  'prior_wallet_median_return_percent',
-  'prior_wallet_win_rate_percent',
-  'prior_wallet_positive_day_percent',
-  'prior_wallet_best_token_profit_share_percent',
-  'prior_wallet_median_hold_seconds',
-  'prior_wallet_under_15_seconds_percent',
-  'prior_wallet_paired_trade_count',
-  'prior_wallet_distinct_token_count',
-  'prior_wallet_trades_per_active_day',
-  'prior_wallet_median_buy_size_usd',
-  'prior_wallet_return_volatility_percent',
-  'prior_wallet_top3_token_profit_share_percent',
-]);
+const SUPPORTED_LIVE_FEATURES = new Set<string>(
+  walletFeaturesForApplication('live_evaluation').map(({ identifier }) => identifier),
+);
 
 const liveMetricForFeature = (features: CurrentWalletFeatures, feature: string): number | null => {
-  const map = featureMap(features);
+  const map = currentWalletFeatureValueMap(features);
   return feature in map ? map[feature] : null;
 };
 
@@ -710,7 +782,35 @@ export const computeLiveEvaluation = (
   const now = options.now ?? new Date();
 
   const row = buildLiveGmgnWalletRow(database, walletAddress, { chain, periodDays: 30, now });
-  const walletFeatures = readCurrentWalletFeatures(database, walletAddress, { chain });
+  // Live Evaluation is read-only: this report consumes only already-persisted Dune matches.
+  // The 90-day scope is explicit in the proof while the legacy GMGN reference fields remain 30d.
+  const delayedCopyWallet = computeCopySimulationReport(database, {
+    walletAddresses: [walletAddress],
+    chain,
+    periodDays: 90,
+    now,
+  }).wallets[0];
+  // Live Evaluation is current-context (not a historical replay), so a fresh GMGN risk-bundle
+  // snapshot is legitimately usable here -- unlike Decision Lab, which never populates it.
+  const liveActivitySnapshot = readWalletFeatureSnapshotsBatch(database, {
+    walletAddresses: [walletAddress],
+    asOfTimestamp: now.toISOString(),
+    lookbackDays: 30,
+    includePreWindowContext: false,
+    trigger: 'current',
+    chain,
+  }).get(walletAddress);
+  const activitySignals = {
+    fastRoundTripPercent: row?.riskEvidence.fastRoundTripPercent ?? null,
+    under15SecondsPercent: row?.riskEvidence.under15SecondsPercent ?? null,
+    medianHoldSeconds: row?.riskEvidence.medianHoldSeconds ?? null,
+    tradesPerActiveDay: liveActivitySnapshot?.features.priorWalletTradesPerActiveDay ?? null,
+  };
+  const riskBundle = buildGmgnRiskBundleEvidence(readGmgnRiskResults(database, [walletAddress])[0]);
+  const winnerPolicyEvidence = delayedCopyWallet
+    ? buildWinnerPolicyEvidence(delayedCopyWallet, 90, { activitySignals, riskBundle })
+    : emptyWinnerPolicyEvidence(90);
+  const winnerPolicy = evaluateWinnerPolicy(winnerPolicyEvidence);
 
   const profile = readPromotedProfile(database);
 
@@ -734,10 +834,35 @@ export const computeLiveEvaluation = (
 
   if (!row || row.trades < RULES.minTrades) {
     const evidenceLevel: LiveEvaluationResult['evidenceLevel'] = row ? 'partial' : 'missing';
+    const copyabilityDiagnostics = computeCopyabilityScore({
+      medianHoldSeconds: row?.riskEvidence.medianHoldSeconds ?? null,
+      fastRoundTripPercent: row?.riskEvidence.fastRoundTripPercent ?? null,
+      under15SecondPercent: row?.riskEvidence.under15SecondsPercent ?? null,
+      pairedTradeCount: row?.riskEvidence.pairedTradeCount ?? 0,
+      under15SecondCount: row?.riskEvidence.under15SecondsCount ?? null,
+    }).diagnostics;
     return {
       walletAddress,
       generatedAt: now.toISOString(),
+      featureEngineVersion: WALLET_FEATURE_ENGINE_VERSION,
       periodDays: 30,
+      evidenceContext: createHistoricalEvidenceContext({
+        chain,
+        asOf: now,
+        periodDays: 30,
+        completeness: { status: 'partial' },
+      }),
+      calculationVersions: CALCULATION_VERSIONS,
+      calculationManifestVersion: CALCULATION_VERSION_MANIFEST.manifestVersion,
+      evidenceSnapshot: buildLiveEvidenceSnapshot({
+        walletAddress,
+        chain,
+        now,
+        row,
+        gmgnStatsUsed,
+        evidenceLevel,
+        winnerPolicyEvidence,
+      }),
       readOnly: true,
       noDuneFetch: true,
       disclaimer: LIVE_EVALUATION_DISCLAIMER,
@@ -745,6 +870,8 @@ export const computeLiveEvaluation = (
       evidenceLevel,
       confidence: 'none',
       verdict: 'insufficient_evidence',
+      winnerPolicy,
+      winnerPolicyStatus: winnerPolicy.status,
       gmgnProfitabilityLanguage: gmgnProfitabilityLanguage(evidenceLevel, null),
       estimatedOverallScore: null,
       componentScores: {
@@ -766,6 +893,7 @@ export const computeLiveEvaluation = (
       rulesApplied: [],
       rulesUnavailable: [],
       gmgnStatsUsed,
+      copyabilityDiagnostics,
     };
   }
 
@@ -777,6 +905,16 @@ export const computeLiveEvaluation = (
     chain,
     now,
   }).rows;
+  const featureSnapshots = readWalletFeatureSnapshotsBatch(database, {
+    walletAddresses: [walletAddress, ...referenceRows.map((candidate) => candidate.walletAddress)],
+    asOfTimestamp: now.toISOString(),
+    lookbackDays: 30,
+    includePreWindowContext: false,
+    trigger: 'current',
+    chain,
+  });
+  const walletSnapshot = featureSnapshots.get(walletAddress) ?? null;
+  const walletFeatures = walletSnapshot?.features ?? null;
   const hyperactivityPenalty = computeHistoricalHyperactivityPenalty(
     row,
     referenceRows,
@@ -784,15 +922,46 @@ export const computeLiveEvaluation = (
   );
   const fastTradingPenalty = computeFastTradingPenalty(row, promotedRules);
 
+  const canonical = walletSnapshot?.decisionMetrics;
+  if (walletSnapshot && canonical) {
+    gmgnStatsUsed.trades = canonical.completedTrades;
+    gmgnStatsUsed.buyCount = walletSnapshot.features.priorWalletBuyCount;
+    gmgnStatsUsed.sellCount = canonical.sellCount;
+    gmgnStatsUsed.medianReturnPercent = canonical.medianReturnPercent;
+    gmgnStatsUsed.winRatePercent = canonical.winRatePercent;
+    gmgnStatsUsed.medianHoldSeconds = canonical.medianHoldSeconds;
+    gmgnStatsUsed.fastRoundTripPercent = canonical.under60SecondsPercent;
+    gmgnStatsUsed.noCostBasisPercent = canonical.noCostBasisPercent;
+    gmgnStatsUsed.under15SecondsPercent = canonical.under15SecondsPercent;
+    gmgnStatsUsed.bestTokenProfitSharePercent = canonical.bestTokenProfitSharePercent;
+    gmgnStatsUsed.realizedProfitUsd = walletSnapshot.features.priorWalletRealizedProfitUsd;
+  }
+  const medianReturnPercent = canonical?.medianReturnPercent ?? row.medianReturnPercent;
+  const excludingBestTokenMedianReturnPercent =
+    canonical?.excludingBestTokenMedianReturnPercent ??
+    row.profitConcentration.excludingBestToken.medianReturnPercent;
+  const holdSeconds = canonical?.medianHoldSeconds ?? row.riskEvidence.medianHoldSeconds;
+  const copyabilityResult = computeCopyabilityScore({
+    medianHoldSeconds: holdSeconds,
+    fastRoundTripPercent: canonical?.under60SecondsPercent ?? row.riskEvidence.fastRoundTripPercent,
+    under15SecondPercent:
+      canonical?.under15SecondsPercent ?? row.riskEvidence.under15SecondsPercent,
+    pairedTradeCount: row.riskEvidence.pairedTradeCount,
+    under15SecondCount: row.riskEvidence.under15SecondsCount,
+    patternAdjustment: -(fastTradingPenalty + hyperactivityPenalty),
+  });
   const baseScores: Record<LiveEvaluationCategory, number | null> = {
-    historicalProfitability: estimateHistoricalProfitabilityScore(row.medianReturnPercent),
-    consistency: consistencyScore(row),
-    robustness: robustnessScore(row),
-    copyability: estimateGmgnCopyabilityScore(
-      row.riskEvidence.medianHoldSeconds,
-      fastTradingPenalty,
-      hyperactivityPenalty,
-    ),
+    historicalProfitability: estimateHistoricalProfitabilityScore(medianReturnPercent),
+    consistency: canonical
+      ? canonical.periodCount === 0
+        ? null
+        : clamp((canonical.positivePeriodCount / canonical.periodCount) * 100)
+      : null,
+    robustness:
+      excludingBestTokenMedianReturnPercent === null
+        ? null
+        : clamp(50 + excludingBestTokenMedianReturnPercent * 1.25),
+    copyability: copyabilityResult.score,
   };
 
   let rulesApplied: LiveEvaluationRuleApplied[] = [];
@@ -800,7 +969,7 @@ export const computeLiveEvaluation = (
   const componentScores = { ...baseScores };
   if (walletFeatures) {
     const referenceFeatures = referenceRows
-      .map((candidate) => readCurrentWalletFeatures(database, candidate.walletAddress, { chain }))
+      .map((candidate) => featureSnapshots.get(candidate.walletAddress)?.features ?? null)
       .filter((candidate): candidate is CurrentWalletFeatures => candidate !== null);
     const generic = applyPromotedGmgnRules(profile.patterns, walletFeatures, referenceFeatures);
     rulesApplied = generic.rulesApplied;
@@ -909,7 +1078,25 @@ export const computeLiveEvaluation = (
   return {
     walletAddress,
     generatedAt: now.toISOString(),
+    featureEngineVersion: WALLET_FEATURE_ENGINE_VERSION,
     periodDays: 30,
+    evidenceContext: createHistoricalEvidenceContext({
+      chain,
+      asOf: now,
+      periodDays: 30,
+      completeness: { status: evidenceLevel === 'complete' ? 'complete' : 'partial' },
+    }),
+    calculationVersions: CALCULATION_VERSIONS,
+    calculationManifestVersion: CALCULATION_VERSION_MANIFEST.manifestVersion,
+    evidenceSnapshot: buildLiveEvidenceSnapshot({
+      walletAddress,
+      chain,
+      now,
+      row,
+      gmgnStatsUsed,
+      evidenceLevel,
+      winnerPolicyEvidence,
+    }),
     readOnly: true,
     noDuneFetch: true,
     disclaimer: LIVE_EVALUATION_DISCLAIMER,
@@ -917,6 +1104,8 @@ export const computeLiveEvaluation = (
     evidenceLevel,
     confidence,
     verdict,
+    winnerPolicy,
+    winnerPolicyStatus: winnerPolicy.status,
     gmgnProfitabilityLanguage: profitabilityLanguage,
     estimatedOverallScore,
     componentScores,
@@ -926,6 +1115,7 @@ export const computeLiveEvaluation = (
     rulesApplied,
     rulesUnavailable,
     gmgnStatsUsed,
+    copyabilityDiagnostics: copyabilityResult.diagnostics,
   };
 };
 
@@ -966,61 +1156,4 @@ const readExperimentalDecisionPromotedRulesFromPatterns = (
     hyperactivityCorrelations: [...hyperactivityCorrelations.values()],
     fastTradingCorrelations: [...fastTradingCorrelations.values()],
   };
-};
-
-// ---------------------------------------------------------------------------------------------
-// GMGN fetch orchestration (kept out of the pure compute path above)
-// ---------------------------------------------------------------------------------------------
-
-const isFresh = (fetchedAt: string, maxAgeHours: number): boolean => {
-  const timestamp = Date.parse(fetchedAt);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < maxAgeHours * 3_600_000;
-};
-
-export const isLiveGmgnEvidenceFresh = (
-  database: DatabaseSync,
-  walletAddress: string,
-  options: { chain?: string; maxAgeHours?: number } = {},
-): boolean => {
-  const chain = options.chain ?? 'sol';
-  const maxAgeHours = options.maxAgeHours ?? 24;
-  const existing = database
-    .prepare(
-      `SELECT fetched_at AS fetchedAt FROM copytrade_wallet_stats WHERE chain = ? AND wallet_address = ? AND period = '30d'`,
-    )
-    .get(chain, walletAddress) as { fetchedAt: string } | undefined;
-  return Boolean(existing?.fetchedAt && isFresh(existing.fetchedAt, maxAgeHours));
-};
-
-/** Starts the GMGN fetch WITHOUT waiting for it to finish (a cold, high-activity wallet's full
- *  trade-history walk is rate-limited ~5s/request and can take a long time) -- the caller polls
- *  the existing `/api/copytrade/fetch/status` for detailed progress and can stop it via the
- *  existing `/api/copytrade/fetch/stop`, exactly like the roster/winners fetches already do. */
-export const startLiveGmgnFetch = (
-  database: DatabaseSync,
-  walletAddress: string,
-  options: { chain?: string } = {},
-): { runId: number } => {
-  if (hasActiveFetchRun(database)) {
-    throw new Error('A fetch run is already in progress. Try again shortly.');
-  }
-  const runId = createCopyTradeFetchRun(database, { limit: 1, periodDays: 30, scope: 'single' });
-  void runCopyTradeFetch(database, runId, {
-    limit: 1,
-    periodDays: 30,
-    chain: options.chain ?? 'sol',
-    walletAddresses: [walletAddress],
-  }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    try {
-      database
-        .prepare(
-          `UPDATE copytrade_fetch_runs SET status = 'failed', completed_at = ?, error = ? WHERE id = ?`,
-        )
-        .run(new Date().toISOString(), message.slice(0, 2000), runId);
-    } catch {
-      /* the database is already unavailable; nothing further can be recorded */
-    }
-  });
-  return { runId };
 };

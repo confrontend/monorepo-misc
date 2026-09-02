@@ -261,6 +261,44 @@ test('estimate: fresh vs covered wallet classification matches what the fetcher 
   }
 });
 
+test('estimate: explicit wallet addresses scope the projection to the selected wallets', () => {
+  const database = setup();
+  try {
+    const now = new Date('2026-08-15T00:00:00.000Z');
+    const oldTs = Math.floor(now.getTime() / 1000) - 40 * 86_400;
+    storeActivityPage(
+      database,
+      [
+        {
+          wallet: 'COVERED_WALLET',
+          chain: 'sol',
+          tx_hash: 'TX1',
+          event_type: 'sell',
+          token: { address: 'TOKEN_A', symbol: 'AAA' },
+          timestamp: oldTs,
+          token_amount: '1',
+          cost_usd: '1',
+          buy_cost_usd: '1',
+          price_usd: '1',
+        },
+      ],
+      { chain: 'sol', fetchedAt: now.toISOString() },
+    );
+
+    const projection = projectFetchDuration(database, {
+      limit: 1,
+      periodDays: 30,
+      now,
+      walletAddresses: ['FRESH_WALLET', 'COVERED_WALLET'],
+    });
+    assert.equal(projection.walletCount, 2);
+    assert.equal(projection.freshWallets, 1);
+    assert.equal(projection.coveredWallets, 1);
+  } finally {
+    database.close();
+  }
+});
+
 test('estimate: a longer requested period scales the fresh-wallet cost without a cap', () => {
   const database = setup();
   try {

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ExperimentalDecisionWallet } from './experimentalDecision.js';
+import type { WinnerPolicyStatus } from './winnerPolicy.js';
 
 export type EvaluationHistorySource = 'live' | 'decision_lab';
 export type EvaluationHistoryVerdict = 'pass' | 'reject' | 'insufficient_evidence';
@@ -40,11 +41,9 @@ export const shouldRecordEvaluationHistory = (
   entry: Pick<RecordEvaluationHistoryInput, 'score' | 'evidenceLevel'>,
 ): boolean => entry.score !== null && entry.evidenceLevel !== 'missing';
 
-const normalizeVerdict = (
-  verdict: ExperimentalDecisionWallet['candidateStatus'],
-): EvaluationHistoryVerdict => {
-  if (verdict === 'eligible') return 'pass';
-  if (verdict === 'rejected') return 'reject';
+const normalizeVerdict = (verdict: WinnerPolicyStatus): EvaluationHistoryVerdict => {
+  if (verdict === 'WINNER') return 'pass';
+  if (verdict === 'REJECTED') return 'reject';
   return 'insufficient_evidence';
 };
 
@@ -164,7 +163,7 @@ export const decisionLabHistoryEntry = (
   source: 'decision_lab',
   generatedAt,
   score: wallet.scores.overall,
-  verdict: normalizeVerdict(wallet.candidateStatus),
+  verdict: normalizeVerdict(wallet.winnerPolicy.status),
   evidenceLevel: wallet.evidence.level,
   componentScores: decisionLabComponents(wallet),
 });

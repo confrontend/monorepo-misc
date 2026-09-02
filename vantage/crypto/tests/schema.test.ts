@@ -19,9 +19,17 @@ test('schema initialization creates V1 tables and is idempotent', () => {
       .all()
       .map((row) => (row as { name: string }).name);
     assert.deepEqual(tables, [
+      'copytrade_activity_probe_pages',
+      'copytrade_activity_probe_runs',
+      'copytrade_activity_reconstruction_runs',
+      'copytrade_activity_reconstruction_steps',
       'copytrade_copy_simulation_match_index_runs',
       'copytrade_copy_simulation_matches',
       'copytrade_copy_simulation_runs',
+      'copytrade_data_workflow_runs',
+      'copytrade_data_workflow_steps',
+      'copytrade_decision_calibration_runs',
+      'copytrade_decision_calibration_wallets',
       'copytrade_dune_fetch_audits',
       'copytrade_evaluation_history',
       'copytrade_experiment_wallets',
@@ -35,6 +43,7 @@ test('schema initialization creates V1 tables and is idempotent', () => {
       'copytrade_trades',
       'copytrade_wallet_coverage',
       'copytrade_wallet_coverage_events',
+      'copytrade_wallet_feature_snapshots',
       'copytrade_wallet_stats',
       'copytrade_wallet_stats_events',
       'copytrade_wallets',

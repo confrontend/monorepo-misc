@@ -1,25 +1,13 @@
 export const strings = {
   liveEvaluation: {
     title: 'Live Evaluation',
-    subtitle: 'GMGN-only wallet estimate',
-    disclaimer: 'GMGN only · no Dune validation',
+    subtitle: 'Current wallet view with historical winner proof',
+    disclaimer: 'Uses saved GMGN context and persisted Dune evidence · never fetches Dune',
     addressLabel: 'Wallet address',
     addressPlaceholder: 'Solana wallet address',
     evaluateButton: 'Evaluate',
     evaluatingButton: 'Evaluating…',
-    fetchingNotice:
-      'Fetching this wallet’s 30-day GMGN data — a cold wallet with a lot of activity can take a while.',
-    stopButton: 'Stop',
-    stoppingButton: 'Stopping…',
-    stoppedNotice:
-      'Stop requested. Finishing the current page, then scoring from whatever was fetched.',
-    progress: {
-      expectedTrades: 'Expected trades',
-      storedTrades: 'Stored so far',
-      remainingTrades: 'Remaining',
-      requestsMade: 'Requests made',
-      estimatedRemaining: 'Est. remaining',
-    },
+    fetchingNotice: 'Reading saved GMGN and delayed-copy evidence…',
     verdictLabels: {
       pass: 'Pass',
       reject: 'Reject',
@@ -52,7 +40,7 @@ export const strings = {
     positiveReasonsTitle: 'Main positive reasons',
     riskReasonsTitle: 'Main risk/rejection reasons',
     noReasons: 'None.',
-    gmgnStatsTitle: '30-day GMGN stats used',
+    gmgnStatsTitle: '30-day GMGN reference stats',
     rulesAppliedTitle: 'Pattern Discovery rules that affected the result',
     rulesUnavailableTitle: 'Promoted rules not applied',
     rulesUnavailableReasons: {
@@ -72,18 +60,6 @@ export const strings = {
     emptyState: 'Enter a wallet address and click Evaluate.',
   },
   decisionLab: {
-    dataControls: {
-      title: 'GMGN data',
-      importRoster: 'Import roster JSON',
-      fetchStats: 'Fetch GMGN data',
-      working: 'Working…',
-      hint: 'Import or refresh the roster, then fetch its 30-day GMGN history.',
-      fetchStarted: 'GMGN fetch started. Progress will update automatically.',
-      fetchAlreadyRunning: 'A GMGN fetch is already running. Showing its progress.',
-      fetching: 'Fetching GMGN history',
-      walletsProgress: (done: number, total: number) => `${done} / ${total} wallets`,
-      requestsMade: (count: number) => `${count} requests made`,
-    },
     copyingRisk: 'Copying risk',
     copyingRiskUnknown: 'Not enough data',
     copyingRiskLow: 'Looks copyable',
@@ -98,7 +74,16 @@ export const strings = {
       complete: 'Gate failed',
     },
     sourceSummary:
-      'Decision Lab is an exploratory, read-only ranking built from the last saved 30-day GMGN wallet data. Dune is used only in Pattern Research and does not affect this ranking.',
+      'Decision Lab is a read-only historical evaluation. Analytical GMGN scores are separate from the authoritative Winner Policy, which uses persisted canonical delayed-copy evidence.',
+    analyticalSummary: 'Exploratory context only — these scores do not decide Winner Policy.',
+    winnerPolicyIntro: 'Winner requires all three gates:',
+    winnerPolicyGates: [
+      '20+ completed copied-buy outcomes',
+      'Positive delayed-copy median',
+      '$100 portfolio ends above $100',
+    ],
+    winnerPolicyScoreSummary:
+      'Score: 70 delayed-copy points + 30 GMGN risk deductions. Holdouts are context only; GMGN can only lower the score.',
     scoringTitle: 'How scoring works',
     scoringRule:
       'Each group receives a score from 0 to 100. The overall score is their weighted average; it is a comparison score, not a guaranteed profit forecast.',
@@ -110,7 +95,7 @@ export const strings = {
       copyability: 'holding time and validated trading penalties',
     },
     candidateGates:
-      'Final-candidate gates are separate from the weighted score: complete GMGN evidence and a positive GMGN median return.',
+      '20+ completed copied-buy outcomes, a positive delayed-copy median, and a canonical $100 portfolio ending above $100.',
     patternFallbackTitle: 'Pattern-based scoring adjustments are not active',
     patternFallbackSummary:
       'Decision Lab is using neutral 25/25/25/25 weights and no discovered-rule penalties.',
@@ -128,7 +113,20 @@ export const strings = {
     tableLegend: 'Scores run from 0 to 100; higher is better.',
     winnersOnly: 'Winners only',
     walletFilterPlaceholder: 'Filter wallet or name',
+    exportAllWithDetails: 'Export all with details',
     generatedAt: (date: string) => `Report generated ${date}.`,
+  },
+  dataWorkflow: {
+    finish: 'Finish with warnings',
+    finishing: 'Finishing…',
+    cancel: 'Cancel workflow',
+    cancelling: 'Cancelling…',
+    finishHelp:
+      'Closes this incomplete run, keeps saved evidence, and marks unrun steps as incomplete.',
+    cancelHelp: 'Closes this run without deleting any saved evidence.',
+    closeUnsafe: 'Wait for the current workflow step to stop before closing this workflow.',
+    alreadyFinished: 'This workflow is already finished.',
+    closed: 'This workflow was closed; create a new workflow run.',
   },
   common: {
     signalTypeLabels: {
@@ -1254,6 +1252,10 @@ export const strings = {
     },
   },
   patternDiscovery: {
+    historyUnavailable: (periodDays: number) =>
+      `At least one wallet must have completed ${periodDays}d history before Pattern Research can run.`,
+    historySubset: (coveredWallets: number, excludedWallets: number, periodDays: number) =>
+      `Pattern Research will use ${coveredWallets} wallets with verified ${periodDays}d history; ${excludedWallets} incomplete wallets will be excluded.`,
     duneWalletSelection: {
       eyebrow: 'DUNE DIAGNOSTICS',
       title: 'Choose wallets to fetch',
@@ -1261,10 +1263,14 @@ export const strings = {
         'Select the wallets whose delayed-copy evidence should be refreshed. No fetch starts until you confirm.',
       cancel: 'Cancel',
       selected: (selected: number, total: number) => `${selected} of ${total} wallets selected`,
-      trades: 'GMGN trades',
-      selectAll: 'Select all',
+      trades: (periodDays: number) => `GMGN trades (${periodDays}d)`,
+      profitableOnly: (periodDays: number) =>
+        `Select profitable wallets only (GMGN median return > 0% in ${periodDays}d)`,
+      rank: 'Rank',
       wallet: 'Wallet',
-      totalTrades: 'Total trades',
+      totalTrades: (periodDays: number) => `GMGN trades (${periodDays}d)`,
+      profitability: (periodDays: number) => `GMGN profitability (${periodDays}d)`,
+      loading: 'Loading GMGN trade counts…',
       empty: 'No GMGN wallet data is available. Load the GMGN roster first.',
       confirm: 'Fetch selected wallets',
     },
@@ -1278,6 +1284,9 @@ export const strings = {
     strongestSignalText: 'high wallet activity → worse future copy returns.',
     coverageSensitivityTitle: 'Coverage sensitivity',
     coverageSensitivityHint: 'Click a coverage level to inspect its run details.',
+    noEligibleData: 'No usable discovery data was available',
+    noEligibleDataDetail:
+      'Every coverage level was unavailable because no outcome-coverage rows met its requirements. No pattern was tested.',
     promoted: 'promoted',
     coverageDetailEvents: (wallets: string, rows: string, stable: number) =>
       `${wallets} wallets · ${rows} events · ${stable} stable patterns`,

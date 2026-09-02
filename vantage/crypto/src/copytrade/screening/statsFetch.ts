@@ -3,6 +3,7 @@ import { listRosterWallets } from './roster.js';
 import { fetchAndStoreWalletStats, readApiKey } from './fetch.js';
 
 export type GmgnStatsFetchStatus = {
+  workflowRunId: number | null;
   running: boolean;
   status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
   walletDone: number;
@@ -16,6 +17,7 @@ export type GmgnStatsFetchStatus = {
 };
 
 let state: GmgnStatsFetchStatus = {
+  workflowRunId: null,
   running: false,
   status: 'idle',
   walletDone: 0,
@@ -36,8 +38,9 @@ const isFresh = (fetchedAt: string, maxAgeHours: number): boolean => {
   return Number.isFinite(timestamp) && Date.now() - timestamp < maxAgeHours * 3_600_000;
 };
 
-export const stopGmgnStatsFetch = (): GmgnStatsFetchStatus => {
-  if (state.running) stopRequested = true;
+export const stopGmgnStatsFetch = (workflowRunId?: number): GmgnStatsFetchStatus => {
+  if (state.running && (workflowRunId === undefined || state.workflowRunId === workflowRunId))
+    stopRequested = true;
   return readGmgnStatsFetchStatus();
 };
 
@@ -47,6 +50,7 @@ export const startGmgnStatsFetch = (
     limit: number;
     snapshotId?: number;
     chain?: string;
+    workflowRunId?: number;
     periods?: Array<'7d' | '30d'>;
     maxAgeHours?: number;
   },
@@ -62,6 +66,7 @@ export const startGmgnStatsFetch = (
     snapshotId: options.snapshotId,
   });
   state = {
+    workflowRunId: options.workflowRunId ?? null,
     running: true,
     status: 'running',
     walletDone: 0,

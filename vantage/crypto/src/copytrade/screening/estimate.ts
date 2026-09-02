@@ -75,25 +75,40 @@ const confidenceFor = (runsCounted: number): FetchProjection['confidence'] =>
  */
 const classifyWallets = (
   database: DatabaseSync,
-  options: { chain: string; limit: number; periodDays: number; now: Date },
+  options: {
+    chain: string;
+    limit: number;
+    periodDays: number;
+    now: Date;
+    walletAddresses?: string[];
+  },
 ): { walletCount: number; freshWallets: number; coveredWallets: number } => {
   const cutoffSeconds = Math.floor(options.now.getTime() / 1000) - options.periodDays * 86_400;
-  const wallets = listRosterWallets(database, { chain: options.chain, limit: options.limit });
-  if (!wallets.length) {
+  const walletAddresses =
+    options.walletAddresses ??
+    listRosterWallets(database, {
+      chain: options.chain,
+      limit: options.limit,
+    }).map((wallet) => wallet.walletAddress);
+  if (!walletAddresses.length) {
     // No roster captured yet: the fetch will pull one, so every requested slot is fresh ground.
-    return { walletCount: options.limit, freshWallets: options.limit, coveredWallets: 0 };
+    return {
+      walletCount: options.walletAddresses?.length ?? options.limit,
+      freshWallets: options.walletAddresses?.length ?? options.limit,
+      coveredWallets: 0,
+    };
   }
   const readOldest = database.prepare(
     `SELECT MIN(observed_timestamp) AS oldest FROM copytrade_trades WHERE wallet_address = ? AND chain = ?`,
   );
   let covered = 0;
-  for (const wallet of wallets) {
-    const row = readOldest.get(wallet.walletAddress, options.chain) as { oldest: number | null };
+  for (const walletAddress of walletAddresses) {
+    const row = readOldest.get(walletAddress, options.chain) as { oldest: number | null };
     if (row.oldest !== null && row.oldest <= cutoffSeconds) covered += 1;
   }
   return {
-    walletCount: wallets.length,
-    freshWallets: wallets.length - covered,
+    walletCount: walletAddresses.length,
+    freshWallets: walletAddresses.length - covered,
     coveredWallets: covered,
   };
 };
@@ -249,7 +264,13 @@ export const recordFetchRunEstimate = (
  */
 export const projectFetchDuration = (
   database: DatabaseSync,
-  options: { limit: number; periodDays: number; chain?: string; now?: Date },
+  options: {
+    limit: number;
+    periodDays: number;
+    chain?: string;
+    now?: Date;
+    walletAddresses?: string[];
+  },
 ): FetchProjection => {
   const chain = options.chain ?? 'sol';
   const now = options.now ?? new Date();
@@ -259,6 +280,7 @@ export const projectFetchDuration = (
     limit: options.limit,
     periodDays: options.periodDays,
     now,
+    walletAddresses: options.walletAddresses,
   });
 
   const periodScale =

@@ -25,7 +25,10 @@
       "Bash(py -3.13 -m pip install --quiet pandas numpy scipy)",
       "Bash(npm.cmd run *)",
       "Bash(node --experimental-sqlite -e ' *)",
-      "Read(//c/Code/monorepo-misc/vantage/crypto/**)"
+      "Read(//c/Code/monorepo-misc/vantage/crypto/**)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(node --test dist/tests/schema.test.js)"
     ]
   }
 }

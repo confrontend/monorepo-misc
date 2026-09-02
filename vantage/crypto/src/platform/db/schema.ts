@@ -1592,6 +1592,239 @@ const migrations: Migration[] = [
       ON copytrade_evaluation_history(wallet_address, chain, id DESC);
     `),
   },
+  {
+    // Temporary, deliberately isolated evidence for the GMGN activity reconstruction experiment.
+    // This can be removed later by dropping these two tables and deleting this migration's data;
+    // it does not alter production wallet stats, Decision Lab, or Pattern Discovery tables.
+    description: 'Persist temporary GMGN activity reconstruction validation runs',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_activity_reconstruction_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_address TEXT NOT NULL,
+        chain TEXT NOT NULL,
+        period_days INTEGER NOT NULL,
+        cutoff_iso TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        official_fetched_at TEXT,
+        status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+        result_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_activity_reconstruction_runs_wallet
+      ON copytrade_activity_reconstruction_runs(wallet_address, id DESC);
+
+      CREATE TABLE IF NOT EXISTS copytrade_activity_reconstruction_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES copytrade_activity_reconstruction_runs(id) ON DELETE CASCADE,
+        step_number INTEGER NOT NULL,
+        step_name TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        UNIQUE(run_id, step_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_activity_reconstruction_steps_run
+      ON copytrade_activity_reconstruction_steps(run_id, step_number);
+    `),
+  },
+  {
+    // Temporary, deliberately isolated raw payload storage for the GMGN activity probe.
+    // Remove later by dropping pages first, then runs. No production evidence table depends on it.
+    description: 'Persist temporary GMGN activity probe runs and pages',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_activity_probe_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chain TEXT NOT NULL,
+        period_days INTEGER NOT NULL,
+        cutoff_iso TEXT NOT NULL,
+        wallet_addresses_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+        calls_made INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        message TEXT NOT NULL,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_activity_probe_runs_latest
+      ON copytrade_activity_probe_runs(id DESC);
+
+      CREATE TABLE IF NOT EXISTS copytrade_activity_probe_pages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES copytrade_activity_probe_runs(id) ON DELETE CASCADE,
+        wallet_address TEXT NOT NULL,
+        wallet_name TEXT,
+        page_number INTEGER NOT NULL,
+        request_cursor TEXT,
+        next_cursor TEXT,
+        fetched_at TEXT NOT NULL,
+        oldest_iso TEXT,
+        reaches_requested_window INTEGER NOT NULL CHECK (reaches_requested_window IN (0, 1)),
+        activities_json TEXT NOT NULL,
+        UNIQUE(run_id, wallet_address, page_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_activity_probe_pages_run
+      ON copytrade_activity_probe_pages(run_id, wallet_address, page_number);
+    `),
+  },
+  {
+    description: 'Persist versioned wallet feature snapshots and Decision calibration runs',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_wallet_feature_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_address TEXT NOT NULL,
+        chain TEXT NOT NULL,
+        as_of_timestamp TEXT NOT NULL,
+        lookback_days INTEGER CHECK (lookback_days IS NULL OR lookback_days > 0),
+        trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('event', 'calendar', 'current')),
+        feature_engine_version TEXT NOT NULL,
+        source_data_revision INTEGER NOT NULL CHECK (source_data_revision >= 0),
+        coverage_start_timestamp TEXT,
+        coverage_end_timestamp TEXT,
+        quality_json TEXT NOT NULL,
+        features_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_copytrade_wallet_feature_snapshots_identity
+      ON copytrade_wallet_feature_snapshots(
+        wallet_address,
+        chain,
+        as_of_timestamp,
+        COALESCE(lookback_days, -1),
+        trigger_kind,
+        feature_engine_version,
+        source_data_revision
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_wallet_feature_snapshots_wallet
+      ON copytrade_wallet_feature_snapshots(wallet_address, chain, as_of_timestamp DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS copytrade_decision_calibration_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        feature_engine_version TEXT NOT NULL,
+        decision_model_version TEXT NOT NULL,
+        pattern_profile_key TEXT,
+        snapshot_start_timestamp TEXT NOT NULL,
+        snapshot_end_timestamp TEXT NOT NULL,
+        outcome_horizon_days INTEGER NOT NULL CHECK (outcome_horizon_days > 0),
+        methodology_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_decision_calibration_runs_created
+      ON copytrade_decision_calibration_runs(created_at DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS copytrade_decision_calibration_wallets (
+        run_id INTEGER NOT NULL REFERENCES copytrade_decision_calibration_runs(id) ON DELETE CASCADE,
+        snapshot_id INTEGER NOT NULL REFERENCES copytrade_wallet_feature_snapshots(id),
+        wallet_address TEXT NOT NULL,
+        score_inputs_json TEXT NOT NULL,
+        future_outcome_json TEXT,
+        eligibility_json TEXT NOT NULL,
+        PRIMARY KEY (run_id, snapshot_id),
+        UNIQUE (run_id, wallet_address)
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_decision_calibration_wallets_snapshot
+      ON copytrade_decision_calibration_wallets(snapshot_id, run_id);
+    `),
+  },
+  {
+    description:
+      'Persist the centralized Data-tab ingestion workflow (runs, steps, and diagnostics)',
+    up: (database) => {
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_data_workflow_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chain TEXT NOT NULL,
+        target_days INTEGER NOT NULL CHECK (target_days BETWEEN 1 AND 365),
+        trader_limit INTEGER NOT NULL,
+        roster_snapshot_id INTEGER REFERENCES gmgn_wallet_rank_snapshots(id),
+        roster_wallets_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (
+          status IN ('active', 'paused', 'completed', 'completed_with_warnings', 'failed', 'abandoned')
+        ),
+        completeness_threshold_percent INTEGER NOT NULL DEFAULT 90
+          CHECK (completeness_threshold_percent BETWEEN 1 AND 100),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_data_workflow_runs_latest
+      ON copytrade_data_workflow_runs(id DESC);
+
+      CREATE TABLE IF NOT EXISTS copytrade_data_workflow_steps (
+        run_id INTEGER NOT NULL REFERENCES copytrade_data_workflow_runs(id) ON DELETE CASCADE,
+        step_key TEXT NOT NULL CHECK (
+          step_key IN (
+            'roster', 'wallet_metadata', 'activity_history',
+            'coverage_verification', 'dune_outcomes', 'readiness'
+          )
+        ),
+        step_order INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (
+          status IN ('not_started', 'running', 'paused', 'completed', 'completed_with_warnings', 'failed')
+        ),
+        started_at TEXT,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        last_success_at TEXT,
+        underlying_run_id INTEGER,
+        underlying_run_kind TEXT,
+        records_total INTEGER NOT NULL DEFAULT 0,
+        records_new INTEGER NOT NULL DEFAULT 0,
+        wallets_total INTEGER NOT NULL DEFAULT 0,
+        wallets_done INTEGER NOT NULL DEFAULT 0,
+        wallets_failed INTEGER NOT NULL DEFAULT 0,
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        error TEXT,
+        PRIMARY KEY (run_id, step_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_data_workflow_steps_run
+      ON copytrade_data_workflow_steps(run_id, step_order);
+      `);
+
+      const addIfMissing = (table: string, name: string, definition: string): void => {
+        const columns = new Set(
+          database
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((row) => (row as { name: string }).name),
+        );
+        if (!columns.has(name))
+          database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+      };
+      addIfMissing('copytrade_wallet_coverage', 'last_error', 'TEXT');
+      addIfMissing('copytrade_wallet_coverage', 'walk_started_at', 'TEXT');
+      addIfMissing('copytrade_wallet_coverage', 'walk_completed_at', 'TEXT');
+      addIfMissing('copytrade_wallet_coverage', 'retry_requested', 'INTEGER NOT NULL DEFAULT 0');
+      addIfMissing('copytrade_wallet_coverage_events', 'error', 'TEXT');
+      addIfMissing('copytrade_fetch_runs', 'workflow_run_id', 'INTEGER');
+      addIfMissing('copytrade_fetch_runs', 'current_wallet_pages', 'INTEGER');
+      addIfMissing('copytrade_fetch_runs', 'current_wallet_oldest_ts', 'INTEGER');
+    },
+  },
+  {
+    // Mirrors copytrade_fetch_runs.workflow_run_id: without this, productionJobLock cannot tell
+    // a Data workflow's own in-flight Dune batch apart from a genuinely external Dune job,
+    // producing a false "another production job is active" warning while the workflow is
+    // running its own dune_outcomes step.
+    description: 'Link Dune copy-simulation batches to the Data workflow run that submitted them',
+    up: (database) => {
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_copy_simulation_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('workflow_run_id'))
+        database.exec(
+          'ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN workflow_run_id INTEGER',
+        );
+    },
+  },
 ];
 
 export const latestSchemaVersion = migrations.length;

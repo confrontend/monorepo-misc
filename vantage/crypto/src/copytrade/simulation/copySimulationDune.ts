@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readDuneApiKey } from '../../dune/client/credentials.js';
 import { waitForDuneCapacity, withDuneSubmissionLock } from './duneScheduler.js';
 import { archiveJsonWithHash } from '../../platform/archive.js';
+import type { WorkflowRunId } from '../data/workflowIds.js';
 
 /**
  * Fetches "the nearest real Dune trade after a delayed timestamp" for a batch of stored
@@ -243,6 +244,7 @@ export const runCopySimulationDuneBatch = async (
     shouldStop?: () => boolean;
     searchWindowMinutes?: number;
     matchSource?: CopySimulationMatchSource;
+    workflowRunId?: WorkflowRunId;
   } = {},
 ): Promise<{ runId: number; matches: CopySimulationMatch[] }> => {
   if (!targets.length) throw new Error('No trade targets to query.');
@@ -276,8 +278,8 @@ export const runCopySimulationDuneBatch = async (
     });
     const inserted = database
       .prepare(
-        `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, search_window_minutes, match_source)
-       VALUES (?, ?, 'submitted', ?, ?, ?)`,
+        `INSERT INTO copytrade_copy_simulation_runs (trade_refs, query_sql, status, requested_at, search_window_minutes, match_source, workflow_run_id)
+       VALUES (?, ?, 'submitted', ?, ?, ?, ?)`,
       )
       .run(
         JSON.stringify(batch.map((t) => t.tradeId)),
@@ -285,6 +287,7 @@ export const runCopySimulationDuneBatch = async (
         requestedAt,
         searchWindowMinutes,
         matchSource,
+        options.workflowRunId ?? null,
       );
     const runId = Number(inserted.lastInsertRowid);
     const execute = await fetchWithRetry('https://api.dune.com/api/v1/sql/execute', {
@@ -508,6 +511,25 @@ export type CopySimulationReconcileSummary = {
   failed: number;
   stillRunning: number;
   noApiKey: number;
+};
+
+/**
+ * Fails only Dune rows that never received an execution id and have aged past the hand-off grace
+ * period. Rows with an execution id remain eligible for `reconcileStuckCopySimulationRuns`, which
+ * can recover a Dune query after this Node process restarts without submitting it again.
+ */
+export const reconcileStaleCopySimulationRuns = (database: DatabaseSync): number => {
+  const staleCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+  const result = database
+    .prepare(
+      `UPDATE copytrade_copy_simulation_runs
+       SET status = 'failed', completed_at = ?
+       WHERE status IN ('submitted', 'running', 'timed_out')
+         AND execution_id IS NULL
+         AND requested_at < ?`,
+    )
+    .run(new Date().toISOString(), staleCutoff);
+  return Number(result.changes);
 };
 
 /**

@@ -146,6 +146,22 @@ methodologies in a permanent side-by-side table. The history module remains sepa
 `liveEvaluation.ts`, preserving the boundary that keeps GMGN-only scoring from reading Decision
 Lab or Dune state.
 
+### Centralized evidence and calculation contracts
+
+The shared calculation boundary is explicit in `src/copytrade/evidence/` and
+`src/copytrade/calculationVersions.ts`. `createHistoricalEvidenceContext` normalizes the chain,
+point-in-time timestamp, inclusive-start/exclusive-end window, source revision, and completeness
+metadata. `buildWalletEvidenceSnapshot` keeps local activity, official GMGN aggregates, delayed-
+copy outcomes, and their provenance in separate namespaces. New report outputs expose this
+metadata while retaining legacy fields for compatibility.
+
+`src/copytrade/simulation/canonicalCopiedBuyOutcome.ts` is the pure contract for reducing multiple
+exit fragments from one original buy into one copy-fraction-weighted outcome. It reports missing
+cost basis, unmatched legs, open positions, partial matches, and exclusion reasons. The existing
+simulation report attaches its diagnostics without changing its established per-fragment medians
+or scoring semantics. This makes future consumers use one auditable aggregation rule instead of
+reimplementing it.
+
 ## Persistence and contracts
 
 The migration history in `src/platform/db/schema.ts` is authoritative for tables and compatibility.

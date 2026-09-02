@@ -414,6 +414,7 @@ export type GmgnAggregateStats = {
 };
 
 export type GmgnStatsFetchStatus = {
+  workflowRunId: number | null;
   running: boolean;
   status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
   walletDone: number;
@@ -1252,6 +1253,7 @@ export type CopySimulationWalletReport = {
 
 export type CopySimulationReport = {
   computedAt: string;
+  duneTargetsTotal?: number;
   pendingDuneTargets?: number;
   duneNoMatchTargets?: number;
   duneMatchedTargets?: number;
@@ -1447,11 +1449,7 @@ export type DuneCoverageSummary = {
 } | null;
 
 export type CopyTradeSubTab =
-  | 'wallet-stats'
-  | 'pattern-discovery'
-  | 'api-reference'
-  | 'experimental-decision'
-  | 'live-evaluation';
+  'data' | 'pattern-discovery' | 'api-reference' | 'experimental-decision' | 'live-evaluation';
 
 export type DecisionColumnKey =
   | 'rank'

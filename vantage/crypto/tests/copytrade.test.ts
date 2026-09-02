@@ -283,6 +283,23 @@ test('fetch: a cancelled run reports what it kept rather than looking like a fai
   }
 });
 
+test('fetch: a completed no-op explains that activity was already stored', () => {
+  const database = setup();
+  try {
+    database
+      .prepare(
+        `INSERT INTO copytrade_fetch_runs (started_at, completed_at, status, wallet_total, wallet_done, trades_fetched, trades_duplicate, requests_made)
+       VALUES ('2026-08-15T04:00:00.000Z', '2026-08-15T04:01:00.000Z', 'completed', 25, 25, 0, 18272, 54)`,
+      )
+      .run();
+    const state = readFetchRunState(database);
+    assert.match(state.message, /No new trades were saved across 25 wallets/);
+    assert.match(state.message, /already present in the local database/);
+  } finally {
+    database.close();
+  }
+});
+
 test('fetch: a run orphaned by a restart is cleared so the single-run guard cannot latch', () => {
   const database = setup();
   try {

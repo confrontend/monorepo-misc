@@ -63,6 +63,7 @@ import {
   listLeaderboardSnapshotStatuses,
   listRosterWallets,
   readCaptureHealth,
+  readLatestRankSnapshot,
   resolveSingleTrader,
   syncCopyTradeRoster,
 } from '../copytrade/screening/roster.js';
@@ -86,6 +87,7 @@ import {
   startGmgnStatsFetch,
   stopGmgnStatsFetch,
 } from '../copytrade/screening/statsFetch.js';
+import { readGmgnPeriodMetrics, readGmgnTradeCounts } from '../copytrade/screening/tradeCounts.js';
 import { projectFetchDuration } from '../copytrade/screening/estimate.js';
 import {
   computeCopySimulationReport,
@@ -120,14 +122,25 @@ import {
   type PatternDiscoverySensitivity,
 } from '../copytrade/discovery/patternDiscoveryRunner.js';
 import { PatternDiscoveryCoordinator } from '../copytrade/discovery/patternDiscoveryCoordinator.js';
+import { assessPatternDiscoveryHistoryAvailability } from '../copytrade/discovery/patternDiscoveryAvailability.js';
+import { readDuneOutcomeReadiness } from '../copytrade/discovery/duneOutcomeReadiness.js';
 import { downloadRosterIcons, walletIconDirectory } from '../copytrade/icons.js';
 import { saveGmgnRiskResult } from '../copytrade/scrutiny/gmgnRisk.js';
 import {
+  applyExperimentalDecisionWinnerPolicyMode,
   computeExperimentalDecisionReport,
   readExperimentalDecisionCacheVersion,
   type ExperimentalDecisionReport,
 } from '../copytrade/experimentalDecision.js';
 import { computeLiveEvaluation, parseLiveEvaluationRequest } from '../copytrade/liveEvaluation.js';
+import { WINNER_POLICY_VERSION, type WinnerPolicyMode } from '../copytrade/winnerPolicy.js';
+import {
+  readHistoryDepthCoverage,
+  readWalletFeatureCoverageInventory,
+} from '../copytrade/features/walletFeatureCoverage.js';
+import { generateWalletFeatureCalendarSnapshots } from '../copytrade/features/walletFeatureCalendar.js';
+import { listWalletFeatureSnapshots } from '../copytrade/features/walletFeatureSnapshots.js';
+import { WALLET_FEATURE_ENGINE_VERSION } from '../copytrade/features/walletFeatureDefinitions.js';
 import {
   computeEvaluationTrend,
   decisionLabHistoryEntry,
@@ -143,8 +156,25 @@ import { API_CATALOG } from '../apiCatalog.js';
  *  deliberate top-25 cutoff. */
 const SCRUTINY_ROSTER_LIMIT = 500;
 
-import type { DunePollUpdate } from '../copytrade/simulation/copySimulationDune.js';
+import {
+  reconcileStaleCopySimulationRuns,
+  reconcileStuckCopySimulationRuns,
+  type DunePollUpdate,
+} from '../copytrade/simulation/copySimulationDune.js';
 import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
+import {
+  pauseDataWorkflow,
+  readDataWorkflowStatus,
+  resumeDataWorkflow,
+  finishDataWorkflow,
+  cancelDataWorkflow,
+  runDataWorkflowStep,
+  runDataWorkflowDune,
+  retryDataWorkflowWallet,
+  startDataWorkflow,
+} from '../copytrade/data/dataWorkflowOrchestrator.js';
+import { reconcileStaleDataWorkflowRuns } from '../copytrade/data/dataWorkflowRunStore.js';
+import { readDataWorkflowState } from '../copytrade/data/dataWorkflowState.js';
 
 // Background fetches (roster, winners, single/Live Evaluation) run detached from any one HTTP
 // request -- an error inside one must not take down every other in-flight request. Node's
@@ -158,7 +188,24 @@ process.on('unhandledRejection', (reason) => {
 const database = openDatabase();
 // A CopyTrade fetch only runs inside the process that started it, so anything still marked
 // running at startup was orphaned by a restart and would otherwise latch the single-run guard.
+reconcileStaleDataWorkflowRuns(database);
 const interruptedFetches = reconcileStaleFetchRuns(database);
+// Dune executions live outside this process. Reconcile rows with execution IDs first so a server
+// restart recovers completed queries instead of turning them into duplicate submissions. Only
+// rows that never received an execution ID and have exceeded the hand-off grace period are then
+// failed as genuinely orphaned.
+void reconcileStuckCopySimulationRuns(database)
+  .then((summary) => {
+    const orphaned = reconcileStaleCopySimulationRuns(database);
+    if (summary.completed || summary.failed || orphaned)
+      console.log(
+        `[dune] startup reconciliation: ${summary.completed} completed, ${summary.failed} failed, ${summary.stillRunning} still running, ${orphaned} orphaned submissions`,
+      );
+  })
+  .catch((error: unknown) => {
+    console.error('[dune] startup reconciliation failed:', error);
+    reconcileStaleCopySimulationRuns(database);
+  });
 // In development, a Vite/tsx restart is common and should not turn a partially fetched GMGN
 // snapshot into a manual recovery task. Resume only the exact restart-interruption marker; a
 // user-cancelled run, reset snapshot, ordinary provider failure, or completed run remains idle.
@@ -305,10 +352,11 @@ const readLatestPersistedResearch = <T>(keyPrefix: string): T | null => {
   }
 };
 
-// Version bumps invalidate recalculation caches, but must not hide the last completed report
-// from comparison views. A newly saved run will replace it naturally.
-const decisionLabLatestKeyPrefix = (limit: number): string =>
-  `experimental-decision:%:${limit}:latest:`;
+// Only reuse a completed report produced by the current Decision Lab calculation version.
+// Older serialized reports remain in SQLite for audit, but their feature semantics must not be
+// silently reinterpreted by the current UI.
+const decisionLabLatestKeyPrefix = (limit: number, periodDays: 30 | 60 | 90): string =>
+  `${CACHE_VERSIONS.decisionLab}:${limit}:${periodDays}:latest:`;
 
 // Bump the v-suffix whenever CopySimulationReport/CopySimulationWalletReport's shape changes
 // (new/renamed/removed fields). readCachedResearch's fingerprint only tracks DATA changes (row
@@ -904,10 +952,56 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         return;
       }
       try {
-        const run = patternDiscoveryCoordinator.start(
+        const periodDays =
           payload.periodDays === undefined
             ? DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS
-            : Number(payload.periodDays),
+            : Number(payload.periodDays);
+        if (Number.isInteger(periodDays) && periodDays > 0) {
+          const roster = listRosterWallets(database, {
+            chain: 'sol',
+            limit: MAX_PATTERN_DISCOVERY_WALLETS,
+          });
+          const coverage = readHistoryDepthCoverage(database, {
+            walletAddresses: roster.map((wallet) => wallet.walletAddress),
+            chain: 'sol',
+            targetDays: periodDays,
+            depthMilestones: [periodDays],
+          });
+          const coveredWallets = coverage.summary.byMilestone[periodDays] ?? 0;
+          const availability = assessPatternDiscoveryHistoryAvailability({
+            periodDays,
+            totalWallets: roster.length,
+            coveredWallets,
+          });
+          if (!availability.available) {
+            respond(409, {
+              error: availability.reason,
+              coverage: {
+                targetDays: periodDays,
+                coveredWallets,
+                totalWallets: roster.length,
+              },
+            });
+            return;
+          }
+          const duneAvailability = readDuneOutcomeReadiness(database, {
+            walletAddresses: roster.map((wallet) => wallet.walletAddress),
+            periodDays,
+          });
+          if (!duneAvailability.available) {
+            respond(409, {
+              error: duneAvailability.reason,
+              coverage: {
+                targetDays: periodDays,
+                coveredWallets: duneAvailability.coveredWallets,
+                totalWallets: roster.length,
+              },
+            });
+            return;
+          }
+        }
+        const run = patternDiscoveryCoordinator.start(
+          periodDays,
           payload.minN === undefined ? 10 : Number(payload.minN),
         );
         respond(202, { started: true, runId: run.runId, progress: run.progress });
@@ -927,6 +1021,378 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           stopping: true,
           message: 'Stop requested. Completed coverage-level results remain cached.',
         });
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/data-workflow/status') {
+      const runIdParam = Number(requestUrl.searchParams.get('runId') ?? '');
+      respond(
+        200,
+        readDataWorkflowStatus(database, {
+          chain: requestUrl.searchParams.get('chain') ?? 'sol',
+          targetDays: Number(requestUrl.searchParams.get('targetDays') ?? '90'),
+          runId: Number.isInteger(runIdParam) && runIdParam > 0 ? runIdParam : undefined,
+        }),
+      );
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/data-workflow/roster') {
+      const chain = requestUrl.searchParams.get('chain') ?? 'sol';
+      const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '30');
+      const periodDays = [30, 60, 90].includes(periodParam) ? periodParam : 30;
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '100');
+      const limit =
+        Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : 100;
+      const snapshot = readLatestRankSnapshot(database);
+      const roster = listRosterWallets(database, { chain, limit });
+      const metrics = readGmgnPeriodMetrics(database, { chain, limit, periodDays });
+      const coverage = readHistoryDepthCoverage(database, {
+        chain,
+        walletAddresses: roster.map((wallet) => wallet.walletAddress),
+        targetDays: 60,
+        depthMilestones: [60],
+      });
+      const coverageByWallet = new Map(coverage.rows.map((row) => [row.walletAddress, row]));
+      respond(200, {
+        generatedAt: new Date().toISOString(),
+        chain,
+        periodDays,
+        snapshotId: snapshot.snapshotId,
+        capturedAt: snapshot.capturedAt,
+        wallets: roster.map(({ walletAddress, chain: walletChain, name, rankPosition }) => ({
+          walletAddress,
+          chain: walletChain,
+          name,
+          rankPosition,
+          verified60d: coverageByWallet.get(walletAddress)?.milestones[60] === true,
+          deepestCompletedDays: coverageByWallet.get(walletAddress)?.deepestCompletedDays ?? null,
+          ...metrics[walletAddress],
+        })),
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      requestUrl.pathname === '/api/copytrade/data-workflow/status-summary'
+    ) {
+      const targetDaysParam = Number(requestUrl.searchParams.get('targetDays') ?? '30');
+      const targetDays = [30, 60, 90].includes(targetDaysParam) ? targetDaysParam : 30;
+      const state = readDataWorkflowState(database, { chain: 'sol', targetDays });
+      respond(200, {
+        generatedAt: new Date().toISOString(),
+        targetDays,
+        rosterWallets: state.rosterWallets.length,
+        history: Object.fromEntries(
+          Object.entries(state.counts.coverage.milestones).map(([key, value]) => [key, value]),
+        ),
+        duneStatus: state.counts.dune.status,
+        patternStatus: state.counts.pattern.status,
+        decisionStatus: state.counts.decision.status,
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      requestUrl.pathname === '/api/copytrade/data-workflow/coverage'
+    ) {
+      const status = readDataWorkflowStatus(database, {
+        chain: requestUrl.searchParams.get('chain') ?? 'sol',
+        targetDays: Number(requestUrl.searchParams.get('targetDays') ?? '90'),
+      });
+      const state = readDataWorkflowState(database, {
+        chain: status.chain,
+        targetDays: status.targetDays,
+        runId: status.run?.id,
+      });
+      respond(200, {
+        ...state.counts.coverage.inventory,
+        availabilitySemantics: {
+          oldestRowMeaning: 'availability_only',
+          oldestRowProvesContinuousCoverage: false,
+          description:
+            'Oldest stored activity shows provider availability; coverage completion comes from an uncapped cursor walk.',
+        },
+      });
+      return;
+    }
+    if (
+      request.method === 'GET' &&
+      requestUrl.pathname === '/api/copytrade/data-workflow/readiness'
+    ) {
+      const status = readDataWorkflowStatus(database, {
+        chain: requestUrl.searchParams.get('chain') ?? 'sol',
+        targetDays: Number(requestUrl.searchParams.get('targetDays') ?? '90'),
+      });
+      const state = readDataWorkflowState(database, {
+        runId: status.run?.id,
+        chain: status.chain,
+        targetDays: status.targetDays,
+      });
+      const pattern = state.counts.pattern;
+      const decision = state.counts.decision;
+      const checks = [
+        {
+          key: 'history',
+          label: 'Requested history depth',
+          status: state.counts.coverage.ready ? 'pass' : 'fail',
+          required: true,
+          available: state.counts.coverage.ready,
+          value: `${state.counts.coverage.completeWallets}/${state.counts.coverage.requiredWallets}`,
+          detail: state.counts.coverage.ready
+            ? 'Coverage threshold met.'
+            : `Need ${state.counts.coverage.requiredWallets} completed wallets at ${state.counts.coverage.thresholdPercent}%.`,
+        },
+        {
+          key: 'metadata',
+          label: 'Fresh GMGN metadata',
+          status: state.counts.stats.ready ? 'pass' : 'fail',
+          required: true,
+          available: state.counts.stats.ready,
+          value: `${state.counts.stats.freshDurableRows}/${state.counts.stats.requiredRows}`,
+          detail: state.counts.stats.ready
+            ? 'Fresh durable 30-day stats are available.'
+            : 'Fetch current GMGN metadata in the Data workflow.',
+        },
+        {
+          key: 'pattern',
+          label: 'Pattern Research',
+          status: pattern.ready
+            ? 'pass'
+            : pattern.status === 'ready_with_warnings'
+              ? 'warning'
+              : 'fail',
+          required: false,
+          available: pattern.ready,
+          value: pattern.promotedPatternCount,
+          detail: pattern.reason ?? 'Current Pattern Research evidence is available.',
+        },
+        {
+          key: 'decision',
+          label: 'Decision Engine',
+          status: decision.ready ? 'pass' : 'fail',
+          required: true,
+          available: decision.ready,
+          value: decision.weightingMode,
+          detail: decision.reason ?? 'Decision Engine prerequisites are available.',
+        },
+        {
+          key: 'dune',
+          label: 'Dune outcomes',
+          status: state.counts.dune.ready
+            ? 'pass'
+            : state.counts.dune.status === 'ready_with_warnings'
+              ? 'warning'
+              : 'fail',
+          required: false,
+          available: state.counts.dune.ready,
+          value: `${state.counts.dune.matchedTargetCount}/${state.counts.dune.targetCount}`,
+          detail: state.counts.dune.ready
+            ? 'All planned outcome targets have terminal results.'
+            : 'Dune outcomes are incomplete or gated by history coverage.',
+        },
+      ];
+      const blockers = checks
+        .filter((check) => check.required && !check.available)
+        .map((check) => check.detail);
+      const warnings = checks
+        .filter((check) => !check.required && !check.available)
+        .map((check) => check.detail);
+      respond(200, {
+        generatedAt: new Date().toISOString(),
+        chain: status.chain,
+        targetDays: status.targetDays,
+        status:
+          blockers.length === 0
+            ? warnings.length === 0
+              ? 'ready'
+              : 'ready_with_warnings'
+            : 'blocked',
+        completenessThresholdPercent: state.completenessThresholdPercent,
+        output: {
+          totalWallets: state.rosterWallets.length,
+          eligibleWallets: state.counts.coverage.completeWallets,
+          completeWallets: state.counts.coverage.completeWallets,
+          incompleteWallets: Math.max(
+            0,
+            state.rosterWallets.length - state.counts.coverage.completeWallets,
+          ),
+          historicalEvidenceWallets: state.counts.coverage.completeWallets,
+          currentMetadataWallets: state.counts.stats.currentRows,
+          outcomeCoveredWallets:
+            state.counts.dune.matchedTargetCount + state.counts.dune.noMatchTargetCount,
+          analysisWindowStart: new Date(Date.now() - status.targetDays * 86_400_000).toISOString(),
+          analysisWindowEnd: new Date().toISOString(),
+        },
+        checks,
+        blockers,
+        warnings,
+      });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/start') {
+      const payload = (await readJsonBody(request)) as {
+        chain?: unknown;
+        targetDays?: unknown;
+        traderLimit?: unknown;
+        walletAddresses?: unknown;
+      };
+      const targetDays = Number(payload.targetDays);
+      const traderLimit = Number(payload.traderLimit ?? 100);
+      if (
+        ![30, 60, 90].includes(targetDays) ||
+        !Number.isInteger(traderLimit) ||
+        traderLimit <= 0 ||
+        traderLimit > 500
+      ) {
+        respond(400, {
+          error: 'targetDays must be 30, 60, or 90 and traderLimit must be between 1 and 500.',
+        });
+        return;
+      }
+      const walletAddresses =
+        payload.walletAddresses === undefined
+          ? undefined
+          : Array.isArray(payload.walletAddresses)
+            ? [
+                ...new Set(
+                  payload.walletAddresses.filter(
+                    (value): value is string =>
+                      typeof value === 'string' && value.trim().length > 0,
+                  ),
+                ),
+              ]
+            : null;
+      if (walletAddresses === null || walletAddresses?.length === 0) {
+        respond(400, { error: 'Select at least one wallet before starting the Data workflow.' });
+        return;
+      }
+      const status = readDataWorkflowStatus(database, {
+        chain: typeof payload.chain === 'string' ? payload.chain : 'sol',
+        targetDays,
+      });
+      if (!status.actions.start.allowed) {
+        respond(409, {
+          error: status.actions.start.message ?? 'Another production job is active.',
+        });
+        return;
+      }
+      if (readGmgnStatsFetchStatus().running) {
+        respond(409, { error: 'A GMGN metadata fetch is already running.' });
+        return;
+      }
+      try {
+        respond(
+          202,
+          startDataWorkflow(database, {
+            chain: typeof payload.chain === 'string' ? payload.chain : 'sol',
+            targetDays,
+            traderLimit,
+            walletAddresses: walletAddresses ?? undefined,
+          }),
+        );
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/step') {
+      const payload = (await readJsonBody(request)) as { runId?: unknown; stepKey?: unknown };
+      const stepKeys = [
+        'wallet_metadata',
+        'activity_history',
+        'coverage_verification',
+        'dune_outcomes',
+        'readiness',
+      ] as const;
+      if (
+        !Number.isInteger(payload.runId) ||
+        !stepKeys.includes(payload.stepKey as (typeof stepKeys)[number])
+      ) {
+        respond(400, { error: 'runId and a valid stepKey are required.' });
+        return;
+      }
+      try {
+        respond(
+          202,
+          runDataWorkflowStep(database, {
+            runId: Number(payload.runId),
+            stepKey: payload.stepKey as (typeof stepKeys)[number],
+          }),
+        );
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/pause') {
+      const payload = (await readJsonBody(request)) as { runId?: unknown };
+      try {
+        respond(202, pauseDataWorkflow(database, Number(payload.runId)));
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (
+      request.method === 'POST' &&
+      requestUrl.pathname === '/api/copytrade/data-workflow/resume'
+    ) {
+      const payload = (await readJsonBody(request)) as { runId?: unknown };
+      try {
+        respond(202, resumeDataWorkflow(database, Number(payload.runId)));
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (
+      request.method === 'POST' &&
+      (requestUrl.pathname === '/api/copytrade/data-workflow/finish' ||
+        requestUrl.pathname === '/api/copytrade/data-workflow/cancel')
+    ) {
+      const payload = (await readJsonBody(request)) as { runId?: unknown };
+      if (!Number.isInteger(payload.runId)) {
+        respond(400, { error: 'runId is required.' });
+        return;
+      }
+      try {
+        const action = requestUrl.pathname.endsWith('/finish')
+          ? finishDataWorkflow
+          : cancelDataWorkflow;
+        respond(202, action(database, Number(payload.runId)));
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/dune') {
+      const payload = (await readJsonBody(request)) as { runId?: unknown };
+      try {
+        respond(202, runDataWorkflowDune(database, { runId: Number(payload.runId) }));
+      } catch (error) {
+        respond(409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+    if (
+      request.method === 'POST' &&
+      requestUrl.pathname === '/api/copytrade/data-workflow/coverage/retry'
+    ) {
+      const payload = (await readJsonBody(request)) as { runId?: unknown; walletAddress?: unknown };
+      if (typeof payload.walletAddress !== 'string' || !payload.walletAddress.trim()) {
+        respond(400, { error: 'walletAddress is required.' });
+        return;
+      }
+      try {
+        respond(
+          202,
+          retryDataWorkflowWallet(database, {
+            runId: Number(payload.runId),
+            walletAddress: payload.walletAddress.trim(),
+          }),
+        );
       } catch (error) {
         respond(409, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -1124,6 +1590,20 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, stopGmgnStatsFetch());
       return;
     }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/stats/trade-counts') {
+      const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '30');
+      const periodDays = Number.isInteger(periodParam) && periodParam > 0 ? periodParam : 30;
+      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '100');
+      const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 100;
+      const snapshotParam = Number(requestUrl.searchParams.get('snapshotId') ?? '');
+      const snapshotId =
+        Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : undefined;
+      respond(200, {
+        periodDays,
+        counts: readGmgnTradeCounts(database, { periodDays, limit, snapshotId }),
+      });
+      return;
+    }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/stats') {
       const limitParam = Number(requestUrl.searchParams.get('limit') ?? '25');
       const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 25;
@@ -1237,7 +1717,20 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 25;
       const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '');
       const periodDays = Number.isInteger(periodParam) && periodParam > 0 ? periodParam : 30;
-      respond(200, projectFetchDuration(database, { limit, periodDays }));
+      const chain = requestUrl.searchParams.get('chain')?.trim() || 'sol';
+      const walletAddressesParam = requestUrl.searchParams.get('walletAddresses');
+      const walletAddresses =
+        walletAddressesParam === null
+          ? undefined
+          : [
+              ...new Set(
+                walletAddressesParam
+                  .split(',')
+                  .map((address) => address.trim())
+                  .filter(Boolean),
+              ),
+            ];
+      respond(200, projectFetchDuration(database, { chain, limit, periodDays, walletAddresses }));
       return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/capture-health') {
@@ -1714,6 +2207,12 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       request.method === 'GET' &&
       requestUrl.pathname === '/api/copytrade/experimental-decision'
     ) {
+      const periodRaw = Number(requestUrl.searchParams.get('periodDays') ?? '30');
+      if (periodRaw !== 30 && periodRaw !== 60 && periodRaw !== 90) {
+        respond(400, { error: 'periodDays must be one of 30, 60, or 90.' });
+        return;
+      }
+      const periodDays = periodRaw as 30 | 60 | 90;
       const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
       const snapshotRaw = Number(requestUrl.searchParams.get('snapshotId') ?? '');
       const limit = Number.isFinite(limitRaw)
@@ -1721,24 +2220,43 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         : 100;
       const rosterSnapshotId =
         Number.isInteger(snapshotRaw) && snapshotRaw > 0 ? snapshotRaw : undefined;
+      const modeRaw = requestUrl.searchParams.get('winnerPolicyMode') ?? 'authoritative';
+      if (modeRaw !== 'authoritative' && modeRaw !== 'discovered_rules') {
+        respond(400, { error: 'winnerPolicyMode must be authoritative or discovered_rules.' });
+        return;
+      }
+      const winnerPolicyMode = modeRaw as WinnerPolicyMode;
       // This endpoint is intentionally not wired to any fetch runner. It only computes a
       // separately named experiment from saved SQLite evidence and cannot spend provider credits.
-      const weightingVersion = readExperimentalDecisionCacheVersion(database);
+      const weightingVersion = `${readExperimentalDecisionCacheVersion(database, periodDays)}:${WINNER_POLICY_VERSION}`;
       const refresh = requestUrl.searchParams.get('refresh') === '1';
-      const savedReport =
+      const savedReportCandidate =
         !refresh && rosterSnapshotId === undefined
           ? readLatestPersistedResearch<ExperimentalDecisionReport>(
-              decisionLabLatestKeyPrefix(limit),
+              decisionLabLatestKeyPrefix(limit, periodDays),
             )
           : null;
-      const report =
+      const savedReport =
+        savedReportCandidate?.featureEngineVersion === WALLET_FEATURE_ENGINE_VERSION &&
+        savedReportCandidate.winnerPolicyVersion === WINNER_POLICY_VERSION
+          ? savedReportCandidate
+          : null;
+      const baseReport =
         savedReport ??
         readCachedResearch(
-          versionedCacheKey('decisionLab', limit, rosterSnapshotId ?? 'latest', weightingVersion),
+          versionedCacheKey(
+            'decisionLab',
+            periodDays,
+            limit,
+            rosterSnapshotId ?? 'latest',
+            weightingVersion,
+          ),
           () => {
             const computed = computeExperimentalDecisionReport(database, {
               limit,
               rosterSnapshotId,
+              periodDays,
+              winnerPolicyMode: 'authoritative',
             });
             for (const wallet of computed.wallets) {
               recordEvaluationHistory(
@@ -1749,7 +2267,140 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
             return computed;
           },
         );
+      const report = applyExperimentalDecisionWinnerPolicyMode(baseReport, winnerPolicyMode);
       respond(200, report);
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/feature-coverage') {
+      const periodRaw = Number(requestUrl.searchParams.get('periodDays') ?? '30');
+      const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
+      if (!Number.isInteger(periodRaw) || periodRaw < 1 || periodRaw > 365) {
+        respond(400, { error: 'periodDays must be an integer between 1 and 365.' });
+        return;
+      }
+      const limit = Number.isFinite(limitRaw)
+        ? Math.min(500, Math.max(1, Math.floor(limitRaw)))
+        : 100;
+      const roster = listRosterWallets(database, { chain: 'sol', limit });
+      const walletAddresses = roster.map((wallet) => wallet.walletAddress);
+      const inventory = readWalletFeatureCoverageInventory(database, {
+        walletAddresses,
+        chain: 'sol',
+        periodDays: periodRaw,
+      });
+      const snapshotByWallet = new Map<
+        string,
+        { snapshotCount: number; latestFeatureSnapshotAt: string | null }
+      >();
+      if (walletAddresses.length > 0) {
+        const placeholders = walletAddresses.map(() => '?').join(', ');
+        const snapshotRows = database
+          .prepare(
+            `SELECT wallet_address AS walletAddress, COUNT(*) AS snapshotCount,
+                    MAX(as_of_timestamp) AS latestFeatureSnapshotAt
+             FROM copytrade_wallet_feature_snapshots
+             WHERE chain = 'sol' AND wallet_address IN (${placeholders})
+             GROUP BY wallet_address`,
+          )
+          .all(...walletAddresses) as unknown as Array<{
+          walletAddress: string;
+          snapshotCount: number;
+          latestFeatureSnapshotAt: string | null;
+        }>;
+        for (const row of snapshotRows) snapshotByWallet.set(row.walletAddress, row);
+      }
+      const rosterByWallet = new Map(roster.map((wallet) => [wallet.walletAddress, wallet]));
+      const rows = inventory.rows.map((row) => {
+        const wallet = rosterByWallet.get(row.walletAddress);
+        const snapshot = snapshotByWallet.get(row.walletAddress);
+        return {
+          ...row,
+          name: wallet?.name ?? null,
+          rankPosition: wallet?.rankPosition ?? null,
+          snapshotCount: Number(snapshot?.snapshotCount ?? 0),
+          latestFeatureSnapshotAt: snapshot?.latestFeatureSnapshotAt ?? null,
+        };
+      });
+      respond(200, {
+        generatedAt: new Date().toISOString(),
+        ...inventory,
+        rows,
+        summary: {
+          total: rows.length,
+          complete: rows.filter((row) => row.assessment === 'complete_requested_window').length,
+          incomplete: rows.filter((row) => row.assessment === 'incomplete').length,
+          unknown: rows.filter((row) => row.assessment === 'unknown').length,
+        },
+      });
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/feature-snapshots') {
+      const walletAddress = requestUrl.searchParams.get('walletAddress')?.trim() ?? '';
+      const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
+      if (!walletAddress) {
+        respond(400, { error: 'walletAddress is required.' });
+        return;
+      }
+      const limit = Number.isFinite(limitRaw)
+        ? Math.min(1_000, Math.max(1, Math.floor(limitRaw)))
+        : 100;
+      respond(200, {
+        walletAddress,
+        chain: 'sol',
+        snapshots: listWalletFeatureSnapshots(database, walletAddress, { chain: 'sol', limit }),
+      });
+      return;
+    }
+    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/feature-snapshots') {
+      const body = (await readJsonBody(request)) as {
+        walletAddresses?: unknown;
+        asOfTimestamp?: unknown;
+        lookbackDays?: unknown;
+        triggerKind?: unknown;
+        limit?: unknown;
+      };
+      const requestedWallets = Array.isArray(body.walletAddresses)
+        ? body.walletAddresses.filter((value): value is string => typeof value === 'string')
+        : [];
+      const requestedLimit = typeof body.limit === 'number' ? body.limit : 100;
+      const limit = Number.isFinite(requestedLimit)
+        ? Math.min(500, Math.max(1, Math.floor(requestedLimit)))
+        : 100;
+      const walletAddresses =
+        requestedWallets.length > 0
+          ? [...new Set(requestedWallets.map((wallet) => wallet.trim()).filter(Boolean))].slice(
+              0,
+              limit,
+            )
+          : listRosterWallets(database, { chain: 'sol', limit }).map(
+              (wallet) => wallet.walletAddress,
+            );
+      const asOfTimestamp =
+        typeof body.asOfTimestamp === 'string' && body.asOfTimestamp.trim()
+          ? body.asOfTimestamp
+          : new Date().toISOString();
+      const lookbackDays = body.lookbackDays === null ? null : Number(body.lookbackDays ?? 30);
+      if (lookbackDays !== null && (!Number.isInteger(lookbackDays) || lookbackDays <= 0)) {
+        respond(400, { error: 'lookbackDays must be a positive integer or null.' });
+        return;
+      }
+      const triggerKind = body.triggerKind === 'current' ? 'current' : 'calendar';
+      const generated = generateWalletFeatureCalendarSnapshots(database, {
+        walletAddresses,
+        asOfTimestamp,
+        lookbackDays,
+        chain: 'sol',
+        triggerKind,
+      });
+      respond(200, {
+        asOfTimestamp: generated[0]?.snapshot.asOfTimestamp ?? asOfTimestamp,
+        featureEngineVersion:
+          generated[0]?.snapshot.featureEngineVersion ?? WALLET_FEATURE_ENGINE_VERSION,
+        requested: walletAddresses.length,
+        inserted: generated.filter((result) => result.inserted).length,
+        existing: generated.filter((result) => !result.inserted).length,
+        snapshots: generated.map((result) => result.snapshot),
+      });
       return;
     }
     if (

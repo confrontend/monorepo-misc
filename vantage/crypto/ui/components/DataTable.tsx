@@ -14,6 +14,8 @@ type DataTableColumn<Row> = {
   headerProps?: ThHTMLAttributes<HTMLTableCellElement>;
   render: (row: Row, index: number) => ReactNode;
   label?: string;
+  /** Enables the shared client-side sort behavior for this column. */
+  sortValue?: (row: Row, index: number) => string | number | null | undefined;
   cellProps?: (row: Row, index: number) => TdHTMLAttributes<HTMLTableCellElement> | undefined;
   /** Column stays in the `columns` array (so a caller's own visibility-picker state can name
    *  every column) but is skipped when hidden -- both header and body cells, and the empty-state
@@ -95,6 +97,7 @@ export function DataTable<Row>({
   errorMessage = 'Something went wrong.',
 }: DataTableProps<Row>) {
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
+  const [sort, setSort] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   useEffect(() => {
     if (!enableColumnHiding || !columnVisibilityStorageKey) return;
@@ -119,6 +122,37 @@ export function DataTable<Row>({
     () => columns.filter((column) => !column.hidden && !hiddenColumnKeys.includes(column.key)),
     [columns, hiddenColumnKeys],
   );
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+    const column = columns.find((candidate) => candidate.key === sort.key);
+    if (!column?.sortValue) return rows;
+    return rows
+      .map((row, index) => ({ row, value: column.sortValue?.(row, index) }))
+      .sort((left, right) => {
+        const leftValue = left.value;
+        const rightValue = right.value;
+        const comparison =
+          leftValue == null && rightValue == null
+            ? 0
+            : leftValue == null
+              ? 1
+              : rightValue == null
+                ? -1
+                : typeof leftValue === 'number' && typeof rightValue === 'number'
+                  ? leftValue - rightValue
+                  : String(leftValue).localeCompare(String(rightValue));
+        return (sort.direction === 'asc' ? 1 : -1) * comparison;
+      })
+      .map(({ row }) => row);
+  }, [columns, rows, sort]);
+  const toggleSort = (column: DataTableColumn<Row>) => {
+    if (!column.sortValue) return;
+    setSort((current) =>
+      current?.key === column.key
+        ? { key: column.key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+        : { key: column.key, direction: 'asc' },
+    );
+  };
   const hideableColumns = columns.filter((column) => !column.hidden);
   const resetColumns = () => setHiddenColumnKeys([]);
   const toggleColumn = (key: string) => {
@@ -174,8 +208,34 @@ export function DataTable<Row>({
         <thead>
           <tr>
             {visibleColumns.map((column) => (
-              <th key={column.key} {...column.headerProps}>
-                {column.header}
+              <th
+                key={column.key}
+                {...column.headerProps}
+                aria-sort={
+                  sort?.key === column.key
+                    ? sort.direction === 'asc'
+                      ? 'ascending'
+                      : 'descending'
+                    : column.sortValue
+                      ? 'none'
+                      : undefined
+                }
+              >
+                {column.sortValue ? (
+                  <button
+                    type="button"
+                    className="sortable-header"
+                    onClick={() => toggleSort(column)}
+                    title={`Sort by ${column.label ?? csvText(column.header)}`}
+                  >
+                    {column.header}
+                    <span aria-hidden="true">
+                      {sort?.key === column.key ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                    </span>
+                  </button>
+                ) : (
+                  column.header
+                )}
               </th>
             ))}
           </tr>
@@ -195,7 +255,7 @@ export function DataTable<Row>({
             </tr>
           ) : (
             <>
-              {rows.map((row, index) => (
+              {sortedRows.map((row, index) => (
                 <tr key={getRowKey(row, index)} {...rowProps?.(row, index)}>
                   {visibleColumns.map((column) => (
                     <td key={column.key} {...column.cellProps?.(row, index)}>

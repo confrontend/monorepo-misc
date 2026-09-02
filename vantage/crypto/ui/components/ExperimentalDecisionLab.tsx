@@ -2,9 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import { GmgnTag } from './GmgnTag.js';
+import { WalletDataCoveragePanel } from './WalletDataCoveragePanel.js';
+import { DataStatusSummary } from './data/DataStatusSummary.js';
 import { strings } from '../strings.js';
 import type { ApiClient } from '../httpClient.js';
-import type { GmgnStatsFetchStatus } from '../types.js';
 
 type LabWallet = {
   walletAddress: string;
@@ -13,6 +14,50 @@ type LabWallet = {
   tags?: string[];
   evidence: { level: 'complete' | 'partial' | 'insufficient' | 'missing'; detail: string };
   candidateStatus: 'eligible' | 'rejected' | 'insufficient_evidence' | 'missing_evidence';
+  winnerPolicy: {
+    policyVersion: string;
+    mode: 'authoritative' | 'discovered_rules';
+    status: 'WINNER' | 'REJECTED' | 'UNPROVEN';
+    finalScore: number | null;
+    profitabilityScore: {
+      score: number;
+      max: number;
+      medianReturnScore: number;
+      portfolioScore: number;
+      evidenceConfidenceScore: number;
+    } | null;
+    gmgnRiskScore: {
+      score: number;
+      max: number;
+      deductions: {
+        executionSpeed: number;
+        hyperactivity: number;
+        tradeQuality: number;
+        tokenRisk: number;
+        costs: number;
+      };
+    } | null;
+    gates: Array<{ label: string; status: string; detail: string }>;
+    positiveReasons: string[];
+    rejectionReasons: string[];
+    unprovenReasons: string[];
+    warnings: string[];
+    evidence: {
+      periodDays: number | null;
+      completedCopiedBuyOutcomes: number;
+      medianReturnPercent: number | null;
+      startingCapitalUsd: number;
+      endingCapitalUsd: number | null;
+      riskBundle: { fetchedAt: string } | null;
+      holdouts: Array<{
+        index: number;
+        completedCopiedBuyOutcomes: number;
+        medianReturnPercent: number | null;
+        endingCapitalUsd: number | null;
+        profitable: boolean | null;
+      }>;
+    };
+  };
   scores: {
     edge: number | null;
     consistency: number | null;
@@ -24,22 +69,46 @@ type LabWallet = {
     'edge' | 'consistency' | 'robustness' | 'copyability' | 'overall',
     { label: string; detail: string }
   >;
+  copyabilityDiagnostics: {
+    medianHoldSeconds: number | null;
+    holdContribution: number | null;
+    fastRoundTripPercent: number | null;
+    fastRoundTripPenalty: number;
+    under15SecondPercent: number | null;
+    under15SecondPenalty: number;
+    patternAdjustment: number;
+    confidenceAdjustment: number;
+    sampleSize: {
+      pairedTrades: number;
+      holdingObservations: number;
+      fastRoundTripDenominator: number;
+      under15SecondDenominator: number;
+      under15SecondObservations: number | null;
+    };
+    confidence: 'insufficient' | 'low' | 'moderate' | 'high';
+    gate: 'pass' | 'insufficient_sample' | 'missing_hold';
+    finalScore: number | null;
+  };
   facts: {
-    gmgnPeriod?: string | null;
-    gmgnFetchedAt?: string | null;
-    gmgnTrades?: number | null;
-    gmgnBuyCount?: number | null;
-    gmgnSellCount?: number | null;
-    gmgnMedianPercent: number | null;
-    gmgnWinRatePercent?: number | null;
-    gmgnRealizedProfitUsd?: number | null;
+    activityPeriodDays: 30 | 60 | 90;
+    activityTradeCount: number;
+    activityMedianReturnPercent: number | null;
+    activityUnder15SecondsPercent?: number | null;
+    activityBestTokenSharePercent?: number | null;
+    activityFastRoundTripPercent?: number | null;
+    activityNoCostBasisPercent?: number | null;
+    activityMedianHoldSeconds: number | null;
+    officialGmgnPeriod?: string | null;
+    officialGmgnFetchedAt?: string | null;
+    officialGmgnBuyCount?: number | null;
+    officialGmgnSellCount?: number | null;
+    officialGmgnWinRatePercent?: number | null;
+    officialGmgnRealizedProfitUsd?: number | null;
     copyMedianPercent: number | null;
     copyCapitalUsd: number | null;
     duneCoveragePercent: number | null;
     matchedRoundTrips: number;
     roundTripsConsidered: number;
-    medianHoldSeconds: number | null;
-    under15SecondsPercent: number | null;
   };
   scrutiny: {
     pass: number;
@@ -71,6 +140,8 @@ type LabResponse = {
   readOnly: true;
   noProviderFetch: true;
   source: string;
+  winnerPolicyVersion: string;
+  winnerPolicyMode: 'authoritative' | 'discovered_rules';
   methodology: string[];
   weighting?: {
     mode: 'fixed-fallback' | 'validated-patterns';
@@ -82,154 +153,6 @@ type LabResponse = {
   wallets: LabWallet[];
 };
 
-function DecisionLabGmgnControls({ api }: { api: ApiClient }) {
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [fetchStatus, setFetchStatus] = useState<GmgnStatsFetchStatus | null>(null);
-  const importRoster = async (file: File) => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      await api('/api/copytrade/roster/import', {
-        method: 'POST',
-        body: JSON.stringify({ name: file.name, content: await file.text() }),
-      });
-      setMessage('Roster imported. Reload the report to score it.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const fetchStats = async () => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      await api('/api/copytrade/stats/fetch', {
-        method: 'POST',
-        body: JSON.stringify({ limit: 100 }),
-      });
-      // The worker updates its shared status asynchronously. Show progress immediately so a
-      // fast status read returning `idle` cannot make a successfully-started job disappear.
-      setFetchStatus({
-        running: true,
-        status: 'running',
-        walletDone: 0,
-        walletTotal: 100,
-        periods: [],
-        requestsMade: 0,
-        skippedFresh: 0,
-        error: null,
-        startedAt: new Date().toISOString(),
-        completedAt: null,
-      });
-      setMessage(strings.decisionLab.dataControls.fetchStarted);
-    } catch (error) {
-      // A second click returns 409 while the original job is still healthy. Reconnect to it
-      // instead of presenting the conflict as a failed fetch.
-      if (error instanceof Error && error.message.includes('409')) {
-        try {
-          const status = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
-          setFetchStatus(status);
-          setMessage(strings.decisionLab.dataControls.fetchAlreadyRunning);
-          return;
-        } catch {
-          // Preserve the original conflict message if the status endpoint is unavailable.
-        }
-      }
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => {
-    let disposed = false;
-    void api<GmgnStatsFetchStatus>('/api/copytrade/stats/status')
-      .then((status) => {
-        if (!disposed) {
-          setFetchStatus(status);
-          setBusy(status.running);
-        }
-      })
-      .catch(() => {
-        // Status is supplemental; the controls remain usable if it cannot be read.
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [api]);
-  useEffect(() => {
-    if (!fetchStatus?.running) return;
-    let disposed = false;
-    const poll = async () => {
-      try {
-        const next = await api<GmgnStatsFetchStatus>('/api/copytrade/stats/status');
-        if (!disposed) {
-          setFetchStatus(next);
-          if (!next.running) setBusy(false);
-        }
-      } catch (error) {
-        if (!disposed) setMessage(error instanceof Error ? error.message : String(error));
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [api, fetchStatus?.running]);
-  const walletDone = fetchStatus?.walletDone ?? 0;
-  const walletTotal = fetchStatus?.walletTotal ?? 0;
-  const progressPercent = walletTotal > 0 ? Math.min(100, (walletDone / walletTotal) * 100) : 0;
-  return (
-    <div className="experimental-gmgn-controls">
-      <div>
-        <strong>{strings.decisionLab.dataControls.title}</strong>
-        <small>{strings.decisionLab.dataControls.hint}</small>
-      </div>
-      <div className="experimental-gmgn-control-actions">
-        <label className="secondary">
-          {strings.decisionLab.dataControls.importRoster}
-          <input
-            type="file"
-            accept="application/json,.json"
-            hidden
-            disabled={busy}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importRoster(file);
-              event.currentTarget.value = '';
-            }}
-          />
-        </label>
-        <button type="button" className="primary" disabled={busy} onClick={() => void fetchStats()}>
-          {busy
-            ? strings.decisionLab.dataControls.working
-            : strings.decisionLab.dataControls.fetchStats}
-        </button>
-      </div>
-      {message && <small role="status">{message}</small>}
-      {fetchStatus?.running && (
-        <div className="experimental-gmgn-progress" role="status" aria-live="polite">
-          <div className="experimental-gmgn-progress-head">
-            <span>{strings.decisionLab.dataControls.fetching}</span>
-            <strong>
-              {strings.decisionLab.dataControls.walletsProgress(walletDone, walletTotal || 100)}
-            </strong>
-          </div>
-          <progress
-            value={progressPercent}
-            max={100}
-            aria-label={strings.decisionLab.dataControls.fetching}
-          />
-          <small>{strings.decisionLab.dataControls.requestsMade(fetchStatus.requestsMade)}</small>
-        </div>
-      )}
-      {fetchStatus?.error && <small className="error-text">{fetchStatus.error}</small>}
-    </div>
-  );
-}
 type LabSortKey =
   | 'rank'
   | 'wallet'
@@ -337,41 +260,52 @@ const TableTooltip = ({
 const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
   <span className="experimental-tooltip-cell experimental-facts-cell" tabIndex={0}>
     <span>
-      {pct(wallet.facts.gmgnMedianPercent)} · {usd(wallet.facts.gmgnRealizedProfitUsd ?? null)}
-      <small>{wallet.facts.gmgnTrades ?? '—'} GMGN trades</small>
+      {pct(wallet.facts.activityMedianReturnPercent)} ·{' '}
+      {usd(wallet.facts.officialGmgnRealizedProfitUsd ?? null)}
+      <small>
+        {wallet.facts.activityTradeCount} local activity trades ({wallet.facts.activityPeriodDays}d)
+        · official {wallet.facts.officialGmgnPeriod ?? 'GMGN unavailable'} profit
+      </small>
     </span>
     <span className="experimental-table-tooltip experimental-facts-tooltip" role="tooltip">
       <b>Saved facts</b>
       <span>
-        <strong>GMGN median return</strong>
-        <small>Wallet-reported median return for the saved 30-day period.</small>
-        <em>{pct(wallet.facts.gmgnMedianPercent)}</em>
+        <strong>Local activity median return</strong>
+        <small>Reconstructed from copytrade_trades inside the selected activity window.</small>
+        <em>{pct(wallet.facts.activityMedianReturnPercent)}</em>
       </span>
       <span>
-        <strong>Realized profit</strong>
-        <small>Wallet-reported realized profit in the saved 30-day period.</small>
-        <em>{usd(wallet.facts.gmgnRealizedProfitUsd ?? null)}</em>
+        <strong>Official GMGN realized profit</strong>
+        <small>
+          Reference value from the saved {wallet.facts.officialGmgnPeriod ?? 'GMGN'} snapshot.
+        </small>
+        <em>{usd(wallet.facts.officialGmgnRealizedProfitUsd ?? null)}</em>
       </span>
       <span>
-        <strong>Trade activity</strong>
-        <small>Saved GMGN trades and buy/sell counts.</small>
+        <strong>Activity vs official counts</strong>
+        <small>
+          Activity trades are local; buy/sell counts are official GMGN reference values.
+        </small>
         <em>
-          {wallet.facts.gmgnTrades ?? '—'} · {wallet.facts.gmgnBuyCount ?? '—'} /{' '}
-          {wallet.facts.gmgnSellCount ?? '—'}
+          {wallet.facts.activityTradeCount} activity trades ·{' '}
+          {wallet.facts.officialGmgnBuyCount ?? '—'} / {wallet.facts.officialGmgnSellCount ?? '—'}{' '}
+          official GMGN buys/sells ({wallet.facts.officialGmgnPeriod ?? 'unavailable'})
         </em>
       </span>
       <span>
-        <strong>Win rate</strong>
-        <small>Saved GMGN winning-trade percentage.</small>
-        <em>{pct(wallet.facts.gmgnWinRatePercent ?? null)}</em>
+        <strong>Official GMGN win rate</strong>
+        <small>
+          Reference value from the saved {wallet.facts.officialGmgnPeriod ?? 'GMGN'} snapshot.
+        </small>
+        <em>{pct(wallet.facts.officialGmgnWinRatePercent ?? null)}</em>
       </span>
       <span>
-        <strong>Median hold</strong>
-        <small>Typical holding time from saved GMGN activity.</small>
+        <strong>Local activity median hold</strong>
+        <small>Reconstructed from copytrade_trades inside the selected activity window.</small>
         <em>
-          {wallet.facts.medianHoldSeconds === null
+          {wallet.facts.activityMedianHoldSeconds === null
             ? '—'
-            : `${Math.round(wallet.facts.medianHoldSeconds)}s`}
+            : `${Math.round(wallet.facts.activityMedianHoldSeconds)}s`}
         </em>
       </span>
     </span>
@@ -383,13 +317,13 @@ const legacyScoreDetail = (
 ) => {
   if (key === 'edge')
     return {
-      label: 'Delayed-copy edge',
-      detail: `Based on the saved delayed-copy median return (${pct(wallet.facts.copyMedianPercent)}).`,
+      label: 'Historical profitability',
+      detail: `Based on the locally reconstructed ${wallet.facts.activityPeriodDays}-day median return (${pct(wallet.facts.activityMedianReturnPercent)}).`,
     };
   if (key === 'copyability')
     return {
       label: 'Copyability',
-      detail: `Combines saved Dune coverage (${pct(wallet.facts.duneCoveragePercent)}) and median hold time (${wallet.facts.medianHoldSeconds === null ? '—' : `${(wallet.facts.medianHoldSeconds / 3600).toFixed(1)}h`}) against the 15-second delay reference.`,
+      detail: `Uses the canonical local ${wallet.facts.activityPeriodDays}-day execution-feasibility calculation: gradual hold-time contribution, direct fast-activity penalties, sample confidence, and supplementary promoted rules.`,
     };
   if (key === 'consistency')
     return {
@@ -484,12 +418,20 @@ const exportDecisionLab = (response: LabResponse) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `decision-lab-30d-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `decision-lab-${response.periodDays}d-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
 };
 
-export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
+export function ExperimentalDecisionLab({
+  api,
+  periodDays,
+  onPeriodDaysChange,
+}: {
+  api: ApiClient;
+  periodDays: 30 | 60 | 90;
+  onPeriodDaysChange: (periodDays: 30 | 60 | 90) => void;
+}) {
   const [response, setResponse] = useState<LabResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -501,11 +443,14 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   const [riskImportInfoOpen, setRiskImportInfoOpen] = useState(false);
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [walletFilter, setWalletFilter] = useState('');
+  const [winnerPolicyMode, setWinnerPolicyMode] = useState<'authoritative' | 'discovered_rules'>(
+    'authoritative',
+  );
   const load = (refresh = false) => {
     setLoading(true);
     setError(null);
     void api<LabResponse>(
-      `/api/copytrade/experimental-decision?periodDays=30&limit=100${refresh ? '&refresh=1' : ''}`,
+      `/api/copytrade/experimental-decision?periodDays=${periodDays}&limit=100&winnerPolicyMode=${winnerPolicyMode}${refresh ? '&refresh=1' : ''}`,
     )
       .then(setResponse)
       .catch((reason: unknown) =>
@@ -515,7 +460,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   };
   useEffect(() => {
     load();
-  }, [api]);
+  }, [api, periodDays, winnerPolicyMode]);
   const sortedWallets = response
     ? [...response.wallets].sort((left, right) => {
         const leftHasValue = hasSortableValue(left, sort.key);
@@ -530,7 +475,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
     : [];
   const displayedWallets = (
     winnersOnly
-      ? sortedWallets.filter((wallet) => wallet.candidateStatus === 'eligible')
+      ? sortedWallets.filter((wallet) => wallet.winnerPolicy.status === 'WINNER')
       : sortedWallets
   ).filter((wallet) => {
     const query = walletFilter.trim().toLowerCase();
@@ -667,6 +612,31 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
           <h2>Decision Lab</h2>
         </div>
         <div className="experimental-actions">
+          <label className="experimental-period-control">
+            Evidence horizon
+            <select
+              value={periodDays}
+              onChange={(event) => onPeriodDaysChange(Number(event.target.value) as 30 | 60 | 90)}
+            >
+              {[30, 60, 90].map((days) => (
+                <option key={days} value={days}>
+                  {days} days
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="experimental-period-control">
+            Winner policy
+            <select
+              value={winnerPolicyMode}
+              onChange={(event) =>
+                setWinnerPolicyMode(event.target.value as 'authoritative' | 'discovered_rules')
+              }
+            >
+              <option value="authoritative">Authoritative gates</option>
+              <option value="discovered_rules">Discovered Rules (experimental)</option>
+            </select>
+          </label>
           <button
             type="button"
             className="secondary"
@@ -699,8 +669,11 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
           </button>
         </div>
       </div>
-      <DecisionLabGmgnControls api={api} />
-      <p className="muted">{strings.decisionLab.sourceSummary}</p>
+      <DataStatusSummary api={api} targetDays={response?.periodDays ?? 30} />
+      <WalletDataCoveragePanel api={api} />
+      <p className="muted">
+        {strings.decisionLab.sourceSummary.replaceAll('30-day', `${periodDays}-day`)}
+      </p>
       {loading && (
         <p className="copytrade-analysis-status running">
           <span className="loading-spinner" /> Reading saved SQLite evidence…
@@ -716,20 +689,21 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                 ☷
               </span>
               <div>
-                <strong>Weights</strong>
+                <strong>Analytical / research scores</strong>
+                <p className="muted">
+                  {strings.decisionLab.analyticalSummary}
+                </p>
                 <div className="experimental-weight-bars">
                   {response.weighting &&
-                    (Object.entries(response.weighting.weights) as Array<[string, number]>).map(
-                      ([key, value]) => (
-                        <div key={key}>
-                          <span>{key[0].toUpperCase() + key.slice(1)}</span>
-                          <i>
-                            <b style={{ width: `${value * 100}%` }} />
-                          </i>
-                          <em>{(value * 100).toFixed(0)}%</em>
-                        </div>
-                      ),
-                    )}
+                    Object.entries(response.weighting.weights).map(([key, value]) => (
+                      <div key={key}>
+                        <span>{key[0].toUpperCase() + key.slice(1)}</span>
+                        <i>
+                          <b style={{ width: `${value * 100}%` }} />
+                        </i>
+                        <em>{(value * 100).toFixed(0)}%</em>
+                      </div>
+                    ))}
                 </div>
               </div>
             </section>
@@ -738,12 +712,14 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                 ✓
               </span>
               <div>
-                <strong>Final candidate gates</strong>
+                <strong>Winner Policy · {response.winnerPolicyVersion}</strong>
+                <p>{strings.decisionLab.winnerPolicyIntro}</p>
                 <div className="experimental-gate-pills">
-                  <span>Complete evidence</span>
-                  <span>GMGN median &gt; 0</span>
-                  <span>All GMGN scores available</span>
+                  {strings.decisionLab.winnerPolicyGates.map((gate) => (
+                    <span key={gate}>{gate}</span>
+                  ))}
                 </div>
+                <small>{strings.decisionLab.winnerPolicyScoreSummary}</small>
               </div>
             </section>
             <section className="experimental-model-block">
@@ -757,7 +733,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                     ? `Promoted rules active · ${response.weighting.supportingThresholds.length ? `${Math.min(...response.weighting.supportingThresholds)}–${Math.max(...response.weighting.supportingThresholds)}% coverage` : 'validated coverage'} · ${response.weighting.supportingWallets} supporting wallets`
                     : 'Fallback / insufficient pattern support'}
                 </p>
-                <small>Evidence: saved 30-day GMGN data</small>
+                <small>Evidence: saved {response.periodDays}-day GMGN data</small>
               </div>
             </section>
             <button
@@ -817,7 +793,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
               <h4>Active rules</h4>
               <ul className="experimental-rule-list">
                 <li>Scores are capped from 0 to 100; missing inputs are not treated as zero.</li>
-                <li>Edge uses the typical delayed-copy return.</li>
+                <li>Edge uses the typical saved GMGN realized return.</li>
                 <li>Consistency uses positive saved weekly and monthly periods.</li>
                 <li>
                   Robustness uses return after removing the best token; concentration is neutral.
@@ -831,7 +807,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                     ? 'promoted patterns only, repeated across validated coverage levels.'
                     : 'none active; neutral fallback is in use.'}
                 </li>
-                <li>Final gate: complete GMGN evidence and a positive GMGN median return.</li>
+                <li>Winner Policy gates: 20+ copied buys, positive delayed-copy median, and a $100 portfolio ending above $100.</li>
               </ul>
               <h4>Final candidate gates</h4>
               <p>
@@ -880,7 +856,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                   onClick={() => exportDecisionLab(response)}
                   disabled={loading || importing}
                 >
-                  Export table + details
+                  {strings.decisionLab.exportAllWithDetails}
                 </button>
               )}
             </div>
@@ -896,7 +872,6 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
             rowProps={(wallet) => ({
               className: 'experimental-clickable-row',
               onClick: () => setSelectedWallet(wallet),
-              title: 'Open score details',
             })}
             columns={[
               {
@@ -939,11 +914,33 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
               },
               {
                 key: 'candidateStatus',
-                header: 'Candidate status',
+                header: 'Legacy score status',
                 render: (wallet) => (
                   <span className={`experimental-evidence ${wallet.candidateStatus}`}>
                     {candidateStatusLabel(wallet.candidateStatus)}
                   </span>
+                ),
+              },
+              {
+                key: 'winnerPolicy',
+                header: 'Winner Policy',
+                render: (wallet) => (
+                  <TableTooltip
+                    className={`experimental-evidence ${wallet.winnerPolicy.status.toLowerCase()}`}
+                    label={`Winner Policy ${wallet.winnerPolicy.policyVersion}`}
+                    detail={
+                      [
+                        ...wallet.winnerPolicy.rejectionReasons,
+                        ...wallet.winnerPolicy.unprovenReasons,
+                        ...wallet.winnerPolicy.positiveReasons,
+                        ...wallet.winnerPolicy.warnings,
+                      ].join(' ') || 'All fixed policy gates passed.'
+                    }
+                  >
+                    {wallet.winnerPolicy.status}
+                    {wallet.winnerPolicy.finalScore !== null &&
+                      ` · ${wallet.winnerPolicy.finalScore}`}
+                  </TableTooltip>
                 ),
               },
               {
@@ -1098,6 +1095,69 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
               </div>
               <div className="experimental-detail-grid">
                 <section>
+                  <h4>Authoritative Winner Policy</h4>
+                  <p
+                    className={`experimental-evidence ${selectedWallet.winnerPolicy.status.toLowerCase()}`}
+                  >
+                    {selectedWallet.winnerPolicy.status}
+                  </p>
+                  <p className="muted">
+                    Policy {selectedWallet.winnerPolicy.policyVersion}; this status is independent
+                    of the exploratory score and Pattern Discovery rules.
+                  </p>
+                  {selectedWallet.winnerPolicy.finalScore !== null && (
+                    <div className="experimental-policy-score-breakdown">
+                      <strong>Final score: {selectedWallet.winnerPolicy.finalScore} / 100</strong>
+                      {selectedWallet.winnerPolicy.profitabilityScore && (
+                        <p>
+                          Profitability {selectedWallet.winnerPolicy.profitabilityScore.score} /{' '}
+                          {selectedWallet.winnerPolicy.profitabilityScore.max} (median return{' '}
+                          {selectedWallet.winnerPolicy.profitabilityScore.medianReturnScore},
+                          portfolio {selectedWallet.winnerPolicy.profitabilityScore.portfolioScore},
+                          confidence{' '}
+                          {selectedWallet.winnerPolicy.profitabilityScore.evidenceConfidenceScore})
+                        </p>
+                      )}
+                      {selectedWallet.winnerPolicy.gmgnRiskScore && (
+                        <p>
+                          GMGN risk/execution {selectedWallet.winnerPolicy.gmgnRiskScore.score} /{' '}
+                          {selectedWallet.winnerPolicy.gmgnRiskScore.max} (deductions: execution
+                          speed{' '}
+                          {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.executionSpeed},
+                          hyperactivity{' '}
+                          {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.hyperactivity},
+                          trade quality{' '}
+                          {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tradeQuality}, token
+                          risk {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tokenRisk},
+                          costs {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.costs})
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <ul>
+                    {selectedWallet.winnerPolicy.gates.map((item) => (
+                      <li key={item.label}>
+                        <strong>{item.status}</strong> · {item.label}: {item.detail}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="experimental-policy-holdouts">
+                    <strong>Chronological holdouts (context only — no longer a gate)</strong>
+                    {selectedWallet.winnerPolicy.evidence.holdouts.map((holdout) => (
+                      <p key={holdout.index}>
+                        Window {holdout.index}: {holdout.completedCopiedBuyOutcomes} copied buys ·
+                        median {pct(holdout.medianReturnPercent)} · end{' '}
+                        {usd(holdout.endingCapitalUsd)} ·{' '}
+                        {holdout.profitable === null
+                          ? 'UNPROVEN'
+                          : holdout.profitable
+                            ? 'profitable'
+                            : 'not profitable'}
+                      </p>
+                    ))}
+                  </div>
+                </section>
+                <section>
                   <h4>Evidence used</h4>
                   <p className={`experimental-evidence ${selectedWallet.evidence.level}`}>
                     {selectedWallet.evidence.level}
@@ -1105,23 +1165,40 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                   <p className="muted">{selectedWallet.evidence.detail}</p>
                   <dl>
                     <dt>GMGN median</dt>
-                    <dd>{pct(selectedWallet.facts.gmgnMedianPercent)}</dd>
-                    <dt>Delayed-copy median</dt>
-                    <dd>{pct(selectedWallet.facts.copyMedianPercent)}</dd>
-                    <dt>$100 after copy</dt>
-                    <dd>{usd(selectedWallet.facts.copyCapitalUsd)}</dd>
-                    <dt>Dune coverage</dt>
-                    <dd>{pct(selectedWallet.facts.duneCoveragePercent)}</dd>
-                    <dt>Round trips</dt>
-                    <dd>
-                      {selectedWallet.facts.matchedRoundTrips}/
-                      {selectedWallet.facts.roundTripsConsidered}
-                    </dd>
+                    <dd>{pct(selectedWallet.facts.activityMedianReturnPercent)}</dd>
                     <dt>Median hold</dt>
                     <dd>
-                      {selectedWallet.facts.medianHoldSeconds === null
+                      {selectedWallet.facts.activityMedianHoldSeconds === null
                         ? '—'
-                        : `${(selectedWallet.facts.medianHoldSeconds / 3600).toFixed(1)}h`}
+                        : `${(selectedWallet.facts.activityMedianHoldSeconds / 3600).toFixed(1)}h`}
+                    </dd>
+                  </dl>
+                </section>
+                <section>
+                  <h4>Copyability trace</h4>
+                  <p className="muted">
+                    Execution-feasibility index from local {selectedWallet.facts.activityPeriodDays}
+                    -day activity; it is not a probability of success.
+                  </p>
+                  <dl>
+                    <dt>Hold contribution</dt>
+                    <dd>{score(selectedWallet.copyabilityDiagnostics.holdContribution)}</dd>
+                    <dt>Fast round trips</dt>
+                    <dd>
+                      {pct(selectedWallet.copyabilityDiagnostics.fastRoundTripPercent)} · −
+                      {selectedWallet.copyabilityDiagnostics.fastRoundTripPenalty.toFixed(1)}
+                    </dd>
+                    <dt>Under 15 seconds</dt>
+                    <dd>
+                      {pct(selectedWallet.copyabilityDiagnostics.under15SecondPercent)} · −
+                      {selectedWallet.copyabilityDiagnostics.under15SecondPenalty.toFixed(1)}
+                    </dd>
+                    <dt>Pattern adjustment</dt>
+                    <dd>{selectedWallet.copyabilityDiagnostics.patternAdjustment.toFixed(1)}</dd>
+                    <dt>Confidence</dt>
+                    <dd>
+                      {selectedWallet.copyabilityDiagnostics.confidence} ·{' '}
+                      {selectedWallet.copyabilityDiagnostics.sampleSize.pairedTrades} paired trades
                     </dd>
                   </dl>
                 </section>

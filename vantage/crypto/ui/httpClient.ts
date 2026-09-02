@@ -1,6 +1,8 @@
 /** Shared by App.tsx and the extracted route/hook modules. Kept out of App.tsx itself so those
  *  modules never import back into App.tsx for these two utilities -- that reverse import was
  *  the only thing making ui/App.tsx <-> ui/routes/*.tsx a circular dependency. */
+export type ApiClient = <T>(url: string, init?: RequestInit) => Promise<T>;
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const text = await response.text();

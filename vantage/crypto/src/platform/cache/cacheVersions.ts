@@ -3,8 +3,8 @@
  * Bump the relevant entry whenever that cache family's calculation or serialized shape changes.
  */
 export const CACHE_VERSIONS = {
-  patternDiscovery: 'crypto-pattern-discovery-v5-reduced-coverage-grid',
-  decisionLab: 'experimental-decision:decision-lab-scoring-v9-gmgn-only',
+  patternDiscovery: 'crypto-pattern-discovery-v6-period-aware-coverage-grid',
+  decisionLab: 'experimental-decision:decision-lab-scoring-v12-copyability-diagnostics',
   copySimulation: 'copy-simulation-v2',
 } as const;
 

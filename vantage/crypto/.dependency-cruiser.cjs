@@ -40,6 +40,30 @@ module.exports = {
       from: { path: '^src/copytrade/liveEvaluation\\.ts$' },
       to: { path: '^(src/copytrade/liveEvaluationHistory\\.ts$|src/dune)' },
     },
+    {
+      name: 'canonical-wallet-features-do-not-depend-on-dune',
+      comment:
+        'Canonical GMGN wallet features must remain reproducible from saved GMGN evidence. ' +
+        'Dune belongs on the future-outcome and validation side of the architecture.',
+      severity: 'error',
+      from: { path: '^src/copytrade/features' },
+      to: { path: '^(src/dune|src/copytrade/simulation)' },
+    },
+    {
+      name: 'analysis-modules-do-not-trigger-production-fetches',
+      comment:
+        'Pattern Research, Decision Engine, and Live Evaluation must only read data that the ' +
+        'centralized Data workflow already fetched -- they must never import the GMGN activity/stats ' +
+        'fetchers or the Dune copy-simulation trigger themselves, since that would reintroduce the ' +
+        'scattered per-tab fetch controls the Data tab replaced.',
+      severity: 'error',
+      from: {
+        path: '^src/copytrade/(discovery/patternDiscovery\\.ts$|experimentalDecision\\.ts$|liveEvaluation\\.ts$)',
+      },
+      to: {
+        path: '^src/copytrade/(screening/(fetch|statsFetch)\\.ts$|simulation/copySimulationDune\\.ts$)',
+      },
+    },
   ],
   options: {
     doNotFollow: [

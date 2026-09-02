@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { openDatabase } from '../src/platform/db/client.js';
 import { applyMigrations } from '../src/platform/db/schema.js';
 import {
+  readWalletAddressesWithCompleteCoverage,
   readFullyCoveredWallets,
   validateFullyCoveredPeriodDays,
 } from '../src/copytrade/scrutiny/fullyCovered.js';
@@ -51,6 +52,28 @@ const insertTrade = (database: DatabaseSync, wallet: string, id: string): void =
     .run(wallet, id, `${wallet}:${id}`);
 };
 
+const insertCoverageEvent = (
+  database: DatabaseSync,
+  wallet: string,
+  observedAt: string,
+  oldestHeldTs: number,
+): void => {
+  const run = database
+    .prepare(
+      `INSERT INTO copytrade_fetch_runs (started_at, status, requested_period_days)
+       VALUES (?, 'completed', 90)`,
+    )
+    .run(observedAt);
+  database
+    .prepare(
+      `INSERT INTO copytrade_wallet_coverage_events
+       (run_id, wallet_address, chain, requested_period_days, requests_used, truncated,
+        stop_reason, oldest_held_ts, observed_at)
+       VALUES (?, ?, 'sol', 90, 1, 0, 'window_covered', ?, ?)`,
+    )
+    .run(Number(run.lastInsertRowid), wallet, oldestHeldTs, observedAt);
+};
+
 test('fully covered reader applies chain, marker, truncation, and requested-period filters', () => {
   const database = setup();
   try {
@@ -88,4 +111,22 @@ test('fully covered period validation is loud and bounded', () => {
   assert.throws(() => validateFullyCoveredPeriodDays(0), /between 1 and 365/);
   assert.throws(() => validateFullyCoveredPeriodDays(366), /between 1 and 365/);
   assert.throws(() => validateFullyCoveredPeriodDays(30.5), /between 1 and 365/);
+});
+
+test('a deeper completed coverage event remains valid for a shallower discovery period', () => {
+  const database = setup();
+  try {
+    const observedAt = '2026-08-30T00:00:00.000Z';
+    const oldestHeldTs = Math.floor(Date.parse(observedAt) / 1000) - 90 * 86_400;
+    insertCoverageEvent(database, 'DEEPER_WALK', observedAt, oldestHeldTs);
+
+    assert.deepEqual(readWalletAddressesWithCompleteCoverage(database, 'sol', 60), [
+      'DEEPER_WALK',
+    ]);
+    assert.deepEqual(readFullyCoveredWallets(database, 60).rows.map((row) => row.walletAddress), [
+      'DEEPER_WALK',
+    ]);
+  } finally {
+    database.close();
+  }
 });

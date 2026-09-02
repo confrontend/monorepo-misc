@@ -9,8 +9,10 @@ const statusLabel = (status: string): string =>
   status.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 
 const statusTone = (status: string): 'positive' | 'warning' | 'negative' | 'neutral' => {
-  if (status === 'eligible' || status === 'pass' || status === 'profitable') return 'positive';
-  if (status === 'rejected' || status === 'fail') return 'negative';
+  if (status === 'eligible' || status === 'pass' || status === 'profitable' || status === 'WINNER')
+    return 'positive';
+  if (status === 'rejected' || status === 'fail' || status === 'REJECTED') return 'negative';
+  if (status === 'UNPROVEN') return 'warning';
   if (status.includes('insufficient') || status.includes('missing')) return 'warning';
   return 'neutral';
 };

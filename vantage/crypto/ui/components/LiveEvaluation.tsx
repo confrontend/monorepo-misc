@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { strings } from '../strings.js';
 import { DataTable } from './DataTable.js';
 import { FormattedDate } from './FormattedDate.js';
 import { GmgnTag } from './GmgnTag.js';
 import { StatusPill } from './StatusPill.js';
+import { DataStatusSummary } from './data/DataStatusSummary.js';
 
 type LiveEvaluationCategory =
   'historicalProfitability' | 'consistency' | 'robustness' | 'copyability';
@@ -34,11 +35,47 @@ type HistoryEntry = {
   componentScores: Record<string, number | null>;
   trend: HistoryTrend;
 };
-type FetchRunState = {
-  running: boolean;
-  status: string;
-  currentWalletProgressPercent: number | null;
-  error: string | null;
+type WinnerPolicy = {
+  policyVersion: string;
+  status: 'WINNER' | 'REJECTED' | 'UNPROVEN';
+  finalScore: number | null;
+  profitabilityScore: {
+    score: number;
+    max: number;
+    medianReturnScore: number;
+    portfolioScore: number;
+    evidenceConfidenceScore: number;
+  } | null;
+  gmgnRiskScore: {
+    score: number;
+    max: number;
+    deductions: {
+      executionSpeed: number;
+      hyperactivity: number;
+      tradeQuality: number;
+      tokenRisk: number;
+      costs: number;
+    };
+  } | null;
+  gates: Array<{ label: string; status: string; detail: string }>;
+  positiveReasons: string[];
+  rejectionReasons: string[];
+  unprovenReasons: string[];
+  warnings: string[];
+  evidence: {
+    periodDays: number | null;
+    completedCopiedBuyOutcomes: number;
+    medianReturnPercent: number | null;
+    endingCapitalUsd: number | null;
+    riskBundle: { fetchedAt: string } | null;
+    holdouts: Array<{
+      index: number;
+      completedCopiedBuyOutcomes: number;
+      medianReturnPercent: number | null;
+      endingCapitalUsd: number | null;
+      profitable: boolean | null;
+    }>;
+  };
 };
 type Result = {
   walletAddress: string;
@@ -48,6 +85,8 @@ type Result = {
   evidenceLevel: 'complete' | 'partial' | 'insufficient' | 'missing';
   confidence: 'high' | 'medium' | 'low' | 'none';
   verdict: 'pass' | 'reject' | 'insufficient_evidence';
+  winnerPolicy: WinnerPolicy;
+  winnerPolicyStatus: WinnerPolicy['status'];
   gmgnProfitabilityLanguage: string;
   estimatedOverallScore: number | null;
   componentScores: Record<LiveEvaluationCategory, number | null>;
@@ -73,15 +112,20 @@ type Result = {
     realizedProfitUsd: number | null;
     gmgnTags: string[] | null;
   };
+  copyabilityDiagnostics?: {
+    holdContribution: number | null;
+    fastRoundTripPenalty: number;
+    under15SecondPenalty: number;
+    sampleSize: { pairedTrades: number };
+    confidence: 'insufficient' | 'low' | 'moderate' | 'high';
+    gate: 'pass' | 'insufficient_sample' | 'missing_hold';
+  };
   trend?: HistoryTrend;
 };
-type ApiResponse =
-  | { status: 'result'; result: Result }
-  | { status: 'fetching'; runId: number; walletAddress: string };
+type ApiResponse = { status: 'result'; result: Result };
 type HistoryResponse = { entries: HistoryEntry[] };
 
 const STORAGE_KEY = 'vantage-live-evaluation-last-result';
-const POLL_INTERVAL_MS = 1500;
 const copy = strings.liveEvaluation;
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
 const num = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString());
@@ -122,9 +166,6 @@ export function LiveEvaluation({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [fetchStatus, setFetchStatus] = useState<FetchRunState | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     try {
@@ -138,13 +179,6 @@ export function LiveEvaluation({
       /* local storage is optional */
     }
   }, []);
-  useEffect(
-    () => () => {
-      if (pollTimer.current) clearInterval(pollTimer.current);
-    },
-    [],
-  );
-
   const loadHistory = async (address: string) => {
     try {
       const response = await api<HistoryResponse>(
@@ -159,7 +193,6 @@ export function LiveEvaluation({
     if (response.status !== 'result') return;
     setResult(response.result);
     setLoading(false);
-    setFetchStatus(null);
     try {
       window.localStorage.setItem(
         STORAGE_KEY,
@@ -176,41 +209,12 @@ export function LiveEvaluation({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ walletAddress: address }),
     });
-    if (response.status === 'result') {
-      finishEvaluation(address, response);
-      return;
-    }
-    pollTimer.current = setInterval(() => {
-      void (async () => {
-        try {
-          const status = await api<FetchRunState>('/api/copytrade/fetch/status');
-          setFetchStatus(status);
-          if (status.running) return;
-          if (pollTimer.current) clearInterval(pollTimer.current);
-          pollTimer.current = null;
-          finishEvaluation(
-            address,
-            await api<ApiResponse>('/api/live-evaluation', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ walletAddress: address }),
-            }),
-          );
-        } catch (caught) {
-          if (pollTimer.current) clearInterval(pollTimer.current);
-          pollTimer.current = null;
-          setError(caught instanceof Error ? caught.message : String(caught));
-          setLoading(false);
-        }
-      })();
-    }, POLL_INTERVAL_MS);
+    finishEvaluation(address, response);
   };
   const evaluate = async () => {
-    if (pollTimer.current) clearInterval(pollTimer.current);
     const address = walletAddress.trim();
     setLoading(true);
     setError(null);
-    setFetchStatus(null);
     try {
       await requestEvaluation(address);
     } catch (caught) {
@@ -218,17 +222,6 @@ export function LiveEvaluation({
       setLoading(false);
     }
   };
-  const stopFetch = async () => {
-    setStopping(true);
-    try {
-      await api('/api/copytrade/fetch/stop', { method: 'POST' });
-    } catch {
-      /* status poll is authoritative */
-    } finally {
-      setStopping(false);
-    }
-  };
-
   return (
     <section className="menu-section panel live-evaluation-panel">
       <div className="panel-heading">
@@ -237,6 +230,7 @@ export function LiveEvaluation({
           <h2>{copy.subtitle}</h2>
         </div>
       </div>
+      <DataStatusSummary api={api} />
       <p className="live-evaluation-disclaimer">{copy.disclaimer}</p>
       <div className="live-evaluation-form">
         <label>
@@ -258,21 +252,7 @@ export function LiveEvaluation({
           {loading ? copy.evaluatingButton : copy.evaluateButton}
         </button>
       </div>
-      {loading && !fetchStatus && <p className="muted">{copy.fetchingNotice}</p>}
-      {loading && fetchStatus && (
-        <div className="live-evaluation-fetch-progress">
-          <p className="muted">{copy.fetchingNotice}</p>
-          <progress max={100} value={fetchStatus.currentWalletProgressPercent ?? 0} />
-          <button
-            type="button"
-            className="secondary"
-            disabled={stopping}
-            onClick={() => void stopFetch()}
-          >
-            {stopping ? copy.stoppingButton : copy.stopButton}
-          </button>
-        </div>
-      )}
+      {loading && <p className="muted">{copy.fetchingNotice}</p>}
       {error && <p className="live-evaluation-error">{error}</p>}
       {!result && !loading && !error && <p className="muted">{copy.emptyState}</p>}
       {result && (
@@ -286,6 +266,11 @@ export function LiveEvaluation({
             </span>
             <span>
               {copy.profileStatusLabel}: <strong>{result.profileLoadStatus.status}</strong>
+            </span>
+            <span>
+              Winner Policy: <strong>{result.winnerPolicyStatus}</strong>
+              {result.winnerPolicy.finalScore !== null &&
+                ` · ${result.winnerPolicy.finalScore}/100`}
             </span>
           </div>
           <section className="live-evaluation-history" aria-labelledby="live-history-title">
@@ -364,6 +349,56 @@ export function LiveEvaluation({
             <summary>Details</summary>
             <div className="live-evaluation-reasons">
               <div>
+                <h4>Authoritative Winner Policy · {result.winnerPolicy.policyVersion}</h4>
+                <p>
+                  <StatusPill status={result.winnerPolicy.status} />{' '}
+                  {result.winnerPolicy.evidence.completedCopiedBuyOutcomes} completed copied-buy
+                  outcomes · median {pct(result.winnerPolicy.evidence.medianReturnPercent)} · end{' '}
+                  {usd(result.winnerPolicy.evidence.endingCapitalUsd)}
+                </p>
+                {result.winnerPolicy.finalScore !== null && (
+                  <div className="experimental-policy-score-breakdown">
+                    <strong>Final score: {result.winnerPolicy.finalScore} / 100</strong>
+                    {result.winnerPolicy.profitabilityScore && (
+                      <p>
+                        Profitability {result.winnerPolicy.profitabilityScore.score} /{' '}
+                        {result.winnerPolicy.profitabilityScore.max} (median return{' '}
+                        {result.winnerPolicy.profitabilityScore.medianReturnScore}, portfolio{' '}
+                        {result.winnerPolicy.profitabilityScore.portfolioScore}, confidence{' '}
+                        {result.winnerPolicy.profitabilityScore.evidenceConfidenceScore})
+                      </p>
+                    )}
+                    {result.winnerPolicy.gmgnRiskScore && (
+                      <p>
+                        GMGN risk/execution {result.winnerPolicy.gmgnRiskScore.score} /{' '}
+                        {result.winnerPolicy.gmgnRiskScore.max} (deductions: execution speed{' '}
+                        {result.winnerPolicy.gmgnRiskScore.deductions.executionSpeed}, hyperactivity{' '}
+                        {result.winnerPolicy.gmgnRiskScore.deductions.hyperactivity}, trade quality{' '}
+                        {result.winnerPolicy.gmgnRiskScore.deductions.tradeQuality}, token risk{' '}
+                        {result.winnerPolicy.gmgnRiskScore.deductions.tokenRisk}, costs{' '}
+                        {result.winnerPolicy.gmgnRiskScore.deductions.costs})
+                      </p>
+                    )}
+                    {result.winnerPolicy.evidence.riskBundle && (
+                      <small>
+                        Risk context as of{' '}
+                        <FormattedDate value={result.winnerPolicy.evidence.riskBundle.fetchedAt} />
+                      </small>
+                    )}
+                  </div>
+                )}
+                <ul>
+                  {result.winnerPolicy.gates.map((item) => (
+                    <li key={item.label}>
+                      <strong>{item.status}</strong> · {item.label}: {item.detail}
+                    </li>
+                  ))}
+                </ul>
+                {result.winnerPolicy.warnings.length > 0 && (
+                  <p className="muted">{result.winnerPolicy.warnings.join(' ')}</p>
+                )}
+              </div>
+              <div>
                 <h4>GMGN stats used</h4>
                 <dl className="live-evaluation-stats">
                   <dt>Period</dt>
@@ -414,6 +449,18 @@ export function LiveEvaluation({
                   <dd>{score(result.componentScores.robustness)}</dd>
                   <dt>Copyability</dt>
                   <dd>{score(result.componentScores.copyability)}</dd>
+                  {result.copyabilityDiagnostics && (
+                    <>
+                      <dt>Copyability trace</dt>
+                      <dd>
+                        hold {score(result.copyabilityDiagnostics.holdContribution)} − fast{' '}
+                        {result.copyabilityDiagnostics.fastRoundTripPenalty.toFixed(1)} − under-15s{' '}
+                        {result.copyabilityDiagnostics.under15SecondPenalty.toFixed(1)};{' '}
+                        {result.copyabilityDiagnostics.confidence} confidence ({' '}
+                        {result.copyabilityDiagnostics.sampleSize.pairedTrades} paired)
+                      </dd>
+                    </>
+                  )}
                 </dl>
               </div>
               <div>

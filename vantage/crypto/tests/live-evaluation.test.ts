@@ -196,7 +196,10 @@ test('1. a valid, evidenced wallet returns an estimated score', () => {
     const result = computeLiveEvaluation(database, VALID_ADDRESS, { now: NOW });
     assert.notEqual(result.estimatedOverallScore, null);
     assert.equal(result.walletAddress, VALID_ADDRESS);
-    assert.equal(result.disclaimer, 'GMGN-only estimate — no delayed-copy/Dune validation.');
+    assert.equal(
+      result.disclaimer,
+      'Live Evaluation uses persisted GMGN and delayed-copy evidence; it never fetches Dune or uses a fallback verdict.',
+    );
   } finally {
     database.close();
   }

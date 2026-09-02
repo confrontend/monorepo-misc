@@ -27,7 +27,14 @@ export type ThirtyDayDecisionEvidence = {
 };
 
 export type ThirtyDayDecisionDetails = ThirtyDayDecisionEvidence & {
-  historicalConsistency?: 'consistent' | 'inconsistent' | 'insufficient' | null;
+  historicalConsistency?:
+    | 'consistent'
+    | 'inconsistent'
+    | 'declining'
+    | 'recent_only'
+    | 'consistently_negative'
+    | 'insufficient'
+    | null;
   noLosingWeek?: boolean;
   measuredWeeks?: number;
   minimumMeasuredWeeks?: number;
@@ -82,8 +89,15 @@ export const explainThirtyDayDecision = (evidence: ThirtyDayDecisionDetails): st
       );
     if (!evidence.delayedCopyMedianPositive)
       reasons.push('The median copied trade was not positive.');
-    if (evidence.historicalConsistency === 'inconsistent')
+    if (
+      evidence.historicalConsistency === 'inconsistent' ||
+      evidence.historicalConsistency === 'declining'
+    )
       reasons.push('The earlier and recent parts of the 30-day history were not both positive.');
+    if (evidence.historicalConsistency === 'recent_only')
+      reasons.push('Only the recent part of the measured history was positive.');
+    if (evidence.historicalConsistency === 'consistently_negative')
+      reasons.push('Both the earlier and recent measured history were negative.');
     if (evidence.historicalConsistency === 'insufficient')
       reasons.push('Historical consistency could not be established from enough data.');
     if (evidence.noLosingWeek === false) {

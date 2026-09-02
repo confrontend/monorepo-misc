@@ -7,6 +7,7 @@ import { DAILY_TRADE_INSERT_CAP } from '../simulation/constants.js';
 import { estimateRemainingSeconds, recordFetchRunEstimate } from './estimate.js';
 import { listRosterWallets, syncCopyTradeRoster } from './roster.js';
 import { GMGN_REQUEST_SPACING_MS, waitForGmgnRequest } from '../../gmgn/client/rateLimit.js';
+import { GENUINE_COMPLETION_STOP_REASONS } from '../features/walletFeatureCoverage.js';
 
 // Re-export the shared gate for other server-side GMGN collectors. Keeping one exported symbol
 // prevents a collector from accidentally creating a second, unsynchronized queue.
@@ -69,17 +70,13 @@ const PAGE_SIZE = 50;
 const CLI_TIMEOUT_MS = 30_000;
 
 /**
- * Per-wallet request ceiling: 200 requests ≈ 10,000 trades ≈ 40 seconds.
- *
- * Sized from what the statistics actually need, not from what the API can deliver. Median and
- * win rate are a quantile and a proportion; both are well determined by roughly 2,000
- * completed sells, and telling a 47% win rate from 50% needs about that. Beyond ~10,000 rows
- * you pay fifty times the requests to move the third decimal place.
- *
- * The previous ceiling of 2,000 requests allowed ~7 minutes on a single wallet, so one
- * high-volume trader could consume an eleven-hour run on its own. A wallet that hits this cap
- * is recorded as truncated, and the statistics that truncation biases are suppressed rather
- * than shown — see evaluate.ts.
+ * Per-wallet page ceiling for a single fetch call, when the caller supplies one via
+ * `pageBudgetPerWallet` (the Data workflow's deep-history fetch always does; the plain
+ * `/api/copytrade/fetch` route does not, matching its historical unbounded behavior). Nothing
+ * enforces a ceiling when the option is omitted — a 90-day walk on a very high-volume wallet is
+ * otherwise unbounded. A wallet that hits the budget is recorded as truncated with stop reason
+ * `request_cap`, and the statistics that truncation biases are suppressed rather than shown —
+ * see evaluate.ts.
  */
 
 /**
@@ -391,6 +388,39 @@ export const readWalletCoverageRows = (
   return new Map(rows.map((row) => [row.walletAddress, row]));
 };
 
+/** True when this wallet has at least one genuinely-completed (not truncated, not aborted
+ *  mid-walk) prior coverage event whose actually-achieved span reaches `targetDays`. Used only
+ *  by the Data workflow's `skipCompletedWallets` fast path, to skip a wallet's entire walk
+ *  (including its one stats request) on a resume rather than re-confirming what a deeper or
+ *  equal-depth prior run already proved. Deliberately checks the ACHIEVED span from
+ *  oldest/newest held timestamps, not the event's `requested_period_days` label — a wallet whose
+ *  90-day request stopped at `no_more_data` after 45 real days must not be misread as having
+ *  reached 90. */
+const hasCompletedCoverageAtDepth = (
+  database: DatabaseSync,
+  walletAddress: string,
+  chain: string,
+  targetDays: number,
+): boolean => {
+  // Depth is measured from the event's own observed_at back to oldest_held_ts -- NOT the span
+  // between oldest_held_ts and newest_held_ts. A wallet with a single trade from 95 days ago has
+  // a genuinely-confirmed 95-day-deep walk even though oldest and newest are the same row (span
+  // 0); conversely two trades close together near "now" have a tiny span despite telling us
+  // nothing about how far back the walk actually reached.
+  const genuineReasons = [...GENUINE_COMPLETION_STOP_REASONS];
+  const placeholders = genuineReasons.map(() => '?').join(',');
+  const row = database
+    .prepare(
+      `SELECT MAX((strftime('%s', observed_at) - oldest_held_ts) / 86400.0) AS deepestDays
+       FROM copytrade_wallet_coverage_events
+       WHERE wallet_address = ? AND chain = ? AND truncated = 0
+         AND stop_reason IN (${placeholders})
+         AND oldest_held_ts IS NOT NULL`,
+    )
+    .get(walletAddress, chain, ...genuineReasons) as { deepestDays: number | null };
+  return row.deepestDays !== null && row.deepestDays >= targetDays;
+};
+
 /** Shared "how many trades are already stored since this cutoff" count — used for a single
  *  wallet, a wallet list, with or without an explicit chain filter. Previously written inline
  *  three separate times with slightly different predicates (one omitted the chain filter
@@ -546,7 +576,7 @@ export type FetchRunState = {
   /** GMGN network requests started; local SQLite deduplication does not increment this. */
   requestsMade: number;
   rateLimitedUntil: string | null;
-  status: 'idle' | 'running' | 'completed' | 'failed' | 'rate_limited' | 'cancelled';
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'rate_limited' | 'cancelled' | 'paused';
   message: string;
   estimatedRemainingSeconds: number | null;
   expectedTradesTotal: number | null;
@@ -576,6 +606,23 @@ export type FetchRunState = {
    *  run has ever happened. */
   scope: 'roster' | 'winners' | 'single' | null;
   resumeAvailable: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  elapsedSeconds: number | null;
+  targetDays: number | null;
+  truncatedWallets: number;
+  /** A computed presentation state, never a stored column value: a run that finished normally
+   *  but left some wallets failed or truncated along the way. */
+  completedWithWarnings: boolean;
+  pagesFetchedTotal: number;
+  currentWalletDetail: {
+    pagesFetched: number | null;
+    oldestStoredAt: string | null;
+    newestStoredAt: string | null;
+    daysCovered: number | null;
+    targetDays: number | null;
+    reachedTarget: boolean | null;
+  } | null;
 };
 
 /** Watermarks are derived from the stored trades themselves, so they can never drift from
@@ -612,14 +659,15 @@ export const recordCoverage = (
     insertedRows?: number;
     dailyCappedRows?: number;
     pagesFetched?: number;
+    error?: string | null;
   },
 ): void => {
   database
     .prepare(
       `INSERT INTO copytrade_wallet_coverage
        (wallet_address, chain, last_run_id, requests_used, truncated, coverage_complete, requested_period_days, stop_reason, resume_cursor,
-        malformed_rows, duplicate_rows, inserted_rows, daily_capped_rows, pages_fetched, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        malformed_rows, duplicate_rows, inserted_rows, daily_capped_rows, pages_fetched, last_error, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(wallet_address, chain) DO UPDATE SET
        last_run_id = excluded.last_run_id,
        requests_used = excluded.requests_used,
@@ -634,7 +682,8 @@ export const recordCoverage = (
        duplicate_rows = excluded.duplicate_rows,
        inserted_rows = excluded.inserted_rows,
        daily_capped_rows = excluded.daily_capped_rows,
-       pages_fetched = excluded.pages_fetched,
+        pages_fetched = excluded.pages_fetched,
+        last_error = excluded.last_error,
        updated_at = excluded.updated_at`,
     )
     .run(
@@ -652,6 +701,7 @@ export const recordCoverage = (
       input.insertedRows ?? 0,
       input.dailyCappedRows ?? 0,
       input.pagesFetched ?? 0,
+      input.error ?? null,
       new Date().toISOString(),
     );
 
@@ -665,8 +715,8 @@ export const recordCoverage = (
         `INSERT INTO copytrade_wallet_coverage_events
          (run_id, wallet_address, chain, requested_period_days, requests_used, truncated,
          stop_reason, oldest_held_ts, newest_held_ts, malformed_rows, duplicate_rows,
-         inserted_rows, daily_capped_rows, pages_fetched, observed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         inserted_rows, daily_capped_rows, pages_fetched, observed_at, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.runId,
@@ -684,6 +734,7 @@ export const recordCoverage = (
         input.dailyCappedRows ?? 0,
         input.pagesFetched ?? 0,
         new Date().toISOString(),
+        input.error ?? null,
       );
   } catch {
     // Coverage history is audit metadata; the normalized trades remain the primary evidence.
@@ -755,10 +806,20 @@ export const listWalletCoverageHistory = (
  */
 export const requestCopyTradeFetchStop = (
   database: DatabaseSync,
+  workflowRunId?: number,
 ): { stopped: boolean; runId: number | null } => {
-  const row = database
-    .prepare(`SELECT id FROM copytrade_fetch_runs WHERE status = ? ORDER BY id DESC LIMIT 1`)
-    .get(ACTIVE_STATUS) as { id: number } | undefined;
+  const row =
+    workflowRunId === undefined
+      ? (database
+          .prepare(`SELECT id FROM copytrade_fetch_runs WHERE status = ? ORDER BY id DESC LIMIT 1`)
+          .get(ACTIVE_STATUS) as { id: number } | undefined)
+      : (database
+          .prepare(
+            `SELECT id FROM copytrade_fetch_runs
+             WHERE status = ? AND workflow_run_id = ?
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .get(ACTIVE_STATUS, workflowRunId) as { id: number } | undefined);
   if (!row) return { stopped: false, runId: null };
   cancelledRuns.add(row.id);
   return { stopped: true, runId: row.id };
@@ -777,7 +838,10 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
             current_wallet_expected_trades AS currentWalletExpectedTrades,
             current_wallet_initial_trades AS currentWalletInitialTrades,
             current_wallet_started_at AS currentWalletStartedAt,
-            resume_disabled AS resumeDisabled
+            resume_disabled AS resumeDisabled,
+            completed_at AS completedAt,
+            current_wallet_pages AS currentWalletPages,
+            current_wallet_oldest_ts AS currentWalletOldestTs
      FROM copytrade_fetch_runs ORDER BY id DESC LIMIT 1`,
     )
     .get() as
@@ -802,6 +866,9 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
         currentWalletInitialTrades: number;
         currentWalletStartedAt: string | null;
         resumeDisabled: number;
+        completedAt: string | null;
+        currentWalletPages: number | null;
+        currentWalletOldestTs: number | null;
       }
     | undefined;
 
@@ -836,10 +903,18 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
       estimateExceeded: false,
       walletsWithNewData: 0,
       walletsAlreadyCurrent: 0,
+      startedAt: null,
+      completedAt: null,
+      elapsedSeconds: null,
+      targetDays: null,
+      truncatedWallets: 0,
+      completedWithWarnings: false,
+      pagesFetchedTotal: 0,
+      currentWalletDetail: null,
     };
   }
   const status = (
-    ['running', 'completed', 'failed', 'rate_limited', 'cancelled'].includes(row.status)
+    ['running', 'completed', 'failed', 'rate_limited', 'cancelled', 'paused'].includes(row.status)
       ? row.status
       : 'idle'
   ) as FetchRunState['status'];
@@ -851,6 +926,24 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
         )
         .get(row.id) as { count: number }
     ).count,
+  );
+  const truncatedWallets = Number(
+    (
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM copytrade_wallet_coverage_events WHERE run_id = ? AND truncated = 1`,
+        )
+        .get(row.id) as { count: number }
+    ).count,
+  );
+  const pagesFetchedTotal = Number(
+    (
+      database
+        .prepare(
+          `SELECT COALESCE(SUM(pages_fetched), 0) AS total FROM copytrade_wallet_coverage_events WHERE run_id = ?`,
+        )
+        .get(row.id) as { total: number }
+    ).total,
   );
   // Re-running the roster ALWAYS revisits every wallet: there is no way to know a wallet has new
   // trades without asking GMGN for its newest page. For a wallet already covered, that costs ~1-2
@@ -948,14 +1041,18 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
     status === 'running'
       ? `Fetching wallet ${row.walletDone + 1} of ${row.walletTotal}.`
       : status === 'completed'
-        ? `Fetched ${row.tradesFetched} new trades across ${row.walletDone} wallets${failedWallets > 0 ? `; ${failedWallets} wallet${failedWallets === 1 ? '' : 's'} failed and were skipped` : ''}.`
+        ? row.tradesFetched === 0
+          ? `No new trades were saved across ${row.walletDone} wallets; fetched activity was already present in the local database${failedWallets > 0 ? `; ${failedWallets} wallet${failedWallets === 1 ? '' : 's'} failed and were skipped` : ''}.`
+          : `Saved ${row.tradesFetched} new trades across ${row.walletDone} wallets${failedWallets > 0 ? `; ${failedWallets} wallet${failedWallets === 1 ? '' : 's'} failed and were skipped` : ''}.`
         : status === 'rate_limited'
           ? 'GMGN rate limit reached. Waiting for the reset time before any retry.'
-          : status === 'cancelled'
-            ? `Stopped. ${row.tradesFetched} trades from ${row.walletDone} wallets were kept.`
-            : status === 'failed'
-              ? (row.error ?? 'The fetch failed.')
-              : 'No fetch has been run yet.';
+          : status === 'paused'
+            ? `Paused. ${row.tradesFetched} trades from ${row.walletDone} wallets were kept; resume to continue.`
+            : status === 'cancelled'
+              ? `Stopped. ${row.tradesFetched} trades from ${row.walletDone} wallets were kept.`
+              : status === 'failed'
+                ? (row.error ?? 'The fetch failed.')
+                : 'No fetch has been run yet.';
   return {
     running,
     runId: row.id,
@@ -986,6 +1083,45 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
     totalEstimatedRemainingSeconds,
     scope: row.fetchScope === 'winners' || row.fetchScope === 'single' ? row.fetchScope : 'roster',
     resumeAvailable,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    elapsedSeconds: running
+      ? elapsedSeconds
+      : row.completedAt
+        ? Math.max(1, (Date.parse(row.completedAt) - Date.parse(row.startedAt)) / 1000)
+        : elapsedSeconds,
+    targetDays: row.periodDays,
+    truncatedWallets,
+    completedWithWarnings: status === 'completed' && (failedWallets > 0 || truncatedWallets > 0),
+    pagesFetchedTotal,
+    currentWalletDetail: row.currentWalletAddress
+      ? (() => {
+          const newestRow = database
+            .prepare(
+              `SELECT MAX(observed_timestamp) AS newest FROM copytrade_trades WHERE chain = 'sol' AND wallet_address = ?`,
+            )
+            .get(row.currentWalletAddress) as { newest: number | null };
+          const oldestSeconds = row.currentWalletOldestTs;
+          const newestSeconds = newestRow.newest;
+          const daysCovered =
+            oldestSeconds !== null && newestSeconds !== null
+              ? Math.max(0, newestSeconds - oldestSeconds) / 86_400
+              : null;
+          return {
+            pagesFetched: row.currentWalletPages,
+            oldestStoredAt:
+              oldestSeconds !== null ? new Date(oldestSeconds * 1000).toISOString() : null,
+            newestStoredAt:
+              newestSeconds !== null ? new Date(newestSeconds * 1000).toISOString() : null,
+            daysCovered,
+            targetDays: row.periodDays,
+            reachedTarget:
+              daysCovered !== null && row.periodDays !== null
+                ? daysCovered >= row.periodDays
+                : null,
+          };
+        })()
+      : null,
   };
 };
 
@@ -1025,12 +1161,20 @@ export const reconcileStaleFetchRuns = (database: DatabaseSync): number => {
   return Number(result.changes);
 };
 
-export const hasActiveFetchRun = (database: DatabaseSync): boolean =>
-  (
-    database
-      .prepare(`SELECT COUNT(*) AS count FROM copytrade_fetch_runs WHERE status = ?`)
-      .get(ACTIVE_STATUS) as { count: number }
-  ).count > 0;
+export const hasActiveFetchRun = (database: DatabaseSync, workflowRunId?: number): boolean => {
+  const row =
+    workflowRunId === undefined
+      ? (database
+          .prepare(`SELECT COUNT(*) AS count FROM copytrade_fetch_runs WHERE status = ?`)
+          .get(ACTIVE_STATUS) as { count: number })
+      : (database
+          .prepare(
+            `SELECT COUNT(*) AS count FROM copytrade_fetch_runs
+             WHERE status = ? AND workflow_run_id = ?`,
+          )
+          .get(ACTIVE_STATUS, workflowRunId) as { count: number });
+  return row.count > 0;
+};
 
 /**
  * Walks every roster wallet's trade history, newest first, stopping at the period cutoff.
@@ -1040,14 +1184,49 @@ export const hasActiveFetchRun = (database: DatabaseSync): boolean =>
 export const runCopyTradeFetch = async (
   database: DatabaseSync,
   runId: number,
-  options: { limit: number; periodDays: number; chain?: string; walletAddresses?: string[] },
+  options: {
+    limit: number;
+    periodDays: number;
+    chain?: string;
+    walletAddresses?: string[];
+    /** Caps pages walked per wallet in this run. Omitted (the default, matching every existing
+     *  caller's behavior) means unbounded, same as before this option existed. */
+    pageBudgetPerWallet?: number;
+    /** Skip a wallet's ENTIRE processing for this run -- including its one stats request, not
+     *  just its activity walk -- when it already has a genuinely-completed coverage event at or
+     *  beyond `periodDays`. Only ever passed `true` by the Data workflow's resume path; every
+     *  other caller keeps today's always-revisit-every-wallet behavior. */
+    skipCompletedWallets?: boolean;
+    /** Wallets exempted from `skipCompletedWallets`, so a single-wallet retry can force a real
+     *  walk even though the wallet would otherwise be skipped as already complete. */
+    refreshWallets?: string[];
+    /** What the run's terminal `status` column says when the run is cancelled mid-walk. Defaults
+     *  to 'cancelled' (today's only behavior); the Data workflow's pause action passes 'paused'
+     *  so the same underlying stop mechanism reads correctly to the user as a pause, not a
+     *  failure. Purely a run-status word -- the per-wallet StopReason enum is unaffected. */
+    terminalStatusOnCancel?: 'cancelled' | 'paused';
+    /** Test seam: `fetchActivityPage` is otherwise called as a bare module import, which cannot
+     *  be stubbed. Defaults to the real function for every production caller. */
+    fetchPage?: typeof fetchActivityPage;
+    /** Test seam for the per-wallet supporting-stats call, for the same reason as `fetchPage` --
+     *  without it, every test exercising this loop pays the real 5s GMGN rate gate once per
+     *  wallet even though the activity walk itself is fully stubbed. Defaults to the real
+     *  function for every production caller. */
+    fetchStats?: typeof fetchAndStoreWalletStats;
+  },
 ): Promise<void> => {
   const chain = options.chain ?? 'sol';
   const cutoffSeconds = Math.floor(Date.now() / 1000) - options.periodDays * 86_400;
+  const fetchPage = options.fetchPage ?? fetchActivityPage;
+  const fetchStats = options.fetchStats ?? fetchAndStoreWalletStats;
+  const refreshWallets = new Set(options.refreshWallets ?? []);
   const updateProgress = database.prepare(
     `UPDATE copytrade_fetch_runs
      SET wallet_done = ?, trades_fetched = ?, trades_duplicate = ?, trades_daily_capped = ?, requests_made = ?
      WHERE id = ?`,
+  );
+  const updateCurrentWalletProgress = database.prepare(
+    `UPDATE copytrade_fetch_runs SET current_wallet_pages = ?, current_wallet_oldest_ts = ? WHERE id = ?`,
   );
 
   let walletDone = 0;
@@ -1136,7 +1315,8 @@ export const runCopyTradeFetch = async (
         .prepare(
           `UPDATE copytrade_fetch_runs
          SET current_wallet_address = ?, current_wallet_expected_trades = ?,
-             current_wallet_initial_trades = ?, current_wallet_started_at = ?
+             current_wallet_initial_trades = ?, current_wallet_started_at = ?,
+             current_wallet_pages = 0, current_wallet_oldest_ts = NULL
          WHERE id = ?`,
         )
         .run(
@@ -1146,6 +1326,23 @@ export const runCopyTradeFetch = async (
           new Date().toISOString(),
           runId,
         );
+
+      if (
+        options.skipCompletedWallets &&
+        !refreshWallets.has(wallet.walletAddress) &&
+        hasCompletedCoverageAtDepth(database, wallet.walletAddress, chain, options.periodDays)
+      ) {
+        walletDone += 1;
+        updateProgress.run(
+          walletDone,
+          tradesFetched,
+          tradesDuplicate,
+          tradesDailyCapped,
+          requestsMade,
+          runId,
+        );
+        continue;
+      }
 
       // What we already hold for this wallet. Paging cannot skip — reaching older data means
       // walking every page in between — so the watermark is not used to avoid requests. Its
@@ -1179,7 +1376,7 @@ export const runCopyTradeFetch = async (
       // trade history remains useful on its own.
       try {
         requestsMade += 1;
-        await fetchAndStoreWalletStats(database, {
+        await fetchStats(database, {
           wallet: wallet.walletAddress,
           chain,
           period: '30d',
@@ -1233,6 +1430,8 @@ export const runCopyTradeFetch = async (
       let walletMalformed = 0;
       let walletDailyCapped = 0;
       let walletPages = 0;
+      let walletOldestTs: number | null = null;
+      let walletError: string | null = null;
       // Whether this wallet's walk has already jumped to priorResumeCursor this run — a
       // one-shot attempt, so a stale cursor can only ever cost one wasted request, not a loop.
       const fetchAndStore = async (
@@ -1248,7 +1447,7 @@ export const runCopyTradeFetch = async (
           requestsMade,
           runId,
         );
-        const page = await fetchActivityPage({
+        const page = await fetchPage({
           wallet: wallet.walletAddress,
           chain,
           cursor: cursorToUse,
@@ -1275,6 +1474,17 @@ export const runCopyTradeFetch = async (
           requestsMade,
           runId,
         );
+        const oldestOnStoredPage = page.activities.reduce((min: number, item) => {
+          const ts = typeof item.timestamp === 'number' ? item.timestamp : Number.POSITIVE_INFINITY;
+          return ts < min ? ts : min;
+        }, Number.POSITIVE_INFINITY);
+        if (Number.isFinite(oldestOnStoredPage)) {
+          walletOldestTs =
+            walletOldestTs === null
+              ? oldestOnStoredPage
+              : Math.min(walletOldestTs, oldestOnStoredPage);
+        }
+        updateCurrentWalletProgress.run(walletPages, walletOldestTs, runId);
         return { page, stored };
       };
 
@@ -1321,11 +1531,13 @@ export const runCopyTradeFetch = async (
                 insertedRows: walletInserted,
                 dailyCappedRows: walletDailyCapped,
                 pagesFetched: walletPages,
+                error: message,
               });
               throw error;
             }
             // Keep the other wallets moving, but persist this wallet as failed coverage.
             stopReason = 'failed';
+            walletError = message;
             break;
           }
 
@@ -1354,11 +1566,23 @@ export const runCopyTradeFetch = async (
           }
 
           if (seenCursors.has(result.next)) {
-            stopReason = 'failed';
+            // The cursor is known bad, not merely unlucky -- do not save it for resume.
+            stopReason = 'cursor_stalled';
             truncated = true;
             break;
           }
           seenCursors.add(result.next);
+          // Advanced here, before the budget/stall checks below, so that if either one stops the
+          // walk, `cursor` already points at the NEXT unfetched page (matching how the
+          // cancellation check at the top of this loop always resumes correctly) rather than the
+          // page that was just fetched and stored.
+          cursor = result.next;
+
+          if (options.pageBudgetPerWallet && walletPages >= options.pageBudgetPerWallet) {
+            stopReason = 'request_cap';
+            truncated = true;
+            break;
+          }
 
           // A barren page only signals a stalled cursor when it lands *outside* known coverage.
           // Inside it, duplicates are exactly what a backfill is supposed to produce — and a page
@@ -1373,20 +1597,27 @@ export const runCopyTradeFetch = async (
           else {
             barrenPages = stored.inserted + stored.dailyCapped === 0 ? barrenPages + 1 : 0;
             if (barrenPages >= 3) {
-              stopReason = 'failed';
+              // Three consecutive barren pages outside known coverage means the cursor is known
+              // bad, the same as the repeated-cursor case above -- not resumable.
+              stopReason = 'cursor_stalled';
               truncated = true;
               break;
             }
           }
-
-          cursor = result.next;
         }
       }
 
-      // Save a resume point only when there is real unfinished ground to resume — a truncated
-      // wallet, or one the user stopped mid-walk. Every other stop reason means either the
-      // window is fully covered or the cursor is known bad, so nothing should be resumed from.
-      const resumeCursorToSave = stopReason === 'cancelled' ? cursor : null;
+      // Save a resume point whenever there is real unfinished ground and the cursor itself is
+      // still trustworthy: the user stopped mid-walk ('cancelled', including a Data-workflow
+      // pause), a page/rate budget cut the walk short ('request_cap'), or a genuine request
+      // error aborted it ('failed' -- previously not resumed from at all, which meant any
+      // transient CLI/network failure restarted that wallet's walk from scratch next time).
+      // 'cursor_stalled' is deliberately excluded: those two guard breaks (repeated cursor,
+      // three barren pages) mean the cursor itself is known bad, not just unlucky timing.
+      const resumeCursorToSave =
+        stopReason === 'cancelled' || stopReason === 'request_cap' || stopReason === 'failed'
+          ? cursor
+          : null;
       recordCoverage(database, {
         walletAddress: wallet.walletAddress,
         chain,
@@ -1406,6 +1637,7 @@ export const runCopyTradeFetch = async (
         insertedRows: walletInserted,
         dailyCappedRows: walletDailyCapped,
         pagesFetched: walletPages,
+        error: walletError,
       });
       if (stopReason === 'cancelled') break;
       walletDone += 1;
@@ -1420,9 +1652,10 @@ export const runCopyTradeFetch = async (
     }
 
     const cancelled = cancelledRuns.has(runId);
+    const cancelledStatusWord = options.terminalStatusOnCancel ?? 'cancelled';
     database
       .prepare(`UPDATE copytrade_fetch_runs SET status = ?, completed_at = ? WHERE id = ?`)
-      .run(cancelled ? 'cancelled' : 'completed', new Date().toISOString(), runId);
+      .run(cancelled ? cancelledStatusWord : 'completed', new Date().toISOString(), runId);
     // Only a genuinely completed run (not cancelled, not failed/rate-limited — those exit
     // through the catch block below and never reach here) feeds the duration estimate, so a
     // partial or rate-limit-truncated run can never drag the measured rate off course.
@@ -1470,6 +1703,9 @@ export const createCopyTradeFetchRun = (
      *  this from walletAddresses/wallet_total is unsafe. Defaults to 'roster' for the ordinary
      *  top-N discovery fetch; a caller passing walletAddresses should always pass this too. */
     scope?: 'roster' | 'winners' | 'single';
+    /** Links this run to a copytrade_data_workflow_runs/steps row, when started from the
+     *  centralized Data workflow rather than directly. Null for every other caller. */
+    workflowRunId?: number;
   },
 ): number => {
   const startedAt = new Date().toISOString();
@@ -1478,10 +1714,10 @@ export const createCopyTradeFetchRun = (
     .prepare(
       `INSERT INTO copytrade_fetch_runs
        (started_at, status, wallet_total, wallet_done, trades_fetched, requests_made,
-        requested_period_days, trader_limit, fetch_scope)
-     VALUES (?, 'running', 0, 0, 0, 0, ?, ?, ?)`,
+        requested_period_days, trader_limit, fetch_scope, workflow_run_id)
+     VALUES (?, 'running', 0, 0, 0, 0, ?, ?, ?, ?)`,
     )
-    .run(startedAt, options.periodDays, options.limit, scope);
+    .run(startedAt, options.periodDays, options.limit, scope, options.workflowRunId ?? null);
   return Number((database.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number }).id);
 };
 
@@ -1493,6 +1729,13 @@ export const startCopyTradeFetch = (
     chain?: string;
     walletAddresses?: string[];
     scope?: 'roster' | 'winners' | 'single';
+    workflowRunId?: number;
+    pageBudgetPerWallet?: number;
+    skipCompletedWallets?: boolean;
+    refreshWallets?: string[];
+    terminalStatusOnCancel?: 'cancelled' | 'paused';
+    fetchPage?: typeof fetchActivityPage;
+    fetchStats?: typeof fetchAndStoreWalletStats;
   },
 ): { runId: number; status: 'running' } => {
   const runId = createCopyTradeFetchRun(database, options);

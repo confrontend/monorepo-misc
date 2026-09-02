@@ -281,53 +281,12 @@ h2 {
 .routed-view.page-copytrade #copytrade > .experimental-decision-panel,
 .routed-view.page-copytrade #copytrade > .live-evaluation-panel,
 .routed-view.page-copytrade #copytrade > .api-reference-panel,
-.routed-view.page-copytrade #copytrade-wallet-stats,
 .routed-view.page-copytrade #copytrade-pattern-discovery,
 .routed-view.page-evidence #evidence,
 .routed-view.page-evidence .quality-panel,
 .routed-view.page-evidence .lower-grid,
 .routed-view.page-diagnostics #diagnostics {
   display: block;
-}
-.wallet-stats-only #copytrade {
-  display: none !important;
-}
-.wallet-stats-only.lightweight-pattern-discovery #copytrade,
-.wallet-stats-only.lightweight-pattern-discovery #copytrade-wallet-stats {
-  display: none !important;
-}
-.wallet-stats-only.lightweight-pattern-discovery #copytrade-pattern-discovery {
-  display: block !important;
-}
-.wallet-stats-only.lightweight-api-reference #copytrade {
-  display: block !important;
-}
-.wallet-stats-only.lightweight-api-reference #copytrade-wallet-stats,
-.wallet-stats-only.lightweight-api-reference #copytrade-pattern-discovery {
-  display: none !important;
-}
-.wallet-stats-only.lightweight-api-reference .api-reference-panel {
-  display: block !important;
-}
-.wallet-stats-only.lightweight-experimental-decision #copytrade {
-  display: block !important;
-}
-.wallet-stats-only.lightweight-experimental-decision #copytrade-wallet-stats,
-.wallet-stats-only.lightweight-experimental-decision #copytrade-pattern-discovery {
-  display: none !important;
-}
-.wallet-stats-only.lightweight-experimental-decision .experimental-decision-panel {
-  display: block !important;
-}
-.wallet-stats-only.lightweight-live-evaluation #copytrade {
-  display: block !important;
-}
-.wallet-stats-only.lightweight-live-evaluation #copytrade-wallet-stats,
-.wallet-stats-only.lightweight-live-evaluation #copytrade-pattern-discovery {
-  display: none !important;
-}
-.wallet-stats-only.lightweight-live-evaluation .live-evaluation-panel {
-  display: block !important;
 }
 .live-evaluation-form {
   display: flex;
@@ -804,6 +763,62 @@ html[data-theme='light'] .live-evaluation-score-difference {
 }
 .copytrade-stop-button:hover {
   background: rgba(125, 48, 39, 0.25);
+}
+.dune-fetch-progress {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 14px;
+  padding: 14px;
+  border: 1px solid #3a8066;
+  border-radius: 9px;
+  background: rgba(114, 216, 170, 0.08);
+}
+.dune-fetch-progress-heading,
+.dune-fetch-progress-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dune-fetch-progress-heading > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.dune-fetch-progress-heading span,
+.dune-fetch-progress-summary span {
+  color: #9ebaae;
+  font-size: 12px;
+}
+.dune-fetch-progress progress {
+  width: 100%;
+  height: 9px;
+  accent-color: #72d8af;
+}
+.dune-fetch-progress-summary strong {
+  color: #72d8af;
+  font-variant-numeric: tabular-nums;
+}
+.dune-fetch-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  color: #c9e9d8;
+  font-size: 12px;
+}
+.dune-fetch-progress-grid span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.dune-fetch-progress-grid b {
+  color: #91aa9e;
+  font-weight: 500;
+}
+@media (max-width: 720px) {
+  .dune-fetch-progress-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .copytrade-status-warning,
 .copytrade-warning {
@@ -1478,16 +1493,6 @@ html[data-theme='light'] .live-evaluation-score-difference {
   padding-top: 15px;
   border-top: 1px solid rgba(143, 187, 169, 0.18);
 }
-.copytrade-research-route#copytrade-wallet-stats {
-  display: flex;
-  flex-direction: column;
-}
-.copytrade-research-route#copytrade-wallet-stats > .panel-heading {
-  order: -3;
-}
-.copytrade-research-route#copytrade-wallet-stats > p:first-of-type {
-  order: -2;
-}
 .copytrade-coverage-controls {
   display: flex;
   align-items: end;
@@ -1826,9 +1831,69 @@ html[data-theme='light'] .live-evaluation-score-difference {
   width: min(1080px, 100%);
 }
 .dune-wallet-selection-modal {
-  width: min(760px, 94vw);
+  width: min(840px, 94vw);
   max-height: 88vh;
-  overflow: auto;
+  overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+.data-workflow-wallet-selection-modal {
+  width: min(980px, 94vw);
+}
+.data-workflow-wallet-selection-table {
+  max-height: min(58vh, 560px);
+}
+.data-workflow-wallet-selection-table th:first-child,
+.data-workflow-wallet-selection-table td:first-child {
+  width: 2.5rem;
+  min-width: 2.5rem;
+  text-align: center;
+}
+.data-workflow-wallet-selection-table th:nth-child(2),
+.data-workflow-wallet-selection-table td:nth-child(2) {
+  width: 4.5rem;
+  white-space: nowrap;
+}
+.data-workflow-wallet-selection-table th:nth-child(3),
+.data-workflow-wallet-selection-table td:nth-child(3) {
+  width: 9rem;
+}
+.data-workflow-wallet-selection-table th:nth-child(4),
+.data-workflow-wallet-selection-table td:nth-child(4) {
+  width: 16rem;
+}
+.data-workflow-wallet-selection-table th:nth-child(5),
+.data-workflow-wallet-selection-table td:nth-child(5) {
+  width: 12rem;
+  white-space: normal;
+}
+.data-workflow-wallet-selection-table th:nth-child(6),
+.data-workflow-wallet-selection-table td:nth-child(6) {
+  width: 7rem;
+  white-space: nowrap;
+}
+.data-workflow-wallet-selection-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem 1rem;
+  padding: 0.65rem 0;
+  color: #b7e8d2;
+  font-size: 0.78rem;
+}
+.data-workflow-wallet-selection-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.data-workflow-wallet-selection-checkbox-filter {
+  color: #dff8ea;
+  font-weight: 700;
+}
+.data-workflow-wallet-selection-filters input[type='number'] {
+  width: 7rem;
+}
+.data-workflow-wallet-selection-filters small {
+  color: #91aa9e;
 }
 .dune-wallet-selection-summary {
   display: flex;
@@ -1839,22 +1904,121 @@ html[data-theme='light'] .live-evaluation-score-difference {
 .dune-wallet-selection-summary strong {
   color: #72d8af;
 }
+.data-workflow-fetch-estimate {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.35rem 0 0.25rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(114, 216, 175, 0.25);
+  border-radius: 0.45rem;
+  background: rgba(114, 216, 175, 0.06);
+  color: #b7e8d2;
+  font-size: 0.78rem;
+}
+.data-workflow-fetch-estimate small {
+  color: #91aa9e;
+  line-height: 1.35;
+}
+.copytrade-workflow-external-blocker {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.8rem 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(240, 200, 117, 0.42);
+  border-radius: 0.45rem;
+  background: rgba(95, 69, 28, 0.18);
+  color: #e7d4a9;
+}
+.copytrade-workflow-external-blocker strong {
+  color: #f0c875;
+}
+.copytrade-workflow-external-blocker small {
+  color: #c8b995;
+  line-height: 1.35;
+}
+.copytrade-workflow-state-warning {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.8rem 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(241, 125, 130, 0.42);
+  border-radius: 0.45rem;
+  background: rgba(96, 28, 35, 0.18);
+  color: #ffd7d9;
+}
+.copytrade-workflow-state-warning strong {
+  color: #ff9da1;
+}
+.copytrade-workflow-state-warning small {
+  line-height: 1.35;
+}
+.dune-wallet-selection-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #b7e8d2;
+  font-size: 0.78rem;
+}
 .dune-wallet-selection-table {
-  max-height: 52vh;
-  overflow: auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .dune-wallet-selection-table table {
   width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.dune-wallet-selection-table th,
+.dune-wallet-selection-table td {
+  overflow-wrap: anywhere;
+}
+.dune-wallet-selection-wallet-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.dune-wallet-selection-wallet-link:hover strong {
+  color: #72d8af;
+  text-decoration: underline;
+}
+.data-table-wrap th .sortable-header {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.data-workflow-wallet-selection-table td:nth-child(5) {
+  overflow-wrap: anywhere;
 }
 .dune-wallet-selection-table th:first-child,
 .dune-wallet-selection-table td:first-child {
-  width: 6.5rem;
+  width: 2.5rem;
+  white-space: nowrap;
+}
+.dune-wallet-selection-table th:nth-child(2),
+.dune-wallet-selection-table td:nth-child(2) {
+  width: 4.5rem;
   white-space: nowrap;
 }
 .dune-wallet-selection-checkbox {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+.dune-wallet-selection-checkbox-only {
+  justify-content: center;
+  width: 100%;
 }
 .dune-wallet-selection-address {
   display: block;
@@ -4234,8 +4398,6 @@ footer {
   color: #8fa99c;
 }
 
-/* Decision-first wallet-stats view. The existing evidence tables remain available
-   inside the collapsed maintenance disclosure below the primary table. */
 .copytrade-page-lede {
   max-width: 58rem;
   margin: 0.35rem 0 1rem;
@@ -5821,6 +5983,39 @@ footer {
   gap: 0.5rem;
   margin: 0.9rem 0 0.75rem;
 }
+.copytrade-data-status-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.7rem 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(114, 216, 175, 0.28);
+  border-radius: 0.55rem;
+  background: rgba(18, 53, 39, 0.45);
+  color: #b9dac9;
+  font-size: 0.75rem;
+}
+.copytrade-data-status-summary button {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+}
+.copytrade-data-status-summary small {
+  color: #f0bb82;
+}
+.copytrade-workflow-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+.copytrade-file-button {
+  cursor: pointer;
+}
+.copytrade-file-button input {
+  display: none;
+}
 .copytrade-workflow-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(170px, 0.55fr) auto;
@@ -6632,7 +6827,13 @@ footer {
   font-size: 0.75rem;
   line-height: 1.3;
   white-space: normal;
-  overflow-wrap: anywhere;
+  /* `anywhere` lets a flexible grid/flex column's computed min-content width collapse toward a
+     single character whenever a sibling column also wants space -- the browser is "allowed" to
+     break the text anywhere, so it picks the narrowest possible column and renders one character
+     per line. `break-word` still wraps long unbroken tokens (a hash, a long number) but prefers
+     word boundaries first, so a squeezed column wraps onto a few readable lines instead of
+     collapsing to zero width. Applies to every descendant (small/p/em) in this shared tooltip. */
+  overflow-wrap: break-word;
   pointer-events: none;
 }
 .experimental-table-tooltip > b {
@@ -6643,7 +6844,10 @@ footer {
 }
 .experimental-table-tooltip > span {
   display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr) auto;
+  /* Both flexible columns get a genuine floor (6rem), not `minmax(0, ...)` -- a bare 0 floor is
+     what let one of them get squeezed to zero and trigger the collapse above. 8rem label + two
+     6rem floors = 20rem, comfortably inside the tooltip's `min(27rem, ...)` width budget. */
+  grid-template-columns: 8rem minmax(6rem, 1fr) minmax(6rem, max-content);
   gap: 0.35rem;
   align-items: baseline;
   padding: 0.28rem 0;

@@ -5,6 +5,16 @@ import {
   type CopySimulationTradeResult,
   type CopySimulationWalletReport,
 } from '../simulation/copySimulation.js';
+import type { PreEventFeatures } from '../features/walletFeatureEngine.js';
+import {
+  readCurrentWalletFeatures,
+  readPreEventFeatures,
+  readPreEventFeatureSnapshotsBatch,
+} from '../features/walletFeatureReader.js';
+import { readWalletAddressesWithCompleteCoverage } from '../scrutiny/fullyCovered.js';
+
+export { readCurrentWalletFeatures, readPreEventFeatures };
+export type { CurrentWalletFeatures } from '../features/walletFeatureEngine.js';
 
 export const DEFAULT_PATTERN_DISCOVERY_PERIOD_DAYS = 30;
 export const MAX_PATTERN_DISCOVERY_PERIOD_DAYS = 90;
@@ -106,8 +116,6 @@ export type PatternDiscoveryExport = {
   };
   rows: PatternDiscoveryExportRow[];
 };
-
-type FullyCoveredWallet = { walletAddress: string };
 
 type PatternDiscoveryCacheRow = { reportJson: string; dataFingerprint: string; updatedAt: string };
 
@@ -244,450 +252,11 @@ const validateCoveragePercent = (coveragePercent: number): number => {
   return coveragePercent;
 };
 
-type PreEventFeatures = {
-  priorWalletTradeCount: number;
-  priorTokenTradeCount: number;
-  priorWalletBuyVolumeUsd: number;
-  priorWalletBuyCount: number;
-  priorWalletSellCount: number;
-  priorWalletSellVolumeUsd: number;
-  priorWalletRealizedProfitUsd: number | null;
-  priorWalletMedianReturnPercent: number | null;
-  priorWalletWinRatePercent: number | null;
-  priorWalletPositiveDayPercent: number | null;
-  priorWalletBestTokenProfitSharePercent: number | null;
-  priorWalletMedianHoldSeconds: number | null;
-  priorWalletUnder15SecondsPercent: number | null;
-  priorWalletPairedTradeCount: number;
-  priorWalletDistinctTokenCount: number;
-  priorWalletTradesPerActiveDay: number | null;
-  priorWalletMedianBuySizeUsd: number | null;
-  priorWalletReturnVolatilityPercent: number | null;
-  priorWalletTop3TokenProfitSharePercent: number | null;
-  priorTokenBuyCount: number;
-  priorTokenSellCount: number;
-  priorTokenBuyVolumeUsd: number;
-  priorTokenSellVolumeUsd: number;
-  tokenMarketCapAtEntry: number | null;
-  tokenAgeSecondsAtEntry: number | null;
-  tokenLaunchpadPlatform: string | null;
-  entryTradeAmountUsd: number | null;
-};
-
-type PriorTrade = {
-  id: number;
-  eventType: string;
-  tokenAddress: string;
-  observedTimestamp: number;
-  costUsd: string | null;
-  buyCostUsd: string | null;
-  launchpadPlatform?: string | null;
-};
-
-const amount = (value: string | null): number | null => {
-  if (value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-class NumberHeap {
-  private readonly values: number[] = [];
-
-  constructor(private readonly before: (left: number, right: number) => boolean) {}
-
-  get size(): number {
-    return this.values.length;
-  }
-
-  peek(): number | undefined {
-    return this.values[0];
-  }
-
-  push(value: number): void {
-    this.values.push(value);
-    let index = this.values.length - 1;
-    while (index > 0) {
-      const parent = Math.floor((index - 1) / 2);
-      if (!this.before(this.values[index], this.values[parent])) break;
-      [this.values[index], this.values[parent]] = [this.values[parent], this.values[index]];
-      index = parent;
-    }
-  }
-
-  pop(): number | undefined {
-    const first = this.values[0];
-    const last = this.values.pop();
-    if (this.values.length > 0 && last !== undefined) {
-      this.values[0] = last;
-      let index = 0;
-      while (true) {
-        const left = index * 2 + 1;
-        const right = left + 1;
-        let next = index;
-        if (left < this.values.length && this.before(this.values[left], this.values[next]))
-          next = left;
-        if (right < this.values.length && this.before(this.values[right], this.values[next]))
-          next = right;
-        if (next === index) break;
-        [this.values[index], this.values[next]] = [this.values[next], this.values[index]];
-        index = next;
-      }
-    }
-    return first;
-  }
-}
-
-class StreamingMedian {
-  private readonly lower = new NumberHeap((left, right) => left > right);
-  private readonly upper = new NumberHeap((left, right) => left < right);
-
-  add(value: number): void {
-    if (this.lower.size === 0 || value <= (this.lower.peek() ?? value)) this.lower.push(value);
-    else this.upper.push(value);
-    if (this.lower.size > this.upper.size + 1) this.upper.push(this.lower.pop()!);
-    if (this.upper.size > this.lower.size) this.lower.push(this.upper.pop()!);
-  }
-
-  value(): number | null {
-    if (this.lower.size === 0) return null;
-    return this.lower.size === this.upper.size
-      ? ((this.lower.peek() ?? 0) + (this.upper.peek() ?? 0)) / 2
-      : (this.lower.peek() ?? null);
-  }
-}
-
-class PreEventAccumulator {
-  private tradeCount = 0;
-  private buyCount = 0;
-  private sellCount = 0;
-  private buyVolume = 0;
-  private sellVolume = 0;
-  private realizedProfit = 0;
-  private returnCount = 0;
-  private winningReturns = 0;
-  private positiveDays = 0;
-  private positiveTokenProfit = 0;
-  private pairedTradeCount = 0;
-  private under15Seconds = 0;
-  private readonly activeDays = new Set<string>();
-  private readonly buySizeMedian = new StreamingMedian();
-  private readonly returns: number[] = [];
-  private readonly tokenBuyCount = new Map<string, number>();
-  private readonly tokenSellCount = new Map<string, number>();
-  private readonly tokenBuyVolume = new Map<string, number>();
-  private readonly tokenSellVolume = new Map<string, number>();
-  private readonly tokenTradeCount = new Map<string, number>();
-  private readonly lastBuyByToken = new Map<string, number>();
-  private readonly profitByToken = new Map<string, number>();
-  private readonly profitByDay = new Map<string, number>();
-  private readonly returnMedian = new StreamingMedian();
-  private readonly holdMedian = new StreamingMedian();
-
-  apply(row: PriorTrade): void {
-    this.tradeCount += 1;
-    this.tokenTradeCount.set(
-      row.tokenAddress,
-      (this.tokenTradeCount.get(row.tokenAddress) ?? 0) + 1,
-    );
-    this.activeDays.add(new Date(row.observedTimestamp * 1000).toISOString().slice(0, 10));
-    if (row.eventType === 'buy') {
-      this.buyCount += 1;
-      this.buyVolume += amount(row.costUsd) ?? 0;
-      this.tokenBuyCount.set(row.tokenAddress, (this.tokenBuyCount.get(row.tokenAddress) ?? 0) + 1);
-      this.tokenBuyVolume.set(
-        row.tokenAddress,
-        (this.tokenBuyVolume.get(row.tokenAddress) ?? 0) + (amount(row.costUsd) ?? 0),
-      );
-      const buySize = amount(row.costUsd);
-      if (buySize !== null) this.buySizeMedian.add(buySize);
-      this.lastBuyByToken.set(row.tokenAddress, row.observedTimestamp);
-      return;
-    }
-    this.sellCount += 1;
-    this.sellVolume += amount(row.costUsd) ?? 0;
-    this.tokenSellCount.set(row.tokenAddress, (this.tokenSellCount.get(row.tokenAddress) ?? 0) + 1);
-    this.tokenSellVolume.set(
-      row.tokenAddress,
-      (this.tokenSellVolume.get(row.tokenAddress) ?? 0) + (amount(row.costUsd) ?? 0),
-    );
-    const boughtAt = this.lastBuyByToken.get(row.tokenAddress);
-    if (boughtAt !== undefined) {
-      const hold = Math.max(0, row.observedTimestamp - boughtAt);
-      this.holdMedian.add(hold);
-      this.pairedTradeCount += 1;
-      if (hold <= 15) this.under15Seconds += 1;
-    }
-    const proceeds = amount(row.costUsd);
-    const costBasis = amount(row.buyCostUsd);
-    if (proceeds === null || costBasis === null || costBasis <= 0) return;
-    const profitUsd = proceeds - costBasis;
-    const returnPercent = (profitUsd / costBasis) * 100;
-    this.realizedProfit += profitUsd;
-    this.returnCount += 1;
-    this.returns.push(returnPercent);
-    if (returnPercent > 0) this.winningReturns += 1;
-    this.returnMedian.add(returnPercent);
-
-    const priorTokenProfit = this.profitByToken.get(row.tokenAddress) ?? 0;
-    if (priorTokenProfit > 0) this.positiveTokenProfit -= priorTokenProfit;
-    const tokenProfit = priorTokenProfit + profitUsd;
-    this.profitByToken.set(row.tokenAddress, tokenProfit);
-    if (tokenProfit > 0) this.positiveTokenProfit += tokenProfit;
-
-    const day = new Date(row.observedTimestamp * 1000).toISOString().slice(0, 10);
-    const priorDayProfit = this.profitByDay.get(day) ?? 0;
-    if (priorDayProfit > 0) this.positiveDays -= 1;
-    const dayProfit = priorDayProfit + profitUsd;
-    this.profitByDay.set(day, dayProfit);
-    if (dayProfit > 0) this.positiveDays += 1;
-  }
-
-  snapshot(tokenAddress: string, entry?: PriorTrade): PreEventFeatures {
-    const positiveProfits = [...this.profitByToken.values()]
-      .filter((profit) => profit > 0)
-      .sort((a, b) => b - a);
-    const bestTokenProfit = positiveProfits[0] ?? 0;
-    const top3TokenProfit = positiveProfits.slice(0, 3).reduce((sum, profit) => sum + profit, 0);
-    const meanReturn = this.returns.length
-      ? this.returns.reduce((sum, value) => sum + value, 0) / this.returns.length
-      : 0;
-    const returnVariance =
-      this.returns.length > 1
-        ? this.returns.reduce((sum, value) => sum + (value - meanReturn) ** 2, 0) /
-          this.returns.length
-        : null;
-    return {
-      priorWalletTradeCount: this.tradeCount,
-      priorTokenTradeCount: this.tokenTradeCount.get(tokenAddress) ?? 0,
-      priorWalletBuyVolumeUsd: this.buyVolume,
-      priorWalletBuyCount: this.buyCount,
-      priorWalletSellCount: this.sellCount,
-      priorWalletSellVolumeUsd: this.sellVolume,
-      priorWalletRealizedProfitUsd: this.returnCount === 0 ? null : this.realizedProfit,
-      priorWalletMedianReturnPercent: this.returnMedian.value(),
-      priorWalletWinRatePercent:
-        this.returnCount === 0 ? null : (this.winningReturns / this.returnCount) * 100,
-      priorWalletPositiveDayPercent:
-        this.profitByDay.size === 0 ? null : (this.positiveDays / this.profitByDay.size) * 100,
-      priorWalletBestTokenProfitSharePercent:
-        this.positiveTokenProfit <= 0 ? null : (bestTokenProfit / this.positiveTokenProfit) * 100,
-      priorWalletMedianHoldSeconds: this.holdMedian.value(),
-      priorWalletUnder15SecondsPercent:
-        this.pairedTradeCount === 0 ? null : (this.under15Seconds / this.pairedTradeCount) * 100,
-      priorWalletPairedTradeCount: this.pairedTradeCount,
-      priorWalletDistinctTokenCount: this.tokenTradeCount.size,
-      priorWalletTradesPerActiveDay:
-        this.activeDays.size === 0 ? null : this.tradeCount / this.activeDays.size,
-      priorWalletMedianBuySizeUsd: this.buySizeMedian.value(),
-      priorWalletReturnVolatilityPercent:
-        returnVariance === null ? null : Math.sqrt(returnVariance),
-      priorWalletTop3TokenProfitSharePercent:
-        this.positiveTokenProfit <= 0 ? null : (top3TokenProfit / this.positiveTokenProfit) * 100,
-      priorTokenBuyCount: this.tokenBuyCount.get(tokenAddress) ?? 0,
-      priorTokenSellCount: this.tokenSellCount.get(tokenAddress) ?? 0,
-      priorTokenBuyVolumeUsd: this.tokenBuyVolume.get(tokenAddress) ?? 0,
-      priorTokenSellVolumeUsd: this.tokenSellVolume.get(tokenAddress) ?? 0,
-      tokenMarketCapAtEntry: null,
-      tokenAgeSecondsAtEntry: null,
-      tokenLaunchpadPlatform: entry?.launchpadPlatform ?? null,
-      entryTradeAmountUsd: entry ? amount(entry.costUsd) : null,
-    };
-  }
-}
-
-const addTokenEntryContext = (
-  database: DatabaseSync,
-  features: PreEventFeatures,
-  tokenAddress: string,
-  observedTimestamp: number,
-): PreEventFeatures => {
-  const signal = database
-    .prepare(
-      `SELECT COALESCE(trigger_mc, first_trigger_mc, market_cap) AS marketCap
-       FROM gmgn_signals
-       WHERE token_address = ? AND observed_at IS NOT NULL AND observed_at < ?
-       ORDER BY observed_at DESC, id DESC LIMIT 1`,
-    )
-    .get(tokenAddress, new Date(observedTimestamp * 1000).toISOString()) as
-    { marketCap: number | null } | undefined;
-  const token = database
-    .prepare(`SELECT first_trade_time AS firstTradeTime FROM tokens WHERE token_address = ?`)
-    .get(tokenAddress) as { firstTradeTime: string | null } | undefined;
-  const firstTradeSeconds = token?.firstTradeTime
-    ? Math.floor(Date.parse(token.firstTradeTime) / 1000)
-    : NaN;
-  return {
-    ...features,
-    tokenMarketCapAtEntry: signal?.marketCap ?? null,
-    tokenAgeSecondsAtEntry: Number.isFinite(firstTradeSeconds)
-      ? Math.max(0, observedTimestamp - firstTradeSeconds)
-      : null,
-  };
-};
-
-/** Build aggregates using only rows strictly before the wallet buy, including id as a
- * deterministic tie-breaker when multiple trades share the same observed second. */
-export const readPreEventFeatures = (
-  database: DatabaseSync,
-  walletAddress: string,
-  tokenAddress: string,
-  buyAt: string,
-  buyTradeId: number,
-): PreEventFeatures => {
-  const observedTimestamp = Math.floor(Date.parse(buyAt) / 1000);
-  if (!Number.isFinite(observedTimestamp))
-    throw new Error(`Invalid buy timestamp for pattern discovery: ${buyAt}`);
-  const rows = database
-    .prepare(
-      `SELECT id, event_type AS eventType, token_address AS tokenAddress,
-            observed_timestamp AS observedTimestamp, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
-     FROM copytrade_trades
-     WHERE chain = 'sol' AND wallet_address = ? AND event_type IN ('buy', 'sell')
-       AND (observed_timestamp < ? OR (observed_timestamp = ? AND id < ?))
-     ORDER BY observed_timestamp ASC, id ASC`,
-    )
-    .all(
-      walletAddress,
-      observedTimestamp,
-      observedTimestamp,
-      buyTradeId,
-    ) as unknown as PriorTrade[];
-  const accumulator = new PreEventAccumulator();
-  for (const row of rows) accumulator.apply(row);
-  const entry = database
-    .prepare(
-      `SELECT cost_usd AS costUsd, launchpad_platform AS launchpadPlatform FROM copytrade_trades WHERE id = ?`,
-    )
-    .get(buyTradeId) as { costUsd: string | null; launchpadPlatform: string | null } | undefined;
-  return addTokenEntryContext(
-    database,
-    accumulator.snapshot(
-      tokenAddress,
-      entry
-        ? {
-            ...entry,
-            id: buyTradeId,
-            eventType: 'buy',
-            tokenAddress,
-            observedTimestamp,
-            buyCostUsd: null,
-          }
-        : undefined,
-    ),
-    tokenAddress,
-    observedTimestamp,
-  );
-};
-
-/** The `prior_wallet_*`-only subset of {@link PreEventFeatures} — safe for a standing wallet
- *  evaluation that has no specific token-entry event to attach `prior_token_*`/`token_*`/
- *  `entry_*` fields to. Those fields do not exist for "this wallet, right now" and must never
- *  be fabricated, so this type omits them entirely rather than setting them to null/0. */
-export type CurrentWalletFeatures = Pick<
-  PreEventFeatures,
-  | 'priorWalletTradeCount'
-  | 'priorWalletBuyVolumeUsd'
-  | 'priorWalletBuyCount'
-  | 'priorWalletSellCount'
-  | 'priorWalletSellVolumeUsd'
-  | 'priorWalletRealizedProfitUsd'
-  | 'priorWalletMedianReturnPercent'
-  | 'priorWalletWinRatePercent'
-  | 'priorWalletPositiveDayPercent'
-  | 'priorWalletBestTokenProfitSharePercent'
-  | 'priorWalletMedianHoldSeconds'
-  | 'priorWalletUnder15SecondsPercent'
-  | 'priorWalletPairedTradeCount'
-  | 'priorWalletDistinctTokenCount'
-  | 'priorWalletTradesPerActiveDay'
-  | 'priorWalletMedianBuySizeUsd'
-  | 'priorWalletReturnVolatilityPercent'
-  | 'priorWalletTop3TokenProfitSharePercent'
->;
-
-/** Standing (as-of-now) wallet feature snapshot for Live Evaluation — the same point-in-time-safe
- *  accumulation `readPreEventFeatures` uses for a specific past buy, applied instead to the
- *  wallet's entire stored trade history. Deliberately skips `addTokenEntryContext` (there is no
- *  buy event to attach token-entry context to) and returns only the `prior_wallet_*` fields. */
-export const readCurrentWalletFeatures = (
-  database: DatabaseSync,
-  walletAddress: string,
-  options: { chain?: string } = {},
-): CurrentWalletFeatures | null => {
-  const chain = options.chain ?? 'sol';
-  const rows = database
-    .prepare(
-      `SELECT id, event_type AS eventType, token_address AS tokenAddress,
-            observed_timestamp AS observedTimestamp, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
-     FROM copytrade_trades
-     WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell')
-     ORDER BY observed_timestamp ASC, id ASC`,
-    )
-    .all(chain, walletAddress) as unknown as PriorTrade[];
-  if (rows.length === 0) return null;
-  const accumulator = new PreEventAccumulator();
-  for (const row of rows) accumulator.apply(row);
-  const {
-    priorWalletTradeCount,
-    priorWalletBuyVolumeUsd,
-    priorWalletBuyCount,
-    priorWalletSellCount,
-    priorWalletSellVolumeUsd,
-    priorWalletRealizedProfitUsd,
-    priorWalletMedianReturnPercent,
-    priorWalletWinRatePercent,
-    priorWalletPositiveDayPercent,
-    priorWalletBestTokenProfitSharePercent,
-    priorWalletMedianHoldSeconds,
-    priorWalletUnder15SecondsPercent,
-    priorWalletPairedTradeCount,
-    priorWalletDistinctTokenCount,
-    priorWalletTradesPerActiveDay,
-    priorWalletMedianBuySizeUsd,
-    priorWalletReturnVolatilityPercent,
-    priorWalletTop3TokenProfitSharePercent,
-  } = accumulator.snapshot('');
-  return {
-    priorWalletTradeCount,
-    priorWalletBuyVolumeUsd,
-    priorWalletBuyCount,
-    priorWalletSellCount,
-    priorWalletSellVolumeUsd,
-    priorWalletRealizedProfitUsd,
-    priorWalletMedianReturnPercent,
-    priorWalletWinRatePercent,
-    priorWalletPositiveDayPercent,
-    priorWalletBestTokenProfitSharePercent,
-    priorWalletMedianHoldSeconds,
-    priorWalletUnder15SecondsPercent,
-    priorWalletPairedTradeCount,
-    priorWalletDistinctTokenCount,
-    priorWalletTradesPerActiveDay,
-    priorWalletMedianBuySizeUsd,
-    priorWalletReturnVolatilityPercent,
-    priorWalletTop3TokenProfitSharePercent,
-  };
-};
-
 const fullyCoveredWalletAddresses = (
   database: DatabaseSync,
   periodDays: number,
   limit: number,
-): string[] => {
-  const rows = database
-    .prepare(
-      `SELECT wallet_address AS walletAddress
-     FROM copytrade_wallet_coverage
-     WHERE chain = 'sol'
-       AND coverage_complete = 1
-       AND truncated = 0
-       AND requested_period_days = ?
-     ORDER BY updated_at DESC, wallet_address ASC
-     LIMIT ?`,
-    )
-    .all(periodDays, limit) as unknown as FullyCoveredWallet[];
-  return rows.map((row) => row.walletAddress);
-};
+): string[] => readWalletAddressesWithCompleteCoverage(database, 'sol', periodDays, limit);
 
 type AggregatedEntry = {
   buyTradeId: number;
@@ -734,67 +303,20 @@ const readPreEventFeatureSnapshots = (
   entries: PatternDiscoveryEntry[],
   onWallet?: (completed: number, total: number, walletAddress: string) => void,
 ): Map<number, PreEventFeatures> => {
-  const entriesByWallet = new Map<string, PatternDiscoveryEntry[]>();
-  for (const item of entries) {
-    const group = entriesByWallet.get(item.wallet.walletAddress) ?? [];
-    group.push(item);
-    entriesByWallet.set(item.wallet.walletAddress, group);
-  }
-  const snapshots = new Map<number, PreEventFeatures>();
-  const wallets = [...entriesByWallet.entries()];
-  for (let walletIndex = 0; walletIndex < wallets.length; walletIndex += 1) {
-    const [walletAddress, walletEntries] = wallets[walletIndex];
-    const requested = new Map(
-      walletEntries.map((item) => [
-        item.entry.buyTradeId,
-        item.entry.trades[0]?.tokenAddress ?? '',
-      ]),
-    );
-    const rows = database
-      .prepare(
-        `SELECT id, event_type AS eventType, token_address AS tokenAddress,
-                observed_timestamp AS observedTimestamp, cost_usd AS costUsd,
-                buy_cost_usd AS buyCostUsd, launchpad_platform AS launchpadPlatform
-         FROM copytrade_trades
-         WHERE chain = 'sol' AND wallet_address = ? AND event_type IN ('buy', 'sell')
-         ORDER BY observed_timestamp ASC, id ASC`,
-      )
-      .all(walletAddress) as unknown as PriorTrade[];
-    const accumulator = new PreEventAccumulator();
-    for (const row of rows) {
-      const tokenAddress = requested.get(row.id);
-      if (tokenAddress !== undefined) {
-        snapshots.set(
-          row.id,
-          addTokenEntryContext(
-            database,
-            accumulator.snapshot(tokenAddress, row),
-            tokenAddress,
-            row.observedTimestamp,
-          ),
-        );
-      }
-      accumulator.apply(row);
-    }
-    for (const item of walletEntries) {
-      if (!snapshots.has(item.entry.buyTradeId)) {
-        const trade = item.entry.trades[0];
-        if (!trade?.buyAt) throw new Error('Pattern Discovery entry is missing its buy time.');
-        snapshots.set(
-          item.entry.buyTradeId,
-          readPreEventFeatures(
-            database,
-            walletAddress,
-            trade.tokenAddress,
-            trade.buyAt,
-            item.entry.buyTradeId,
-          ),
-        );
-      }
-    }
-    onWallet?.(walletIndex + 1, wallets.length, walletAddress);
-  }
-  return snapshots;
+  return readPreEventFeatureSnapshotsBatch(
+    database,
+    entries.map((item) => {
+      const trade = item.entry.trades[0];
+      if (!trade?.buyAt) throw new Error('Pattern Discovery entry is missing its buy time.');
+      return {
+        tradeId: item.entry.buyTradeId,
+        walletAddress: item.wallet.walletAddress,
+        tokenAddress: trade.tokenAddress,
+        observedTimestamp: Math.floor(Date.parse(trade.buyAt) / 1000),
+      };
+    }),
+    { chain: 'sol', onWallet },
+  );
 };
 
 const normalizedRow = (
