@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Badge } from './ui/badge.js';
 
 type StatusPillProps = {
   status: string;
@@ -12,13 +13,11 @@ const statusTone = (status: string): 'positive' | 'warning' | 'negative' | 'neut
   if (status === 'eligible' || status === 'pass' || status === 'profitable' || status === 'WINNER')
     return 'positive';
   if (status === 'rejected' || status === 'fail' || status === 'REJECTED') return 'negative';
-  if (status === 'UNPROVEN') return 'warning';
+  if (status === 'UNPROVEN' || status === 'REVIEW') return 'warning';
   if (status.includes('insufficient') || status.includes('missing')) return 'warning';
   return 'neutral';
 };
 
 export function StatusPill({ status, children }: StatusPillProps) {
-  return (
-    <span className={`status-pill ${statusTone(status)}`}>{children ?? statusLabel(status)}</span>
-  );
+  return <Badge className={statusTone(status)}>{children ?? statusLabel(status)}</Badge>;
 }

@@ -31,7 +31,6 @@ export type {
 } from './dataWorkflowTypes.js';
 
 const BASE_ENDPOINT = '/api/copytrade/data-workflow';
-const TARGET_PERIODS = [30, 60, 90] as const;
 const POLL_INTERVAL_MS = 3000;
 
 const COPY = {
@@ -471,20 +470,10 @@ export function DataWorkflow({
               <small>Choose the depth this run must verify for each wallet.</small>
             </div>
           </div>
-          <label>
-            <span className="visually-hidden">Requested history window</span>
-            <select
-              value={targetDays}
-              onChange={(event) => setTargetDays(Number(event.target.value))}
-              disabled={Boolean(isActive) || loadingStatus}
-            >
-              {TARGET_PERIODS.map((period) => (
-                <option key={period} value={period}>
-                  {period} days
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="copytrade-workflow-status">
+            <strong>History depth: Maximum available</strong>
+            <small>30/60/90-day milestones remain diagnostic only.</small>
+          </div>
           <button
             type="button"
             className="primary"
@@ -676,10 +665,39 @@ export function DataWorkflow({
               />
             )}
             {definition.key === 'dune_outcomes' && (
-              <DuneOutcomeProgressPanel
-                progress={statusResponse?.duneProgress ?? null}
-                step={step}
-              />
+              <>
+                <DuneOutcomeProgressPanel
+                  progress={statusResponse?.duneProgress ?? null}
+                  step={step}
+                />
+                {activeRun?.depthMode === 'requested' &&
+                  !step.action.allowed &&
+                  step.status !== 'running' && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={async () => {
+                        setBusyAction('step');
+                        setError(null);
+                        try {
+                          await api(`${BASE_ENDPOINT}/dune`, {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json' },
+                            body: JSON.stringify({ runId: activeRun.id, allowPartialDepth: true }),
+                          });
+                          await Promise.all([loadStatus(), loadCoverage(), loadReadiness()]);
+                        } catch (reason: unknown) {
+                          setError(actionError(reason));
+                        } finally {
+                          setBusyAction(null);
+                        }
+                      }}
+                      disabled={busyAction !== null}
+                    >
+                      Fetch available Dune outcomes anyway
+                    </button>
+                  )}
+              </>
             )}
             {definition.key === 'readiness' && (
               <DatasetReadinessPanel

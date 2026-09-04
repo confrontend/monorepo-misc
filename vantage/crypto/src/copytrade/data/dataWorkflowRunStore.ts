@@ -32,6 +32,7 @@ export type DataWorkflowRun = {
   rosterWallets: string[];
   status: DataWorkflowRunStatus;
   completenessThresholdPercent: number;
+  depthMode: 'requested' | 'maximum_available';
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -72,6 +73,7 @@ export const createDataWorkflowRun = (
     rosterSnapshotId: number | null;
     rosterWallets: string[];
     completenessThresholdPercent?: number;
+    depthMode?: 'requested' | 'maximum_available';
   },
 ): number => {
   const now = new Date().toISOString();
@@ -79,8 +81,8 @@ export const createDataWorkflowRun = (
     .prepare(
       `INSERT INTO copytrade_data_workflow_runs
        (chain, target_days, trader_limit, roster_snapshot_id, roster_wallets_json, status,
-        completeness_threshold_percent, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+        completeness_threshold_percent, depth_mode, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
     )
     .run(
       options.chain,
@@ -89,6 +91,7 @@ export const createDataWorkflowRun = (
       options.rosterSnapshotId,
       JSON.stringify(options.rosterWallets),
       options.completenessThresholdPercent ?? 90,
+      options.depthMode ?? 'requested',
       now,
       now,
     );
@@ -114,6 +117,7 @@ const parseRun = (row: {
   rosterWalletsJson: string;
   status: string;
   completenessThresholdPercent: number;
+  depthMode: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -134,6 +138,7 @@ const parseRun = (row: {
   })(),
   status: row.status as DataWorkflowRunStatus,
   completenessThresholdPercent: row.completenessThresholdPercent,
+  depthMode: row.depthMode === 'maximum_available' ? 'maximum_available' : 'requested',
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
   completedAt: row.completedAt,
@@ -187,7 +192,7 @@ const parseStep = (row: {
 
 const RUN_COLUMNS = `id, chain, target_days AS targetDays, trader_limit AS traderLimit,
   roster_snapshot_id AS rosterSnapshotId, roster_wallets_json AS rosterWalletsJson, status,
-  completeness_threshold_percent AS completenessThresholdPercent, created_at AS createdAt,
+  completeness_threshold_percent AS completenessThresholdPercent, depth_mode AS depthMode, created_at AS createdAt,
   updated_at AS updatedAt, completed_at AS completedAt, error`;
 
 const STEP_COLUMNS = `run_id AS runId, step_key AS stepKey, step_order AS stepOrder, status,

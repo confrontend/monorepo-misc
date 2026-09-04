@@ -266,7 +266,6 @@ h2 {
 .routed-view .menu-section,
 .routed-view .reference-divider,
 .routed-view .outcome-results-details {
-  display: none;
 }
 .routed-view.page-overview #overview,
 .routed-view.page-imports #imports,
@@ -2529,6 +2528,91 @@ html[data-theme='light'] .live-evaluation-score-difference {
   height: 170px;
   vertical-align: middle;
   overscroll-behavior: contain;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.capital-path-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+  min-width: 100%;
+  transition: width 0.15s ease;
+}
+.capital-path-plot {
+  position: relative;
+  height: 100%;
+  margin-left: 3rem;
+  padding-bottom: 1.35rem;
+  box-sizing: border-box;
+}
+.capital-path-y-axis {
+  position: absolute;
+  inset: 0 auto 1.2rem 0;
+  width: 2.7rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #91b5a4;
+  font-size: 0.65rem;
+  text-align: right;
+}
+.capital-path-x-axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  color: #91b5a4;
+  font-size: 0.65rem;
+}
+.capital-path-bar {
+  flex: 1 0 5px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+}
+.capital-path-bar.positive {
+  background: #72d8aa;
+}
+.capital-path-bar.negative {
+  background: #e88989;
+}
+.capital-path-bar {
+  position: relative;
+}
+.capital-path-tooltip {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.3rem;
+  background: #14271f;
+  border: 1px solid rgba(114, 216, 170, 0.55);
+  color: #c9dfd0;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+.capital-path-tooltip strong {
+  display: block;
+  color: #72d8aa;
+}
+.capital-path-bar:first-child .capital-path-tooltip {
+  left: 0;
+  transform: none;
+}
+.capital-path-bar:last-child .capital-path-tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.capital-path-chart-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.35rem;
 }
 .capital-path-reset {
   position: absolute;
@@ -6746,7 +6830,7 @@ footer {
 }
 .experimental-table-wrap {
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   position: relative;
 }
 .experimental-table {
@@ -6795,6 +6879,8 @@ footer {
      collapsing to zero width. Applies to every descendant (small/p/em) in this shared tooltip. */
   overflow-wrap: break-word;
   pointer-events: none;
+  max-height: min(22rem, calc(100vh - 3rem));
+  overflow-y: auto;
 }
 .experimental-table-tooltip > b {
   display: block;
@@ -6836,10 +6922,10 @@ footer {
 .experimental-scrutiny-tooltip .experimental-table-tooltip {
   width: min(18rem, calc(100vw - 2rem));
 }
-.experimental-tooltip-cell:hover .experimental-table-tooltip,
-.experimental-tooltip-cell:focus .experimental-table-tooltip,
-.experimental-tooltip-cell:focus-within .experimental-table-tooltip {
-  display: block;
+.experimental-table td:last-child .experimental-table-tooltip,
+.experimental-table th:last-child .experimental-table-tooltip {
+  left: auto;
+  right: 0;
 }
 .experimental-table td,
 .experimental-table th {
@@ -6989,7 +7075,13 @@ footer {
 .experimental-detail-modal {
   width: min(980px, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 8rem;
+}
+.experimental-table-tooltip-portal {
+  z-index: 10000;
+  max-width: min(27rem, calc(100vw - 2rem));
 }
 .experimental-detail-score-grid {
   display: grid;
@@ -7031,6 +7123,18 @@ footer {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.15rem;
+}
+
+.experimental-coverage-quality {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(114, 216, 170, 0.28);
+  border-radius: 0.5rem;
+  color: var(--text-primary, #d8f5e8);
+}
+
+.experimental-coverage-quality small {
+  color: var(--text-muted, #8eb4a4);
 }
 .calculation-gate {
   padding: 0.2rem 0.45rem;
@@ -7502,4 +7606,139 @@ html[data-theme='light'] .api-reference-entry summary {
 html[data-theme='light'] .api-reference-entry summary strong,
 html[data-theme='light'] .api-reference-entry summary code {
   color: #17613f;
+}
+/* Shared shadcn-style adapters. These map to the existing Vantage theme and
+   remain intentionally small; domain panels continue to own their layout. */
+.vantage-button {
+  font: inherit;
+}
+.vantage-button.primary {
+  width: auto;
+  margin-top: 0;
+}
+.vantage-button:focus-visible {
+  outline: 2px solid #72d8aa;
+  outline-offset: 2px;
+}
+.vantage-button.ghost {
+  padding: 10px 13px;
+  color: var(--text-primary, #d8f5e8);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.vantage-button.ghost:hover {
+  background: rgba(114, 216, 170, 0.12);
+}
+.vantage-button.icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+.vantage-button.button-sm {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.vantage-button.button-lg {
+  padding: 13px 17px;
+  font-size: 15px;
+}
+.vantage-button.destructive {
+  color: #ffd8d8;
+  border-color: #9a5151;
+}
+.vantage-button.destructive:hover {
+  background: #482525;
+}
+.vantage-button .loading-spinner {
+  display: inline-block;
+  margin-right: 7px;
+}
+.vantage-separator {
+  width: 100%;
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background: var(--border-subtle, #2b463a);
+}
+.vantage-separator-vertical {
+  width: 1px;
+  height: 100%;
+}
+.vantage-skeleton {
+  min-height: 1rem;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #14221c 25%, #20352b 50%, #14221c 75%);
+  background-size: 200% 100%;
+  animation: vantage-skeleton-pulse 1.5s ease-in-out infinite;
+}
+@keyframes vantage-skeleton-pulse {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.vantage-card {
+  border: 1px solid var(--border-subtle, #2b463a);
+  border-radius: 10px;
+  background: var(--surface-panel, #14221c);
+}
+.vantage-card-header,
+.vantage-card-content,
+.vantage-card-footer {
+  padding: 14px;
+}
+.vantage-card-header + .vantage-card-content,
+.vantage-card-content + .vantage-card-footer {
+  padding-top: 0;
+}
+.vantage-tooltip,
+.vantage-popover,
+.vantage-dropdown-menu {
+  box-sizing: border-box;
+  max-width: min(24rem, calc(100vw - 1rem));
+  border: 1px solid var(--border, rgba(114, 216, 170, 0.42));
+  border-radius: 0.45rem;
+  background: var(--panel, #10271f);
+  color: var(--text, #e9fff4);
+  box-shadow: 0 0.7rem 2rem rgba(0, 0, 0, 0.35);
+}
+
+.vantage-tooltip {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.vantage-popover,
+.vantage-dropdown-menu {
+  padding: 0.35rem;
+}
+
+.vantage-dropdown-menu {
+  min-width: 10rem;
+}
+
+.vantage-dropdown-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: inherit;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vantage-dropdown-menu-item:hover,
+.vantage-dropdown-menu-item:focus-visible {
+  background: rgba(114, 216, 170, 0.14);
+  outline: none;
 }

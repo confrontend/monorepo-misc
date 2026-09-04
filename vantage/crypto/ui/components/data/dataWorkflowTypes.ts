@@ -69,6 +69,7 @@ export type DataHistoryCoverageRow = {
 export type DataHistoryCoverageResponse = {
   chain: string;
   targetDays: number;
+  depthMode?: 'requested' | 'maximum_available';
   depthMilestones: number[];
   generatedAt: string;
   availabilitySemantics: {
@@ -164,6 +165,7 @@ export type DataWorkflowRunResponse = {
   rosterWallets: string[];
   status: DataWorkflowRunStatus;
   completenessThresholdPercent: number;
+  depthMode: 'requested' | 'maximum_available';
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

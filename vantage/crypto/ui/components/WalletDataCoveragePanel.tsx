@@ -3,6 +3,7 @@ import type { ApiClient } from '../httpClient.js';
 import { DataTable } from './DataTable.js';
 import { FormattedDate } from './FormattedDate.js';
 import { StatusPill } from './StatusPill.js';
+import { Input } from './ui/input.js';
 
 export type WalletDataCoverageAssessment = 'complete_requested_window' | 'incomplete' | 'unknown';
 
@@ -179,7 +180,7 @@ export const WalletDataCoveragePanel = ({
         <div className="experimental-table-toolbar">
           <label className="experimental-wallet-filter">
             <span className="visually-hidden">{COPY.filterLabel}</span>
-            <input
+            <Input
               type="search"
               value={filter}
               onChange={(event) => setFilter(event.target.value)}

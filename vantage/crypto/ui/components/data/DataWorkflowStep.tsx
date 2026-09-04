@@ -33,7 +33,7 @@ export const DATA_WORKFLOW_STEP_DEFINITIONS: DataWorkflowStepDefinition[] = [
   {
     key: 'activity_history',
     title: 'Fetch activity history',
-    description: 'Walk each wallet’s GMGN activity pages through the requested history window.',
+    description: 'Walk each wallet’s GMGN activity pages to the provider’s available limit.',
   },
   {
     key: 'coverage_verification',

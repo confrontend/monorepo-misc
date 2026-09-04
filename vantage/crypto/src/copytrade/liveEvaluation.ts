@@ -782,7 +782,7 @@ export const computeLiveEvaluation = (
 
   const row = buildLiveGmgnWalletRow(database, walletAddress, { chain, periodDays: null, now });
   // Live Evaluation is read-only: this report consumes only already-persisted Dune matches.
-  // The 90-day scope is explicit in the proof while the legacy GMGN reference fields remain 30d.
+  // The authoritative proof uses all available delayed-copy history; legacy 30d fields remain display context.
   const delayedCopyWallet = computeCopySimulationReport(database, {
     walletAddresses: [walletAddress],
     chain,
@@ -808,7 +808,11 @@ export const computeLiveEvaluation = (
   };
   const riskBundle = buildGmgnRiskBundleEvidence(readGmgnRiskResults(database, [walletAddress])[0]);
   const winnerPolicyEvidence = delayedCopyWallet
-    ? buildWinnerPolicyEvidence(delayedCopyWallet, null, { activitySignals, riskBundle })
+    ? buildWinnerPolicyEvidence(delayedCopyWallet, null, {
+        activitySignals,
+        riskBundle,
+        evaluationTimestamp: now,
+      })
     : emptyWinnerPolicyEvidence(null);
   const winnerPolicy = evaluateWinnerPolicy(winnerPolicyEvidence);
 

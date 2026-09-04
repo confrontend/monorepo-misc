@@ -84,6 +84,7 @@ export type DataWorkflowStartOptions = {
   targetDays: number;
   traderLimit: number;
   walletAddresses?: string[];
+  depthMode?: 'requested' | 'maximum_available';
 };
 
 /**
@@ -722,7 +723,7 @@ const executeDataWorkflow = async (database: DatabaseSync, runId: number): Promi
       setStepRunning(database, runId, 'activity_history', 'gmgn_activity_fetch');
       const activity = startCopyTradeFetch(database, {
         limit: wallets.length,
-        periodDays: run.targetDays,
+        periodDays: run.depthMode === 'maximum_available' ? 365 : run.targetDays,
         chain: run.chain,
         walletAddresses: wallets,
         scope: 'roster',
@@ -817,6 +818,7 @@ export const startDataWorkflow = (
     traderLimit: wallets.length,
     rosterSnapshotId: roster.snapshotId,
     rosterWallets: wallets.map((wallet) => wallet.walletAddress),
+    depthMode: options.depthMode ?? 'maximum_available',
   });
   finishStep(database, runId, 'roster', 'completed', {
     underlyingRunId: roster.snapshotId,
@@ -843,7 +845,9 @@ export const runDataWorkflowStep = (
       {
         warning: state.counts.coverage.ready
           ? undefined
-          : `Coverage is ${state.counts.coverage.completePercent}% at the requested depth; ${state.counts.coverage.thresholdPercent}% is required.`,
+          : state.depthMode === 'maximum_available'
+            ? `Fetch has not reached the provider’s available end for ${state.counts.coverage.requiredWallets - state.counts.coverage.completeWallets} wallet${state.counts.coverage.requiredWallets - state.counts.coverage.completeWallets === 1 ? '' : 's'}.`
+            : `Coverage is ${state.counts.coverage.completePercent}% at the requested depth; ${state.counts.coverage.thresholdPercent}% is required.`,
       },
     );
     return { runId: options.runId, status: 'active' };
@@ -993,14 +997,18 @@ export const resumeDataWorkflow = (
  * invariant. */
 export const runDataWorkflowDune = (
   database: DatabaseSync,
-  options: { runId: number },
+  options: { runId: number; allowPartialDepth?: boolean },
 ): DataWorkflowActionResult => {
   const run = readDataWorkflowRun(database, options.runId);
   if (!run) throw new Error('Workflow run not found.');
   if (hasActiveFetchRun(database) || readGmgnStatsFetchStatus().running)
     throw new Error('Another GMGN fetch is already running.');
   const state = readDataWorkflowState(database, { runId: run.id });
-  if (!state.counts.coverage.ready) {
+  if (
+    !state.counts.coverage.ready &&
+    !options.allowPartialDepth &&
+    run.depthMode !== 'maximum_available'
+  ) {
     throw new Error(
       `Dune outcomes are blocked until ${state.counts.coverage.requiredWallets} wallets complete ${run.targetDays}-day history.`,
     );
@@ -1011,7 +1019,7 @@ export const runDataWorkflowDune = (
   void runCopySimulationBatch(database, {
     walletAddresses: run.rosterWallets,
     chain: run.chain,
-    periodDays: run.targetDays,
+    periodDays: run.depthMode === 'maximum_available' ? 365 : run.targetDays,
     workflowRunId: asWorkflowRunId(run.id),
     shouldStop: () => pauseRequested.has(run.id),
     onPlan: (plan) =>
@@ -1085,7 +1093,7 @@ export const retryDataWorkflowWallet = (
   setStepRunning(database, run.id, 'activity_history', 'gmgn_activity_fetch');
   const activity = startCopyTradeFetch(database, {
     limit: 1,
-    periodDays: run.targetDays,
+    periodDays: run.depthMode === 'maximum_available' ? 365 : run.targetDays,
     chain: run.chain,
     walletAddresses: [options.walletAddress],
     refreshWallets: [options.walletAddress],

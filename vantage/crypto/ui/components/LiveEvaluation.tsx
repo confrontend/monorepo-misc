@@ -38,13 +38,16 @@ type HistoryEntry = {
 type WinnerPolicy = {
   policyVersion: string;
   status: 'WINNER' | 'REJECTED' | 'UNPROVEN';
+  actionability?: 'ACTIONABLE' | 'REVIEW' | 'NOT_ACTIONABLE';
   finalScore: number | null;
   profitabilityScore: {
     score: number;
     max: number;
-    medianReturnScore: number;
     portfolioScore: number;
+    profitFactorScore: number;
     evidenceConfidenceScore: number;
+    robustnessScore: number;
+    weightedProfitFactor: number | null;
   } | null;
   gmgnRiskScore: {
     score: number;
@@ -365,7 +368,13 @@ export function LiveEvaluation({
               <div>
                 <h4>Authoritative Winner Policy · {result.winnerPolicy.policyVersion}</h4>
                 <p>
-                  <StatusPill status={result.winnerPolicy.status} />{' '}
+                  <StatusPill
+                    status={
+                      result.winnerPolicy.actionability === 'REVIEW'
+                        ? 'REVIEW'
+                        : result.winnerPolicy.status
+                    }
+                  />{' '}
                   {result.winnerPolicy.evidence.completedCopiedBuyOutcomes} completed copied-buy
                   outcomes · median {pct(result.winnerPolicy.evidence.medianReturnPercent)} · end{' '}
                   {usd(result.winnerPolicy.evidence.endingCapitalUsd)}
@@ -376,10 +385,11 @@ export function LiveEvaluation({
                     {result.winnerPolicy.profitabilityScore && (
                       <p>
                         Profitability {result.winnerPolicy.profitabilityScore.score} /{' '}
-                        {result.winnerPolicy.profitabilityScore.max} (median return{' '}
-                        {result.winnerPolicy.profitabilityScore.medianReturnScore}, portfolio{' '}
-                        {result.winnerPolicy.profitabilityScore.portfolioScore}, confidence{' '}
-                        {result.winnerPolicy.profitabilityScore.evidenceConfidenceScore})
+                        {result.winnerPolicy.profitabilityScore.max} (portfolio{' '}
+                        {result.winnerPolicy.profitabilityScore.portfolioScore}, profit factor{' '}
+                        {result.winnerPolicy.profitabilityScore.profitFactorScore}, confidence{' '}
+                        {result.winnerPolicy.profitabilityScore.evidenceConfidenceScore}, robustness{' '}
+                        {result.winnerPolicy.profitabilityScore.robustnessScore})
                       </p>
                     )}
                     {result.winnerPolicy.gmgnRiskScore && (

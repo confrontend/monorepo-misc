@@ -9,11 +9,11 @@ test('persisted report cache keys derive from the centralized version registry',
   );
   assert.equal(
     versionedCacheKey('decisionLab', 100, 'latest', 'fingerprint:updated'),
-    'experimental-decision:decision-lab-scoring-v12-copyability-diagnostics:100:latest:fingerprint:updated',
+    'experimental-decision:decision-lab-scoring-v14-uncopyable-gate:100:latest:fingerprint:updated',
   );
   assert.equal(
     versionedCacheKey('copySimulation', 30, 'scope-hash'),
-    'copy-simulation-v2:30:scope-hash',
+    'copy-simulation-v4-uncopyable-gate:30:scope-hash',
   );
   assert.equal(
     CACHE_VERSIONS.patternDiscovery,

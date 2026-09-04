@@ -1410,7 +1410,9 @@ export function App() {
         onMenuChange={navigateTo}
       />
 
-      <OverviewSection stats={stats} gmgnStatus={gmgnStatus} />
+      {false && (
+        <>
+          <OverviewSection stats={stats} gmgnStatus={gmgnStatus} />
 
       <section id="imports" className="menu-section work-grid">
         <article className="panel upload-panel">
@@ -2925,6 +2927,9 @@ export function App() {
           </table>
         </div>
       </Collapsible>
+
+        </>
+      )}
 
       <section id="copytrade" className="menu-section panel copytrade-panel">
         <CopyTradeSubTabContent

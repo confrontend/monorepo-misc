@@ -21,7 +21,11 @@ import {
   type HistoricalEvidenceContext,
 } from './evidence/historicalEvidenceContext.js';
 import { computeCopySimulationReport } from './simulation/copySimulation.js';
-import { buildWinnerPolicyEvidence, emptyWinnerPolicyEvidence } from './winnerPolicyEvidence.js';
+import {
+  buildGmgnRiskBundleEvidence,
+  buildWinnerPolicyEvidence,
+  emptyWinnerPolicyEvidence,
+} from './winnerPolicyEvidence.js';
 import {
   evaluateWinnerPolicy,
   WINNER_POLICY_VERSION,
@@ -594,7 +598,6 @@ const evidenceFor = (
     ExperimentalDecisionWallet['scores'],
     'edge' | 'consistency' | 'robustness' | 'copyability'
   >,
-  periodDays: 30 | 60 | 90,
 ): ExperimentalDecisionWallet['evidence'] => {
   if (Object.values(scores).some((score) => score === null))
     return {
@@ -605,7 +608,7 @@ const evidenceFor = (
     return { level: 'partial', detail: 'GMGN history is incomplete for this wallet.' };
   return {
     level: 'complete',
-    detail: `${row.trades} locally reconstructed activity trades in the last ${periodDays} days; all four activity scores are available.`,
+    detail: `${row.trades} locally reconstructed GMGN activity trades are available for the activity context; all four activity scores are available.`,
   };
 };
 
@@ -724,18 +727,17 @@ export const computeExperimentalDecisionReport = (
         featureSnapshots.get(row.walletAddress)?.features.priorWalletTradesPerActiveDay ?? null,
       walletAgeDays: row.riskEvidence.walletAgeDays,
     };
-    // Decision Lab evaluates historical periods; a current-only GMGN risk-bundle snapshot can
-    // never be retroactively valid for a past evaluation window, so it is never populated here.
+    const riskBundle = buildGmgnRiskBundleEvidence(riskByWallet.get(row.walletAddress));
     const winnerPolicy = delayedCopy
       ? evaluateWinnerPolicy(
-          buildWinnerPolicyEvidence(delayedCopy, null, { activitySignals, riskBundle: null }),
+          buildWinnerPolicyEvidence(delayedCopy, null, {
+            activitySignals,
+            riskBundle,
+            evaluationTimestamp: now,
+          }),
         )
       : evaluateWinnerPolicy(emptyWinnerPolicyEvidence(null));
-    const evidence = evidenceFor(
-      row,
-      { edge, consistency, robustness, copyability },
-      selectedPeriodDays,
-    );
+    const evidence = evidenceFor(row, { edge, consistency, robustness, copyability });
     // The legacy analytical score is descriptive only. It remains unavailable when one of its
     // component inputs is missing, but it no longer applies an independent 100-GMGN-trade gate.
     const rawOverall =
@@ -901,7 +903,7 @@ export const computeExperimentalDecisionReport = (
     source: 'saved SQLite evidence',
     winnerPolicyVersion: WINNER_POLICY_VERSION,
     methodology: [
-      `${periodDays}-day saved GMGN report calculated through the shared point-in-time wallet feature engine; the analytical score is separate from the Winner Policy, which reads persisted canonical Dune evidence without fetching.`,
+      'All available saved GMGN history is evaluated through the shared point-in-time wallet feature engine; recent observations receive more weight through the 45-day decay.',
       'Raw overall scores require all four selected-period activity components; thinner samples remain unavailable. Candidate status is descriptive only; authoritative winner status uses the Winner Policy gates.',
       'Copyability is an execution-feasibility index, not a probability of success; its local activity inputs are hold duration, fast round trips, ultra-fast activity, supplementary promoted rules, and sample confidence.',
       'The hold contribution uses logarithmic interpolation from 15 seconds to an explicit four-hour cap so materially different execution speeds remain distinguishable.',
@@ -916,7 +918,7 @@ export const computeExperimentalDecisionReport = (
         : 'No cross-coverage promoted pattern supplied a supplementary Copyability adjustment; direct fast-round-trip and under-15-second penalties remain active.',
       'Profit concentration is neutral in Robustness; the score uses performance after removing the best token until stronger evidence supports a reward or penalty.',
       'This tab does not replace or modify the production decision engine.',
-      `Winner Policy ${WINNER_POLICY_VERSION} is authoritative for WINNER/REJECTED/UNPROVEN status. It uses persisted canonical delayed-copy evidence only: positive median, fixed-$100 portfolio growth, at least 20 completed copied-buy outcomes, and three chronological holdout windows with at least two profitable.`,
+      `Winner Policy ${WINNER_POLICY_VERSION} is authoritative for WINNER/REJECTED/UNPROVEN status. Its hard gates are at least 20 completed copied-buy outcomes, profitable fixed-$100 chronological portfolio growth, actionable Dune evidence, and profitability that survives removal of sub-60-second trades. The recency-weighted median remains diagnostic only.`,
       'Pattern Discovery and official GMGN aggregate snapshots are never used as Winner Policy proof.',
     ],
     weighting,

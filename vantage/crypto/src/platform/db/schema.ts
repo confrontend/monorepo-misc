@@ -1825,6 +1825,21 @@ const migrations: Migration[] = [
         );
     },
   },
+  {
+    description: 'Allow Data workflow runs to fetch maximum available history depth',
+    up: (database) => {
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_data_workflow_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('depth_mode'))
+        database.exec(
+          "ALTER TABLE copytrade_data_workflow_runs ADD COLUMN depth_mode TEXT NOT NULL DEFAULT 'requested' CHECK (depth_mode IN ('requested', 'maximum_available'))",
+        );
+    },
+  },
 ];
 
 export const latestSchemaVersion = migrations.length;

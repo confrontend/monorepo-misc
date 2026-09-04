@@ -24,7 +24,8 @@ export type DataHistoryCoveragePanelProps = {
 
 const numberFormatter = new Intl.NumberFormat('en-CA');
 
-const statusLabel = (status: HistoryDepthStatus): string => {
+const statusLabel = (status: HistoryDepthStatus, maximumAvailable = false): string => {
+  if (maximumAvailable && status === 'reached_target') return 'Provider limit reached';
   if (status === 'reached_target') return 'Reached target';
   if (status === 'pagination_exhausted') return 'Pagination exhausted';
   if (status === 'not_fetched') return 'Not fetched';
@@ -93,8 +94,11 @@ export function DataHistoryCoveragePanel({
         </div>
         {response && (
           <small>
-            {response.chain.toUpperCase()} · target {response.targetDays}d · generated{' '}
-            <FormattedDate value={response.generatedAt} />
+            {response.chain.toUpperCase()} ·{' '}
+            {response.depthMode === 'maximum_available'
+              ? 'maximum available'
+              : `target ${response.targetDays}d`}{' '}
+            · generated <FormattedDate value={response.generatedAt} />
           </small>
         )}
       </div>
@@ -129,7 +133,11 @@ export function DataHistoryCoveragePanel({
         onToggle={setShowWalletTable}
         summary={
           <>
-            <strong>Wallet coverage at {horizon}d</strong>
+            <strong>
+              {response?.depthMode === 'maximum_available'
+                ? 'Available history by wallet'
+                : `Wallet coverage at ${horizon}d`}
+            </strong>
             <span>
               {numberFormatter.format(rows.length)} of {numberFormatter.format(totalWallets)}{' '}
               wallets
@@ -205,7 +213,7 @@ export function DataHistoryCoveragePanel({
                 viewingConfiguredDepth ? (
                   <div>
                     <StatusPill status={statusTone(row.status)}>
-                      {statusLabel(row.status)}
+                      {statusLabel(row.status, response?.depthMode === 'maximum_available')}
                     </StatusPill>
                     <small>
                       Deepest verified:{' '}

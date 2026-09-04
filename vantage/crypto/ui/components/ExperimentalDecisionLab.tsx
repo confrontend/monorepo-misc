@@ -1,9 +1,13 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import { GmgnTag } from './GmgnTag.js';
 import { WalletDataCoveragePanel } from './WalletDataCoveragePanel.js';
 import { DataStatusSummary } from './data/DataStatusSummary.js';
+import { Input } from './ui/input.js';
+import { Switch } from './ui/switch.js';
+import { Checkbox } from './ui/checkbox.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip.js';
 import { strings } from '../strings.js';
 import type { ApiClient } from '../httpClient.js';
 
@@ -17,18 +21,25 @@ type LabWallet = {
   winnerPolicy: {
     policyVersion: string;
     status: 'WINNER' | 'REJECTED' | 'UNPROVEN';
+    actionability?: 'ACTIONABLE' | 'REVIEW' | 'NOT_ACTIONABLE';
     finalScore: number | null;
     proofGates: {
       completedCopiedTrades: { status: string; detail: string };
-      medianDelayedCopyPositive: { status: string; detail: string };
       simulatedPortfolioPositive: { status: string; detail: string };
+      duneEvidenceActionable: { status: string; detail: string };
+      uncopyableProfitDependency: { status: string; detail: string };
     };
     profitabilityScore: {
       score: number;
       max: number;
-      medianReturnScore: number;
       portfolioScore: number;
+      profitFactorScore: number;
       evidenceConfidenceScore: number;
+      robustnessScore: number;
+      weightedProfitFactor: number | null;
+      bestTradeProfitSharePercent: number | null;
+      bestThreeProfitSharePercent: number | null;
+      portfolioWithoutBestTradeEndingCapitalUsd: number | null;
     } | null;
     gmgnRiskScore: {
       score: number;
@@ -41,7 +52,14 @@ type LabWallet = {
         tokenRisk: number;
         costs: number;
         walletAge: number;
-        walletAge: number;
+      };
+      deductionDetails?: {
+        executionSpeed: string;
+        hyperactivity: string;
+        tradeQuality: string;
+        tokenRisk: string;
+        costs: string;
+        walletAge: string;
       };
     } | null;
     gates: Array<{ label: string; status: string; detail: string }>;
@@ -55,6 +73,7 @@ type LabWallet = {
       medianReturnPercent: number | null;
       startingCapitalUsd: number;
       endingCapitalUsd: number | null;
+      capitalPath?: Array<{ day: string; capitalUsd: number }>;
       riskBundle: { fetchedAt: string } | null;
       holdouts: Array<{
         index: number;
@@ -63,6 +82,20 @@ type LabWallet = {
         endingCapitalUsd: number | null;
         profitable: boolean | null;
       }>;
+      coverageQuality?: {
+        status: string;
+        operationalStatus?: 'PENDING' | 'GOOD' | 'REVIEW' | 'UNPROVEN';
+        missingTradeMateriality?: {
+          severity: 'LOW' | 'MODERATE' | 'HIGH';
+          aggregateInterpretation: string;
+        };
+        eligibleTrips: number;
+        simulatedTrips: number;
+        confirmedMissing: { total: number; missingEntry: number; missingExit: number };
+        pendingTrips: number;
+        coveragePercent: number | null;
+        reason: string;
+      };
     };
   };
   scores: {
@@ -141,6 +174,21 @@ type LabWallet = {
   }> | null;
   risks: string[];
 };
+
+const fallbackDeductionDetail = (rule: string, deduction: number): string => {
+  const labels: Record<string, string> = {
+    executionSpeed: 'Execution-speed penalty',
+    hyperactivity: 'Hyperactivity penalty',
+    tradeQuality: 'Trade-quality penalty',
+    tokenRisk: 'Token/security-risk penalty',
+    costs: 'Cost/fee penalty',
+    walletAge: 'Wallet-maturity penalty',
+  };
+  const label = labels[rule] ?? 'GMGN risk penalty';
+  return deduction > 0
+    ? `${label}: −${deduction} points; detailed source metrics are unavailable in this saved result.`
+    : `${label}: no points deducted; no qualifying signal is present in this saved result.`;
+};
 type LabResponse = {
   generatedAt: string;
   periodDays: number;
@@ -163,6 +211,8 @@ type LabSortKey =
   | 'rank'
   | 'wallet'
   | 'evidence'
+  | 'winnerScore'
+  | 'coverageQuality'
   | 'edge'
   | 'consistency'
   | 'robustness'
@@ -184,6 +234,55 @@ const usd = (value: number | null) =>
         currency: 'USD',
         maximumFractionDigits: value < 10 ? 2 : 0,
       }).format(value);
+const coverageQualityLabel = (status: string): string => {
+  switch (status) {
+    case 'GOOD_COVERAGE_NO_OBVIOUS_BIAS':
+      return 'Reliable';
+    case 'PARTIAL_COVERAGE_MISSING_SET_SIMILAR':
+      return 'Incomplete, no obvious bias';
+    case 'POSSIBLE_OPTIMISTIC_BIAS':
+      return 'Possible optimistic bias';
+    case 'POSSIBLE_CONSERVATIVE_BIAS':
+      return 'Possible conservative bias';
+    case 'INCOMPLETE_COVERAGE_REQUIRES_REVIEW':
+      return 'Incomplete, review coverage';
+    case 'PENDING_DUNE':
+      return 'Pending Dune data';
+    default:
+      return 'Insufficient to assess';
+  }
+};
+const operationalCoverageLabel = (quality: {
+  status: string;
+  operationalStatus?: string;
+}): string =>
+  quality.operationalStatus === 'PENDING'
+    ? 'Pending'
+    : quality.operationalStatus === 'REVIEW'
+      ? 'Review'
+      : quality.operationalStatus === 'UNPROVEN'
+        ? 'Unproven'
+        : quality.operationalStatus === 'GOOD'
+          ? 'Good'
+          : coverageQualityLabel(quality.status);
+const coverageQualityExplanation = (status: string): string => {
+  switch (status) {
+    case 'GOOD_COVERAGE_NO_OBVIOUS_BIAS':
+      return 'Enough trades have Dune results, with no obvious sign that missing data is distorting the result.';
+    case 'PARTIAL_COVERAGE_MISSING_SET_SIMILAR':
+      return 'Some trades are missing Dune results, but the available and missing trades do not look materially different.';
+    case 'POSSIBLE_OPTIMISTIC_BIAS':
+      return 'Dune-covered trades look better than missing trades, so displayed profitability may be too positive.';
+    case 'POSSIBLE_CONSERVATIVE_BIAS':
+      return 'Missing trades look better than Dune-covered trades, so displayed profitability may be too pessimistic.';
+    case 'INCOMPLETE_COVERAGE_REQUIRES_REVIEW':
+      return 'Many trades are missing and the missing group looks different enough to review before relying on the result.';
+    case 'PENDING_DUNE':
+      return 'Trades are waiting to be queried by Dune; the evidence is not finished yet.';
+    default:
+      return 'There is not enough information to determine whether missing Dune data creates bias.';
+  }
+};
 const score = (value: number | null) => (value === null ? '—' : `${Math.round(value)}`);
 const candidateStatusLabel = (status: LabWallet['candidateStatus']) =>
   ({
@@ -254,26 +353,100 @@ const TableTooltip = ({
   label: string;
   detail: string;
   className?: string;
-}) => (
-  <span className={`experimental-tooltip-cell ${className ?? ''}`} tabIndex={0}>
-    {children}
-    <span className="experimental-table-tooltip" role="tooltip">
-      <b>{label}</b>
-      <p>{detail}</p>
-    </span>
-  </span>
-);
-const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
-  <span className="experimental-tooltip-cell experimental-facts-cell" tabIndex={0}>
-    <span>
-      {pct(wallet.facts.activityMedianReturnPercent)} ·{' '}
-      {usd(wallet.facts.officialGmgnRealizedProfitUsd ?? null)}
+}) => {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`experimental-tooltip-cell ${className ?? ''}`} tabIndex={0}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="experimental-table-tooltip" side="top">
+        <b>{label}</b>
+        <p>{detail}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+const CapitalPathChart = ({ path }: { path: Array<{ day: string; capitalUsd: number }> }) => {
+  const [zoom, setZoom] = useState(1);
+  const [hovered, setHovered] = useState<number | null>(null);
+  if (path.length < 2) return null;
+  const values = path.map((point) => point.capitalUsd);
+  const max = Math.max(100, ...values);
+  const min = Math.min(100, ...values);
+  const range = Math.max(1, max - min);
+  return (
+    <section className="copytrade-capital-chart-block" aria-label="Daily $100 after-copy portfolio">
+      <div className="capital-path-chart-heading">
+        <strong>$100 after-copy path</strong>
+        <button
+          type="button"
+          className="capital-path-reset"
+          onClick={() => setZoom(1)}
+          disabled={zoom === 1}
+        >
+          Reset 100%
+        </button>
+      </div>
+      <div
+        className="capital-path-chart"
+        onWheel={(event) => {
+          event.preventDefault();
+          setZoom((value) => Math.max(1, Math.min(6, value * (event.deltaY < 0 ? 1.2 : 0.84))));
+        }}
+      >
+        <div className="capital-path-y-axis">
+          <span>${max.toFixed(0)}</span>
+          <span>$100</span>
+          <span>${min.toFixed(0)}</span>
+        </div>
+        <div className="capital-path-plot">
+          <div className="capital-path-bars" style={{ width: `${zoom * 100}%` }}>
+            {path.map((point, index) => (
+              <span
+                key={point.day}
+                className={`capital-path-bar ${point.capitalUsd >= 100 ? 'positive' : 'negative'}`}
+                style={{ height: `${Math.max(2, ((point.capitalUsd - min) / range) * 100)}%` }}
+                onMouseEnter={() => setHovered(index)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                {hovered === index && (
+                  <b className="capital-path-tooltip">
+                    {point.day}
+                    <strong>${point.capitalUsd.toFixed(2)}</strong>
+                  </b>
+                )}
+              </span>
+            ))}
+          </div>
+          <div className="capital-path-x-axis">
+            <span>{path[0].day}</span>
+            <span>{path[path.length - 1].day}</span>
+          </div>
+        </div>
+      </div>
       <small>
-        {wallet.facts.activityTradeCount} local activity trades ({wallet.facts.activityPeriodDays}d)
-        · official {wallet.facts.officialGmgnPeriod ?? 'GMGN unavailable'} profit
+        Dates → · portfolio value ($) ↑ · latest ${path[path.length - 1].capitalUsd.toFixed(2)} ·
+        wheel to zoom
       </small>
-    </span>
-    <span className="experimental-table-tooltip experimental-facts-tooltip" role="tooltip">
+    </section>
+  );
+};
+const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="experimental-tooltip-cell experimental-facts-cell" tabIndex={0}>
+        <span>
+          {pct(wallet.facts.activityMedianReturnPercent)} ·{' '}
+          {usd(wallet.facts.officialGmgnRealizedProfitUsd ?? null)}
+          <small>
+            {wallet.facts.activityTradeCount} local activity trades ({wallet.facts.activityPeriodDays}d)
+          </small>
+        </span>
+      </span>
+    </TooltipTrigger>
+    <TooltipContent className="experimental-table-tooltip experimental-facts-tooltip" side="top">
       <b>Saved facts</b>
       <span>
         <strong>Local activity median return</strong>
@@ -314,40 +487,9 @@ const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
             : `${Math.round(wallet.facts.activityMedianHoldSeconds)}s`}
         </em>
       </span>
-    </span>
-  </span>
+    </TooltipContent>
+  </Tooltip>
 );
-const legacyScoreDetail = (
-  wallet: LabWallet,
-  key: 'edge' | 'consistency' | 'robustness' | 'copyability' | 'overall',
-) => {
-  if (key === 'edge')
-    return {
-      label: 'Historical profitability',
-      detail: `Based on the locally reconstructed ${wallet.facts.activityPeriodDays}-day median return (${pct(wallet.facts.activityMedianReturnPercent)}).`,
-    };
-  if (key === 'copyability')
-    return {
-      label: 'Copyability',
-      detail: `Uses the canonical local ${wallet.facts.activityPeriodDays}-day execution-feasibility calculation: gradual hold-time contribution, direct fast-activity penalties, sample confidence, and supplementary promoted rules.`,
-    };
-  if (key === 'consistency')
-    return {
-      label: 'Consistency',
-      detail: 'Calculated from the saved weekly and monthly GMGN performance periods.',
-    };
-  if (key === 'robustness')
-    return {
-      label: 'Robustness',
-      detail:
-        'Calculated from saved profit concentration and the return after removing the best token.',
-    };
-  return {
-    label: 'Overall',
-    detail:
-      'Weighted from edge 35%, consistency 25%, robustness 20%, and copyability 20%; missing inputs prevent a complete overall score.',
-  };
-};
 const evidenceOrder: Record<LabWallet['evidence']['level'], number> = {
   complete: 0,
   partial: 1,
@@ -358,6 +500,7 @@ const nullableNumber = (value: number | null) =>
   value === null ? Number.POSITIVE_INFINITY : value;
 const hasSortableValue = (wallet: LabWallet, key: LabSortKey) => {
   if (key === 'rank') return wallet.rank !== null;
+  if (key === 'winnerScore') return wallet.winnerPolicy.finalScore !== null;
   if (
     key === 'edge' ||
     key === 'consistency' ||
@@ -375,6 +518,10 @@ const hasSortableValue = (wallet: LabWallet, key: LabSortKey) => {
 };
 const compareWallets = (left: LabWallet, right: LabWallet, key: LabSortKey) => {
   if (key === 'rank') return nullableNumber(left.rank) - nullableNumber(right.rank);
+  if (key === 'winnerScore')
+    return (
+      nullableNumber(left.winnerPolicy.finalScore) - nullableNumber(right.winnerPolicy.finalScore)
+    );
   if (key === 'wallet')
     return (left.name?.trim() || left.walletAddress).localeCompare(
       right.name?.trim() || right.walletAddress,
@@ -412,11 +559,19 @@ const compareWallets = (left: LabWallet, right: LabWallet, key: LabSortKey) => {
     );
   return (left.tags ?? []).join(',').localeCompare((right.tags ?? []).join(','));
 };
-const exportDecisionLab = (response: LabResponse) => {
+const exportDecisionLab = (response: LabResponse, winnersOnly: boolean) => {
+  const wallets = winnersOnly
+    ? response.wallets.filter(
+        (wallet) =>
+          wallet.winnerPolicy.status === 'WINNER' && wallet.winnerPolicy.actionability !== 'REVIEW',
+      )
+    : response.wallets;
   const payload = {
     format: 'vantage-crypto-decision-lab-v1',
     exportedAt: new Date().toISOString(),
+    exportScope: winnersOnly ? 'winners' : 'all',
     ...response,
+    wallets,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: 'application/json;charset=utf-8',
@@ -424,7 +579,9 @@ const exportDecisionLab = (response: LabResponse) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `decision-lab-${response.periodDays}d-${new Date().toISOString().slice(0, 10)}.json`;
+  const policyVersion =
+    wallets[0]?.winnerPolicy.policyVersion.replace('winner-policy-', '') ?? 'v4';
+  link.download = `decision-lab-${winnersOnly ? 'winners' : 'all-history'}-${policyVersion}-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
 };
@@ -442,13 +599,27 @@ export function ExperimentalDecisionLab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<LabWallet | null>(null);
-  const [sort, setSort] = useState<LabSort>({ key: 'overall', direction: 'desc' });
+  const [sort, setSort] = useState<LabSort>({ key: 'winnerScore', direction: 'desc' });
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [scoringInfoOpen, setScoringInfoOpen] = useState(false);
   const [riskImportInfoOpen, setRiskImportInfoOpen] = useState(false);
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [walletFilter, setWalletFilter] = useState('');
+  const [selectedForDune, setSelectedForDune] = useState<Set<string>>(new Set());
+  const [dunePlan, setDunePlan] = useState<{ pendingTargets: number; message: string } | null>(
+    null,
+  );
+  const [dunePlansByWallet, setDunePlansByWallet] = useState<
+    Map<string, { pendingTargets: number; tradeCount: number }>
+  >(new Map());
+  const [duneFetchBusy, setDuneFetchBusy] = useState(false);
+  const [duneFetchProgress, setDuneFetchProgress] = useState<{
+    processed: number;
+    total: number;
+    failed: number;
+  } | null>(null);
+  const duneFetchObservedRunning = useRef(false);
   const load = (refresh = false) => {
     setLoading(true);
     setError(null);
@@ -478,7 +649,11 @@ export function ExperimentalDecisionLab({
     : [];
   const displayedWallets = (
     winnersOnly
-      ? sortedWallets.filter((wallet) => wallet.winnerPolicy.status === 'WINNER')
+      ? sortedWallets.filter(
+          (wallet) =>
+            wallet.winnerPolicy.status === 'WINNER' &&
+            wallet.winnerPolicy.actionability !== 'REVIEW',
+        )
       : sortedWallets
   ).filter((wallet) => {
     const query = walletFilter.trim().toLowerCase();
@@ -488,11 +663,133 @@ export function ExperimentalDecisionLab({
       (wallet.name?.toLowerCase().includes(query) ?? false)
     );
   });
+  useEffect(() => {
+    let disposed = false;
+    if (!selectedForDune.size) {
+      setDunePlan(null);
+      return undefined;
+    }
+    const query = encodeURIComponent([...selectedForDune].join(','));
+    void fetch(`/api/copytrade/decision/dune?walletAddresses=${query}`)
+      .then(async (result) => {
+        if (!result.ok) throw new Error(`Dune preflight failed (${result.status}).`);
+        return (await result.json()) as { pendingTargets: number; message: string };
+      })
+      .then((plan) => {
+        if (!disposed) setDunePlan(plan);
+      })
+      .catch(() => {
+        if (!disposed) setDunePlan({ pendingTargets: 0, message: 'Dune preflight unavailable.' });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [selectedForDune]);
+  useEffect(() => {
+    if (!response?.wallets.length) {
+      setDunePlansByWallet(new Map());
+      return undefined;
+    }
+    let disposed = false;
+    const query = encodeURIComponent(
+      response.wallets.map((wallet) => wallet.walletAddress).join(','),
+    );
+    void fetch(`/api/copytrade/decision/dune?walletAddresses=${query}`)
+      .then(async (result) => {
+        if (!result.ok) throw new Error('Dune preflight unavailable.');
+        return (await result.json()) as {
+          wallets?: Array<{ walletAddress: string; pendingTargets: number; tradeCount: number }>;
+        };
+      })
+      .then((plan) => {
+        if (!disposed) {
+          setDunePlansByWallet(
+            new Map(
+              (plan.wallets ?? []).map((wallet) => [
+                wallet.walletAddress,
+                {
+                  pendingTargets: wallet.pendingTargets,
+                  tradeCount: wallet.tradeCount,
+                },
+              ]),
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        if (!disposed) setDunePlansByWallet(new Map());
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [response]);
+  const startSelectedDuneFetch = async () => {
+    if (!selectedForDune.size || !dunePlan?.pendingTargets) return;
+    setDuneFetchBusy(true);
+    setLoading(true);
+    setError(null);
+    duneFetchObservedRunning.current = false;
+    setDuneFetchProgress({ processed: 0, total: dunePlan.pendingTargets, failed: 0 });
+    try {
+      const result = await fetch('/api/copytrade/decision/dune', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ walletAddresses: [...selectedForDune] }),
+      });
+      if (!result.ok) throw new Error(`Dune fetch could not start (${result.status}).`);
+      setSelectedForDune(new Set());
+      setDunePlan(null);
+    } catch (reason) {
+      setImportMessage(reason instanceof Error ? reason.message : 'Dune fetch could not start.');
+      setDuneFetchBusy(false);
+      setDuneFetchProgress(null);
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (!duneFetchBusy) return undefined;
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const result = await fetch('/api/copytrade/copy-simulation/status');
+        if (!result.ok) return;
+        const status = (await result.json()) as {
+          running?: boolean;
+          targetsTotal?: number;
+          targetsProcessed?: number;
+          failedTargets?: number;
+        };
+        if (disposed) return;
+        setDuneFetchProgress((previous) => ({
+          processed: status.targetsProcessed ?? previous?.processed ?? 0,
+          total: status.targetsTotal ?? previous?.total ?? 0,
+          failed: status.failedTargets ?? previous?.failed ?? 0,
+        }));
+        if (status.running === true) duneFetchObservedRunning.current = true;
+        if (
+          status.running === false &&
+          (duneFetchObservedRunning.current || (status.targetsTotal ?? 0) > 0)
+        ) {
+          setDuneFetchBusy(false);
+          setDuneFetchProgress(null);
+          load(true);
+        }
+      } catch {
+        // Keep the button in its current state; the next poll retries.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [duneFetchBusy]);
   const toggleSort = (key: LabSortKey) =>
     setSort((current) =>
       current.key === key
         ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
-        : { key, direction: key === 'overall' ? 'desc' : 'asc' },
+        : { key, direction: key === 'winnerScore' ? 'desc' : 'asc' },
     );
   const sortableHeader = (key: LabSortKey, label: string, title = `Sort by ${label}`) => (
     <button
@@ -648,8 +945,12 @@ export function ExperimentalDecisionLab({
           </button>
         </div>
       </div>
-      <DataStatusSummary api={api} targetDays={response?.periodDays ?? 30} />
-      <WalletDataCoveragePanel api={api} periodDays={periodDays} />
+      {!loading && (
+        <>
+          <DataStatusSummary api={api} targetDays={response?.periodDays ?? 90} />
+          <WalletDataCoveragePanel api={api} periodDays={periodDays} />
+        </>
+      )}
       {loading && (
         <p className="copytrade-analysis-status running">
           <span className="loading-spinner" /> Reading saved SQLite evidence…
@@ -660,27 +961,6 @@ export function ExperimentalDecisionLab({
       {response && !loading && (
         <>
           <div className="experimental-scoring-card">
-            <section className="experimental-model-block">
-              <span className="experimental-model-icon" aria-hidden="true">
-                ☷
-              </span>
-              <div>
-                <strong>Analytical / research scores</strong>
-                <p className="muted">{strings.decisionLab.analyticalSummary}</p>
-                <div className="experimental-weight-bars">
-                  {response.weighting &&
-                    Object.entries(response.weighting.weights).map(([key, value]) => (
-                      <div key={key}>
-                        <span>{key[0].toUpperCase() + key.slice(1)}</span>
-                        <i>
-                          <b style={{ width: `${value * 100}%` }} />
-                        </i>
-                        <em>{(value * 100).toFixed(0)}%</em>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </section>
             <section className="experimental-model-block">
               <span className="experimental-model-icon" aria-hidden="true">
                 ✓
@@ -694,20 +974,6 @@ export function ExperimentalDecisionLab({
                   ))}
                 </div>
                 <small>{strings.decisionLab.winnerPolicyScoreSummary}</small>
-              </div>
-            </section>
-            <section className="experimental-model-block">
-              <span className="experimental-model-icon" aria-hidden="true">
-                ✦
-              </span>
-              <div>
-                <strong>Pattern profile</strong>
-                <p>
-                  {response.weighting?.mode === 'validated-patterns'
-                    ? `Promoted rules active · ${response.weighting.supportingThresholds.length ? `${Math.min(...response.weighting.supportingThresholds)}–${Math.max(...response.weighting.supportingThresholds)}% coverage` : 'validated coverage'} · ${response.weighting.supportingWallets} supporting wallets`
-                    : 'Fallback / insufficient pattern support'}
-                </p>
-                <small>Evidence: saved {response.periodDays}-day GMGN data</small>
               </div>
             </section>
             <button
@@ -728,7 +994,7 @@ export function ExperimentalDecisionLab({
             >
               <div className="copytrade-modal-head">
                 <div>
-                  <p className="eyebrow">DECISION ENGINE · EXPLANATION</p>
+                  <p className="eyebrow">WINNER POLICY v3 · EXPLANATION</p>
                   <h3>How the score is calculated</h3>
                 </div>
                 <button
@@ -739,50 +1005,22 @@ export function ExperimentalDecisionLab({
                   Close
                 </button>
               </div>
-              <h4>Scoring model</h4>
-              <p>{strings.decisionLab.scoringRule}</p>
-              <div className="experimental-scoring-grid">
-                {(['edge', 'consistency', 'robustness', 'copyability'] as const).map((key) => (
-                  <div key={key}>
-                    <strong>{key[0].toUpperCase() + key.slice(1)}</strong>
-                    <span>{strings.decisionLab.componentDescriptions[key]}</span>
-                  </div>
-                ))}
-              </div>
-              <h4>Active rules</h4>
+              <h4>Hard gates</h4>
               <ul className="experimental-rule-list">
-                <li>Scores are capped from 0 to 100; missing inputs are not treated as zero.</li>
-                <li>Edge uses the typical saved GMGN realized return.</li>
-                <li>Consistency uses positive saved weekly and monthly periods.</li>
-                <li>
-                  Robustness uses return after removing the best token; concentration is neutral.
-                </li>
-                <li>
-                  Copyability uses holding time, less validated fast-trading and activity penalties.
-                </li>
-                <li>
-                  Pattern rules:{' '}
-                  {response.weighting?.mode === 'validated-patterns'
-                    ? 'promoted patterns only, repeated across validated coverage levels.'
-                    : 'none active; neutral fallback is in use.'}
-                </li>
-                <li>
-                  Winner Policy gates: 20+ copied buys, positive delayed-copy median, and a $100
-                  portfolio ending above $100.
-                </li>
+                <li>20+ actual completed delayed-copy buys, otherwise UNPROVEN.</li>
+                <li>Chronological canonical $100 portfolio must end above $100.</li>
+                <li>Profitability must survive removal of sub-60-second trades.</li>
               </ul>
-              <h4>Final candidate gates</h4>
+              <h4>Score</h4>
               <p>
-                <strong>{strings.decisionLab.candidateGatesLabel}</strong>{' '}
-                {strings.decisionLab.candidateGates}
+                70 points come from delayed-copy profitability. 30 points start at 30 and are
+                reduced by GMGN execution, trade-quality, cost, token-risk, and wallet-maturity
+                deductions. Historical metrics use a 45-day decay.
               </p>
-              <h4>Pattern support</h4>
-              <p>
-                {response.weighting?.mode === 'validated-patterns'
-                  ? `Promoted rules · ${response.weighting.supportingThresholds.length ? `${Math.min(...response.weighting.supportingThresholds)}–${Math.max(...response.weighting.supportingThresholds)}% coverage` : 'validated coverage'} · ${response.weighting.supportingWallets} supporting wallets.`
-                  : 'Fallback profile: no promoted pattern support is active.'}
+              <p className="muted">
+                Holdouts, Pattern Discovery, legacy analytical scores, and best-token concentration
+                are context only.
               </p>
-              <p className="muted">{strings.decisionLab.missingEvidence}</p>
               <small className="muted">
                 {strings.decisionLab.generatedAt(new Date(response.generatedAt).toLocaleString())}
               </small>
@@ -792,7 +1030,7 @@ export function ExperimentalDecisionLab({
             <div className="experimental-table-controls">
               <label className="experimental-wallet-filter">
                 <span className="visually-hidden">Filter wallets</span>
-                <input
+                <Input
                   type="search"
                   value={walletFilter}
                   onChange={(event) => setWalletFilter(event.target.value)}
@@ -801,8 +1039,7 @@ export function ExperimentalDecisionLab({
                 />
               </label>
               <label className={`experimental-winners-toggle${winnersOnly ? ' active' : ''}`}>
-                <input
-                  type="checkbox"
+                <Switch
                   checked={winnersOnly}
                   onChange={(event) => setWinnersOnly(event.target.checked)}
                 />
@@ -815,11 +1052,29 @@ export function ExperimentalDecisionLab({
                 <button
                   type="button"
                   className="secondary experimental-export-table-button"
-                  onClick={() => exportDecisionLab(response)}
+                  onClick={() => exportDecisionLab(response, winnersOnly)}
                   disabled={loading || importing}
                 >
-                  {strings.decisionLab.exportAllWithDetails}
+                  {winnersOnly
+                    ? strings.decisionLab.exportWinnersData
+                    : strings.decisionLab.exportAllWithDetails}
                 </button>
+              )}
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void startSelectedDuneFetch()}
+                disabled={duneFetchBusy || !selectedForDune.size || !dunePlan?.pendingTargets}
+                title={dunePlan?.message ?? 'Select wallets to check pending Dune data.'}
+              >
+                {duneFetchBusy
+                  ? `Fetching Dune data (${duneFetchProgress?.processed ?? 0}/${duneFetchProgress?.total ?? dunePlan?.pendingTargets ?? 0})`
+                  : `Fetch Dune data${selectedForDune.size ? ` (${selectedForDune.size})` : ''}`}
+              </button>
+              {selectedForDune.size > 0 && (
+                <small className="experimental-dune-fetch-plan" role="status">
+                  {dunePlan?.message ?? 'Counting pending Dune observations…'}
+                </small>
               )}
             </div>
             <p className="experimental-score-legend">{strings.decisionLab.tableLegend}</p>
@@ -836,6 +1091,26 @@ export function ExperimentalDecisionLab({
               onClick: () => setSelectedWallet(wallet),
             })}
             columns={[
+              {
+                key: 'duneSelect',
+                header: 'Select',
+                render: (wallet) => (
+                  <Checkbox
+                    aria-label={`Select ${wallet.name?.trim() || short(wallet.walletAddress)} for Dune fetch`}
+                    checked={selectedForDune.has(wallet.walletAddress)}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => {
+                      event.stopPropagation();
+                      setSelectedForDune((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) next.add(wallet.walletAddress);
+                        else next.delete(wallet.walletAddress);
+                        return next;
+                      });
+                    }}
+                  />
+                ),
+              },
               {
                 key: 'rank',
                 header: sortableHeader('rank', 'Rank'),
@@ -875,17 +1150,8 @@ export function ExperimentalDecisionLab({
                 ),
               },
               {
-                key: 'candidateStatus',
-                header: 'Legacy score status',
-                render: (wallet) => (
-                  <span className={`experimental-evidence ${wallet.candidateStatus}`}>
-                    {candidateStatusLabel(wallet.candidateStatus)}
-                  </span>
-                ),
-              },
-              {
                 key: 'winnerPolicy',
-                header: 'Winner Policy',
+                header: 'Policy',
                 render: (wallet) => (
                   <TableTooltip
                     className={`experimental-evidence ${wallet.winnerPolicy.status.toLowerCase()}`}
@@ -899,68 +1165,54 @@ export function ExperimentalDecisionLab({
                       ].join(' ') || 'All fixed policy gates passed.'
                     }
                   >
-                    {wallet.winnerPolicy.status}
-                    {wallet.winnerPolicy.finalScore !== null &&
-                      ` · ${wallet.winnerPolicy.finalScore}`}
+                    {wallet.winnerPolicy.actionability === 'REVIEW'
+                      ? 'REVIEW'
+                      : wallet.winnerPolicy.status}
                   </TableTooltip>
                 ),
               },
               {
-                key: 'edge',
-                header: sortableHeader('edge', 'Edge score'),
-                headerProps: { className: 'experimental-score-column' },
-                cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => (
-                  <ScoreCell wallet={wallet} scoreKey="edge" value={wallet.scores.edge} />
-                ),
+                key: 'coverageQuality',
+                header: 'Dune evidence',
+                render: (wallet) => {
+                  const quality = wallet.winnerPolicy.evidence.coverageQuality;
+                  if (!quality) return '—';
+                  const coverage =
+                    quality.coveragePercent === null
+                      ? '—'
+                      : `${quality.coveragePercent.toFixed(0)}%`;
+                  return (
+                    <TableTooltip
+                      className={
+                        quality.operationalStatus === 'UNPROVEN' ||
+                        quality.operationalStatus === 'PENDING' ||
+                        quality.operationalStatus === 'REVIEW'
+                          ? 'experimental-evidence insufficient'
+                          : 'experimental-evidence complete'
+                      }
+                      label="Dune evidence quality"
+                      detail={`${coverageQualityExplanation(quality.status)} ${quality.reason} ${quality.simulatedTrips}/${quality.eligibleTrips} trips simulated; ${quality.pendingTrips} pending.`}
+                    >
+                      {coverage} · {operationalCoverageLabel(quality)}
+                    </TableTooltip>
+                  );
+                },
               },
               {
-                key: 'consistency',
-                header: sortableHeader('consistency', 'Consistency score'),
-                headerProps: { className: 'experimental-score-column' },
-                cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => (
-                  <ScoreCell
-                    wallet={wallet}
-                    scoreKey="consistency"
-                    value={wallet.scores.consistency}
-                  />
-                ),
+                key: 'dunePreflight',
+                header: 'Dune preflight',
+                render: (wallet) => {
+                  const plan = dunePlansByWallet.get(wallet.walletAddress);
+                  if (!plan) return '—';
+                  if (plan.pendingTargets === 0) return 'Complete · 0 pending';
+                  return `${plan.pendingTargets.toLocaleString()} pending`;
+                },
               },
               {
-                key: 'robustness',
-                header: sortableHeader('robustness', 'Robustness score'),
-                headerProps: { className: 'experimental-score-column' },
-                cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => (
-                  <ScoreCell
-                    wallet={wallet}
-                    scoreKey="robustness"
-                    value={wallet.scores.robustness}
-                  />
-                ),
-              },
-              {
-                key: 'copyability',
-                header: sortableHeader('copyability', 'Copyability score'),
-                headerProps: { className: 'experimental-score-column' },
-                cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => (
-                  <ScoreCell
-                    wallet={wallet}
-                    scoreKey="copyability"
-                    value={wallet.scores.copyability}
-                  />
-                ),
-              },
-              {
-                key: 'overall',
-                header: sortableHeader('overall', 'Overall score'),
-                headerProps: { className: 'experimental-score-column' },
-                cellProps: () => ({ className: 'experimental-score-column' }),
-                render: (wallet) => (
-                  <ScoreCell wallet={wallet} scoreKey="overall" value={wallet.scores.overall} />
-                ),
+                key: 'winnerScore',
+                header: sortableHeader('winnerScore', 'Score'),
+                render: (wallet) =>
+                  wallet.winnerPolicy.finalScore === null ? '—' : wallet.winnerPolicy.finalScore,
               },
               {
                 key: 'facts',
@@ -969,25 +1221,57 @@ export function ExperimentalDecisionLab({
               },
               {
                 key: 'risk',
-                header: sortableHeader('risk', 'GMGN risk'),
+                header: sortableHeader('risk', 'GMGN snapshot'),
                 render: (wallet) =>
                   wallet.riskDetails?.available ? (
                     <TableTooltip
                       className="experimental-evidence complete"
-                      label="GMGN risk"
-                      detail="Saved GMGN 30-day risk details are available."
+                      label="GMGN snapshot"
+                      detail="Saved GMGN aggregate statistics are available. The Chrome-extension risk bundle is separate and may still be unavailable."
                     >
                       available
                     </TableTooltip>
                   ) : (
                     <TableTooltip
                       className="muted"
-                      label="GMGN risk"
-                      detail="No saved GMGN risk JSON for this wallet."
+                      label="GMGN snapshot"
+                      detail="No saved GMGN aggregate snapshot for this wallet."
                     >
                       not imported
                     </TableTooltip>
                   ),
+              },
+              {
+                key: 'riskData',
+                header: 'GMGN risk data',
+                render: (wallet) =>
+                  wallet.riskDetails?.available ? (
+                    <TableTooltip
+                      className="experimental-evidence complete"
+                      label="GMGN risk data"
+                      detail="Imported Chrome-extension GMGN risk data is available for this wallet."
+                    >
+                      available
+                    </TableTooltip>
+                  ) : (
+                    <TableTooltip
+                      className="experimental-evidence insufficient"
+                      label="GMGN risk data"
+                      detail="Chrome-extension GMGN risk data is unavailable. Import the wallet risk bundle via the extension to apply token/security-risk checks."
+                    >
+                      unavailable
+                    </TableTooltip>
+                  ),
+              },
+              {
+                key: 'walletAge',
+                header: 'Wallet age',
+                render: (wallet) => {
+                  const ageDays = wallet.winnerPolicy.gmgnRiskScore?.walletAgeDays;
+                  return ageDays === null || ageDays === undefined
+                    ? '—'
+                    : `${ageDays.toFixed(1)} days`;
+                },
               },
               {
                 key: 'tags',
@@ -1030,10 +1314,8 @@ export function ExperimentalDecisionLab({
                   Close
                 </button>
               </div>
-              <p className="muted">
-                Exploratory only. This dialog explains the score inputs; it does not change the
-                production verdict or fetch anything.
-              </p>
+              <p className="muted">Winner Policy v3 evidence and score calculation.</p>
+              <CapitalPathChart path={selectedWallet.winnerPolicy.evidence.capitalPath ?? []} />
               <section className="experimental-calculation-summary">
                 <div className="experimental-calculation-total">
                   <span>Winner Policy score</span>
@@ -1073,23 +1355,25 @@ export function ExperimentalDecisionLab({
                     {selectedWallet.winnerPolicy.profitabilityScore && (
                       <>
                         <div className="score-ledger-row" role="row">
-                          <span>Median delayed-copy return</span>
-                          <strong className="calculation-positive">
-                            +{selectedWallet.winnerPolicy.profitabilityScore.medianReturnScore}
-                          </strong>
-                          <small>
-                            {pct(selectedWallet.winnerPolicy.evidence.medianReturnPercent)} · up to
-                            30
-                          </small>
-                        </div>
-                        <div className="score-ledger-row" role="row">
                           <span>$100 portfolio growth</span>
                           <strong className="calculation-positive">
                             +{selectedWallet.winnerPolicy.profitabilityScore.portfolioScore}
                           </strong>
                           <small>
                             {usd(selectedWallet.winnerPolicy.evidence.endingCapitalUsd)} ending · up
-                            to 25
+                            to 30
+                          </small>
+                        </div>
+                        <div className="score-ledger-row" role="row">
+                          <span>Net-dollar profit factor</span>
+                          <strong className="calculation-positive">
+                            +{selectedWallet.winnerPolicy.profitabilityScore.profitFactorScore}
+                          </strong>
+                          <small>
+                            PF{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.weightedProfitFactor ??
+                              '—'}{' '}
+                            · up to 20
                           </small>
                         </div>
                         <div className="score-ledger-row" role="row">
@@ -1100,7 +1384,30 @@ export function ExperimentalDecisionLab({
                           </strong>
                           <small>
                             {selectedWallet.winnerPolicy.evidence.completedCopiedBuyOutcomes}{' '}
-                            completed copied buys · up to 15
+                            completed copied buys · up to 10
+                          </small>
+                        </div>
+                        <div className="score-ledger-row" role="row">
+                          <span>Tail robustness</span>
+                          <strong className="calculation-positive">
+                            +{selectedWallet.winnerPolicy.profitabilityScore.robustnessScore}
+                          </strong>
+                          <small>
+                            Best trade{' '}
+                            {pct(
+                              selectedWallet.winnerPolicy.profitabilityScore
+                                .bestTradeProfitSharePercent,
+                            )}{' '}
+                            · best 3{' '}
+                            {pct(
+                              selectedWallet.winnerPolicy.profitabilityScore
+                                .bestThreeProfitSharePercent,
+                            )}{' '}
+                            · without best{' '}
+                            {usd(
+                              selectedWallet.winnerPolicy.profitabilityScore
+                                .portfolioWithoutBestTradeEndingCapitalUsd,
+                            )}
                           </small>
                         </div>
                       </>
@@ -1122,14 +1429,11 @@ export function ExperimentalDecisionLab({
                                 {deduction > 0 ? `−${deduction}` : '0'}
                               </strong>
                               <small>
-                                {rule === 'walletAge'
-                                  ? typeof selectedWallet.winnerPolicy.gmgnRiskScore!
-                                      .walletAgeDays !== 'number'
-                                    ? 'Age unavailable'
-                                    : `${selectedWallet.winnerPolicy.gmgnRiskScore!.walletAgeDays} days old`
-                                  : deduction > 0
-                                    ? 'Applied deduction'
-                                    : 'No qualifying risk evidence'}
+                                {selectedWallet.winnerPolicy.gmgnRiskScore!.deductionDetails?.[
+                                  rule as keyof NonNullable<
+                                    typeof selectedWallet.winnerPolicy.gmgnRiskScore.deductionDetails
+                                  >
+                                ] ?? fallbackDeductionDetail(rule, deduction)}
                               </small>
                             </div>
                           ),
@@ -1144,8 +1448,9 @@ export function ExperimentalDecisionLab({
                 >
                   {[
                     ['completedCopiedTrades', strings.decisionLab.winnerPolicyGates[0]],
-                    ['medianDelayedCopyPositive', strings.decisionLab.winnerPolicyGates[1]],
-                    ['simulatedPortfolioPositive', strings.decisionLab.winnerPolicyGates[2]],
+                    ['simulatedPortfolioPositive', strings.decisionLab.winnerPolicyGates[1]],
+                    ['duneEvidenceActionable', strings.decisionLab.winnerPolicyGates[2]],
+                    ['uncopyableProfitDependency', strings.decisionLab.winnerPolicyGates[3]],
                   ].map(([key, label]) => {
                     const gate =
                       selectedWallet.winnerPolicy.proofGates[
@@ -1159,30 +1464,42 @@ export function ExperimentalDecisionLab({
                   })}
                 </div>
               </section>
+              {selectedWallet.winnerPolicy.evidence.coverageQuality && (
+                <section
+                  className="experimental-coverage-quality"
+                  aria-label="Dune coverage quality"
+                >
+                  <strong>Dune evidence: </strong>
+                  <span>
+                    {operationalCoverageLabel(selectedWallet.winnerPolicy.evidence.coverageQuality)}
+                  </span>
+                  <small>
+                    {' '}
+                    {selectedWallet.winnerPolicy.evidence.coverageQuality.coveragePercent === null
+                      ? '—'
+                      : `${selectedWallet.winnerPolicy.evidence.coverageQuality.coveragePercent.toFixed(0)}%`}{' '}
+                    ·{' '}
+                    {coverageQualityExplanation(
+                      selectedWallet.winnerPolicy.evidence.coverageQuality.status,
+                    )}{' '}
+                    {selectedWallet.winnerPolicy.evidence.coverageQuality.reason}
+                  </small>
+                  {selectedWallet.winnerPolicy.evidence.coverageQuality.missingTradeMateriality && (
+                    <small>
+                      {' '}
+                      Missing-trade materiality:{' '}
+                      {selectedWallet.winnerPolicy.evidence.coverageQuality.missingTradeMateriality.severity.toLowerCase()}
+                      {' · '}
+                      {
+                        selectedWallet.winnerPolicy.evidence.coverageQuality.missingTradeMateriality
+                          .aggregateInterpretation
+                      }
+                    </small>
+                  )}
+                </section>
+              )}
               <details className="experimental-advanced-details">
                 <summary>Advanced details</summary>
-                <div className="experimental-detail-score-grid">
-                  {(['overall', 'edge', 'consistency', 'robustness', 'copyability'] as const).map(
-                    (key) => {
-                      const value = selectedWallet.scores[key];
-                      const details =
-                        selectedWallet.scoreDetails?.[key] ??
-                        legacyScoreDetail(selectedWallet, key);
-                      return (
-                        <div className={`experimental-score-card ${key}`} key={key}>
-                          <div>
-                            <span>{details.label}</span>
-                            <strong>{score(value)}</strong>
-                          </div>
-                          <div className="experimental-score-track">
-                            <i style={{ width: `${value ?? 0}%` }} />
-                          </div>
-                          <small>{details.detail}</small>
-                        </div>
-                      );
-                    },
-                  )}
-                </div>
                 <div className="experimental-detail-grid">
                   <section>
                     <h4>Authoritative Winner Policy</h4>
@@ -1192,16 +1509,17 @@ export function ExperimentalDecisionLab({
                       {selectedWallet.winnerPolicy.status}
                     </p>
                     <p className="muted">
-                      Policy {selectedWallet.winnerPolicy.policyVersion}; this status is independent
-                      of the exploratory score and Pattern Discovery rules.
+                      Policy {selectedWallet.winnerPolicy.policyVersion}; this is the authoritative
+                      wallet decision.
                     </p>
                     <div className="experimental-policy-visual">
                       <h5>{strings.decisionLab.winnerPolicyDetailHardGates}</h5>
                       <div className="experimental-policy-gate-grid">
                         {[
                           ['completedCopiedTrades', strings.decisionLab.winnerPolicyGates[0]],
-                          ['medianDelayedCopyPositive', strings.decisionLab.winnerPolicyGates[1]],
-                          ['simulatedPortfolioPositive', strings.decisionLab.winnerPolicyGates[2]],
+                          ['simulatedPortfolioPositive', strings.decisionLab.winnerPolicyGates[1]],
+                          ['duneEvidenceActionable', strings.decisionLab.winnerPolicyGates[2]],
+                          ['uncopyableProfitDependency', strings.decisionLab.winnerPolicyGates[3]],
                         ].map(([key, label]) => {
                           const gate =
                             selectedWallet.winnerPolicy.proofGates[
@@ -1235,7 +1553,7 @@ export function ExperimentalDecisionLab({
                       <h5>Warnings, not gates</h5>
                       <p className="experimental-policy-not-gates">
                         100 GMGN trades · holdout windows · Pattern Discovery rules · Copyability
-                        score · best-token concentration · wallet age risk signal
+                        score · best-token concentration
                       </p>
                     </div>
                     {selectedWallet.winnerPolicy.finalScore !== null && (
@@ -1244,13 +1562,14 @@ export function ExperimentalDecisionLab({
                         {selectedWallet.winnerPolicy.profitabilityScore && (
                           <p>
                             Profitability {selectedWallet.winnerPolicy.profitabilityScore.score} /{' '}
-                            {selectedWallet.winnerPolicy.profitabilityScore.max} (median return{' '}
-                            {selectedWallet.winnerPolicy.profitabilityScore.medianReturnScore},
-                            portfolio{' '}
-                            {selectedWallet.winnerPolicy.profitabilityScore.portfolioScore},
-                            confidence{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.max} (portfolio{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.portfolioScore}, profit
+                            factor{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.profitFactorScore},
+                            evidence-confidence points{' '}
                             {selectedWallet.winnerPolicy.profitabilityScore.evidenceConfidenceScore}
-                            )
+                            , tail robustness{' '}
+                            {selectedWallet.winnerPolicy.profitabilityScore.robustnessScore})
                           </p>
                         )}
                         {selectedWallet.winnerPolicy.gmgnRiskScore && (
@@ -1265,7 +1584,8 @@ export function ExperimentalDecisionLab({
                             {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tradeQuality},
                             token risk{' '}
                             {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.tokenRisk}, costs{' '}
-                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.costs})
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.costs}, wallet age{' '}
+                            {selectedWallet.winnerPolicy.gmgnRiskScore.deductions.walletAge})
                           </p>
                         )}
                       </div>
@@ -1311,36 +1631,6 @@ export function ExperimentalDecisionLab({
                     </dl>
                   </section>
                   <section>
-                    <h4>Copyability trace</h4>
-                    <p className="muted">
-                      Execution-feasibility index from local{' '}
-                      {selectedWallet.facts.activityPeriodDays}
-                      -day activity; it is not a probability of success.
-                    </p>
-                    <dl>
-                      <dt>Hold contribution</dt>
-                      <dd>{score(selectedWallet.copyabilityDiagnostics.holdContribution)}</dd>
-                      <dt>Fast round trips</dt>
-                      <dd>
-                        {pct(selectedWallet.copyabilityDiagnostics.fastRoundTripPercent)} · −
-                        {selectedWallet.copyabilityDiagnostics.fastRoundTripPenalty.toFixed(1)}
-                      </dd>
-                      <dt>Under 15 seconds</dt>
-                      <dd>
-                        {pct(selectedWallet.copyabilityDiagnostics.under15SecondPercent)} · −
-                        {selectedWallet.copyabilityDiagnostics.under15SecondPenalty.toFixed(1)}
-                      </dd>
-                      <dt>Pattern adjustment</dt>
-                      <dd>{selectedWallet.copyabilityDiagnostics.patternAdjustment.toFixed(1)}</dd>
-                      <dt>Confidence</dt>
-                      <dd>
-                        {selectedWallet.copyabilityDiagnostics.confidence} ·{' '}
-                        {selectedWallet.copyabilityDiagnostics.sampleSize.pairedTrades} paired
-                        trades
-                      </dd>
-                    </dl>
-                  </section>
-                  <section>
                     <h4>Warnings and context</h4>
                     {selectedWallet.risks.length ? (
                       <ul className="experimental-risk-list">
@@ -1356,7 +1646,9 @@ export function ExperimentalDecisionLab({
                     </p>
                     <p>
                       <strong>GMGN risk:</strong>{' '}
-                      {selectedWallet.riskDetails?.available ? 'Imported' : 'Not imported'}
+                      {selectedWallet.riskDetails?.available
+                        ? 'Snapshot available'
+                        : 'Not imported'}
                     </p>
                     {selectedWallet.liquidityBands && (
                       <p>

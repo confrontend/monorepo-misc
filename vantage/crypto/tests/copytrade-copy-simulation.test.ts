@@ -967,6 +967,53 @@ test('copy simulation exposes the fixed-stake portfolio from the same delayed fe
   }
 });
 
+test('copy simulation reruns the chronological portfolio without sub-60-second trades', () => {
+  const database = setup();
+  try {
+    const buyId = insertTradeRow(database, {
+      walletAddress: 'FAST',
+      eventType: 'buy',
+      tokenAddress: 'TOKF',
+      observedTimestamp: 1000,
+      buyCostUsd: '100',
+      priceUsd: '1',
+    });
+    const sellId = insertTradeRow(database, {
+      walletAddress: 'FAST',
+      eventType: 'sell',
+      tokenAddress: 'TOKF',
+      observedTimestamp: 1030,
+      costUsd: '200',
+      buyCostUsd: '100',
+      priceUsd: '2',
+    });
+    seedDuneMatch(
+      database,
+      buyId,
+      new Date((1000 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(),
+      1,
+    );
+    seedDuneMatch(
+      database,
+      sellId,
+      new Date((1030 + DEFAULT_COPIER_DELAY_SECONDS) * 1000).toISOString(),
+      2,
+    );
+    const wallet = computeCopySimulationReport(database, {
+      walletAddresses: ['FAST'],
+      feeBps: 0,
+      slippageBps: 0,
+      gasPriorityFeeSolPerTx: 0,
+    }).wallets[0];
+    assert.equal(wallet.uncopyableTradeCount, 1);
+    assert.equal(wallet.portfolio.endingCapitalUsd, 109.98);
+    assert.equal(wallet.portfolioWithoutUncopyableTradesEndingCapitalUsd, 100);
+    assert.equal(wallet.uncopyableProfitDependencyPercent, 100);
+  } finally {
+    database.close();
+  }
+});
+
 test('entry/exit trade USD size (the liquidity proxy) is carried through when present, and stays null rather than zero when a leg has no usable match', () => {
   const database = setup();
   try {

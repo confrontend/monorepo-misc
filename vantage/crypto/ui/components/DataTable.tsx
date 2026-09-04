@@ -7,6 +7,9 @@ import type {
   TdHTMLAttributes,
   ThHTMLAttributes,
 } from 'react';
+import { Button } from './ui/button.js';
+import { Checkbox } from './ui/checkbox.js';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu.js';
 
 type DataTableColumn<Row> = {
   key: string;
@@ -176,20 +179,21 @@ export function DataTable<Row>({
   return (
     <div className={`${wrapClassName} data-table-wrap`}>
       {enableExport && (
-        <button type="button" className="secondary data-table-export" onClick={exportTable}>
+        <Button variant="secondary" className="data-table-export" onClick={exportTable}>
           Export CSV
-        </button>
+        </Button>
       )}
       {enableColumnHiding && (
-        <details className="data-table-column-picker">
-          <summary>Columns</summary>
-          <div className="data-table-column-picker-menu">
+        <DropdownMenu>
+          <DropdownMenuTrigger className="secondary data-table-column-picker">
+            Columns
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="data-table-column-picker-menu">
             {hideableColumns.map((column) => {
               const isVisible = !hiddenColumnKeys.includes(column.key);
               return (
                 <label key={column.key}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={isVisible}
                     disabled={isVisible && visibleColumns.length <= 1}
                     onChange={() => toggleColumn(column.key)}
@@ -198,11 +202,11 @@ export function DataTable<Row>({
                 </label>
               );
             })}
-            <button type="button" className="secondary" onClick={resetColumns}>
+            <Button variant="secondary" onClick={resetColumns}>
               Reset columns
-            </button>
-          </div>
-        </details>
+            </Button>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       <table className={tableClassName}>
         <thead>
@@ -222,8 +226,7 @@ export function DataTable<Row>({
                 }
               >
                 {column.sortValue ? (
-                  <button
-                    type="button"
+                  <Button
                     className="sortable-header"
                     onClick={() => toggleSort(column)}
                     title={`Sort by ${column.label ?? csvText(column.header)}`}
@@ -232,7 +235,7 @@ export function DataTable<Row>({
                     <span aria-hidden="true">
                       {sort?.key === column.key ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
                     </span>
-                  </button>
+                  </Button>
                 ) : (
                   column.header
                 )}

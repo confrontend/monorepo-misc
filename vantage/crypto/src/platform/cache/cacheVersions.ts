@@ -4,8 +4,8 @@
  */
 export const CACHE_VERSIONS = {
   patternDiscovery: 'crypto-pattern-discovery-v6-period-aware-coverage-grid',
-  decisionLab: 'experimental-decision:decision-lab-scoring-v12-copyability-diagnostics',
-  copySimulation: 'copy-simulation-v2',
+  decisionLab: 'experimental-decision:decision-lab-scoring-v14-uncopyable-gate',
+  copySimulation: 'copy-simulation-v4-uncopyable-gate',
 } as const;
 
 export type CacheFamily = keyof typeof CACHE_VERSIONS;

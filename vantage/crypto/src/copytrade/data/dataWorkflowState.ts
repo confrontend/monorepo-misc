@@ -45,6 +45,7 @@ export type DataWorkflowState = {
   run: DataWorkflowRunWithSteps | null;
   chain: string;
   targetDays: number;
+  depthMode: 'requested' | 'maximum_available';
   completenessThresholdPercent: number;
   rosterWallets: string[];
   steps: DataWorkflowStepView[];
@@ -414,7 +415,7 @@ const disabledReasonFor = (
     case 'dune_outcomes':
       return coverage.ready
         ? null
-        : `Complete GMGN wallet-history fetch before Dune outcome fetching (${coverage.completeWallets}/${coverage.requiredWallets} wallets currently reach the requested depth).`;
+        : `Complete GMGN wallet-history fetch before Dune outcome fetching (${coverage.completeWallets}/${coverage.requiredWallets} wallets have reached the provider limit).`;
     default:
       return null;
   }
@@ -427,6 +428,8 @@ export const readDataWorkflowState = (
   const run = options.runId !== undefined ? readDataWorkflowRun(database, options.runId) : null;
   const chain = run?.chain ?? options.chain ?? 'sol';
   const targetDays = run?.targetDays ?? options.targetDays ?? 30;
+  const depthMode = run?.depthMode ?? 'requested';
+  const coverageTargetDays = depthMode === 'maximum_available' ? 365 : targetDays;
   const completenessThresholdPercent =
     run?.completenessThresholdPercent ??
     readLatestDataWorkflowRun(database, chain)?.completenessThresholdPercent ??
@@ -436,17 +439,25 @@ export const readDataWorkflowState = (
     run?.rosterWallets ??
     listRosterWallets(database, { chain }).map((wallet) => wallet.walletAddress);
 
-  const requiredWallets = requiredCount(rosterWallets.length, completenessThresholdPercent);
+  const requiredWallets =
+    depthMode === 'maximum_available'
+      ? rosterWallets.length
+      : requiredCount(rosterWallets.length, completenessThresholdPercent);
   const inventory =
     rosterWallets.length > 0
       ? readHistoryDepthCoverage(database, {
           walletAddresses: rosterWallets,
           chain,
-          targetDays,
+          targetDays: coverageTargetDays,
           depthMilestones: DEPTH_MILESTONES,
         })
       : null;
-  const completeWallets = inventory?.summary.byMilestone[targetDays] ?? 0;
+  const completeWallets =
+    depthMode === 'maximum_available'
+      ? (inventory?.rows.filter(
+          (row) => row.status === 'reached_target' || row.status === 'pagination_exhausted',
+        ).length ?? 0)
+      : (inventory?.summary.byMilestone[targetDays] ?? 0);
   const supersededAttemptWallets =
     inventory?.rows.filter((row) => row.truncated === true && row.deepestCompletedDays !== null)
       .length ?? 0;
@@ -498,6 +509,7 @@ export const readDataWorkflowState = (
     run,
     chain,
     targetDays,
+    depthMode,
     completenessThresholdPercent,
     rosterWallets,
     steps,

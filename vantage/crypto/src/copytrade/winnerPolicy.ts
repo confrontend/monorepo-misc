@@ -5,15 +5,18 @@
  * UI-specific score models must adapt their saved evidence into WinnerPolicyEvidence before this
  * function is called. That keeps “winner” proof stable and reviewable across both consumers.
  *
- * v2 philosophy: Dune delayed-copy evidence proves whether copying a wallet is profitable (hard
- * gates + 70% of the score). GMGN execution/risk data only discounts that already-proven
- * profitability (30% of the score) -- it is never a positive bonus, because only Dune evidence
- * has been validated as predictive of future returns. See progress.md's v2 write-up for the full
- * before/after comparison against v1.
+ * v5 philosophy: the chronological Dune portfolio proves profitability while net-dollar profit
+ * factor and tail robustness describe asymmetric edge (70% total). GMGN execution/risk data only
+ * discounts that already-proven profitability (30%) and never grants winner status on its own.
  */
 
-import type { CopySimulationWalletReport } from './simulation/copySimulation.js';
+import type {
+  CopySimulationTradeResult,
+  CopySimulationWalletReport,
+} from './simulation/copySimulation.js';
+import { median } from './scrutiny/evaluate.js';
 import { WINNER_POLICY_V2_CONFIG } from './winnerPolicyV2Config.js';
+import { UNCOPYABLE_TRADE_MAX_HOLD_SECONDS } from './simulation/constants.js';
 
 export const WINNER_POLICY_VERSION = WINNER_POLICY_V2_CONFIG.policyVersion;
 export const WINNER_POLICY_STARTING_CAPITAL_USD = 100;
@@ -89,6 +92,17 @@ export type WinnerPolicyEvidence = {
   recencyWeightedMedianReturnPercent?: number | null;
   startingCapitalUsd: number;
   endingCapitalUsd: number | null;
+  capitalPath?: { day: string; capitalUsd: number }[];
+  copiedOutcomeEconomics?: Array<{
+    buyTradeId: number;
+    timestamp: number;
+    netPnlUsd: number;
+    returnPercent: number;
+  }>;
+  portfolioWithoutBestTradeEndingCapitalUsd?: number | null;
+  portfolioWithoutUncopyableTradesEndingCapitalUsd?: number | null;
+  uncopyableTradeCount?: number;
+  uncopyableProfitDependencyPercent?: number | null;
   holdouts: WinnerPolicyHoldout[];
   coverageStatus: CopySimulationWalletReport['coverageStatus'] | null;
   feasibility:
@@ -98,12 +112,66 @@ export type WinnerPolicyEvidence = {
   riskBundle: GmgnRiskBundleEvidence | null;
   tradeQualitySignals: WinnerPolicyTradeQualitySignals;
   executionFrictionSignals: WinnerPolicyExecutionFrictionSignals;
+  coverageQuality?: CoverageQuality;
   provenance: {
     delayedCopy: string;
     portfolio: string;
     featureSource: string;
     patternDiscoveryUsed: false;
     officialGmgnAggregatesUsed: false;
+  };
+};
+
+export type CoverageQualityStatus =
+  | 'GOOD_COVERAGE_NO_OBVIOUS_BIAS'
+  | 'PARTIAL_COVERAGE_MISSING_SET_SIMILAR'
+  | 'POSSIBLE_OPTIMISTIC_BIAS'
+  | 'POSSIBLE_CONSERVATIVE_BIAS'
+  | 'INCOMPLETE_COVERAGE_REQUIRES_REVIEW'
+  | 'INSUFFICIENT_DATA_TO_ASSESS'
+  | 'PENDING_DUNE';
+export type OperationalDuneEvidenceStatus = 'PENDING' | 'GOOD' | 'REVIEW' | 'UNPROVEN';
+
+export type CoveragePerformance = {
+  count: number;
+  effectiveSampleSize: number;
+  medianReturn: number | null;
+  weightedMedianReturn: number | null;
+  winRate: number | null;
+  lossRate: number | null;
+  largeLossRate: number | null;
+  bigWinnerRate: number | null;
+  medianHoldSeconds: number | null;
+  fastRoundTripRate: number | null;
+};
+
+export type CoverageQuality = {
+  status: CoverageQualityStatus;
+  operationalStatus: OperationalDuneEvidenceStatus;
+  eligibleTrips: number;
+  simulatedTrips: number;
+  confirmedMissing: { total: number; missingEntry: number; missingExit: number };
+  pendingTrips: number;
+  coveragePercent: number | null;
+  coveredNativePerformance: CoveragePerformance;
+  missingNativePerformance: CoveragePerformance;
+  differences: {
+    medianReturnGap: number | null;
+    weightedMedianReturnGap: number | null;
+    winRateGap: number | null;
+    lossRateGap: number | null;
+    largeLossRateGap: number | null;
+  };
+  sufficientSampleForBiasTest: boolean;
+  optimisticBiasDetected: boolean;
+  reason: string;
+  missingTradeMateriality: {
+    applicable: boolean;
+    missingCount: number;
+    severity: 'LOW' | 'MODERATE' | 'HIGH';
+    concerningTrades: number;
+    worstNativeReturn: number | null;
+    aggregateInterpretation: string;
   };
 };
 
@@ -118,16 +186,22 @@ export type WinnerPolicyProofGateStatus = 'pass' | 'fail' | 'unproven';
 export type WinnerPolicyProofGate = { status: WinnerPolicyProofGateStatus; detail: string };
 export type WinnerPolicyProofGates = {
   completedCopiedTrades: WinnerPolicyProofGate;
-  medianDelayedCopyPositive: WinnerPolicyProofGate;
   simulatedPortfolioPositive: WinnerPolicyProofGate;
+  duneEvidenceActionable: WinnerPolicyProofGate;
+  uncopyableProfitDependency: WinnerPolicyProofGate;
 };
 
 export type WinnerPolicyProfitabilityScore = {
   score: number;
   max: number;
-  medianReturnScore: number;
   portfolioScore: number;
+  profitFactorScore: number;
   evidenceConfidenceScore: number;
+  robustnessScore: number;
+  weightedProfitFactor: number | null;
+  bestTradeProfitSharePercent: number | null;
+  bestThreeProfitSharePercent: number | null;
+  portfolioWithoutBestTradeEndingCapitalUsd: number | null;
 };
 
 export type WinnerPolicyGmgnRiskScore = {
@@ -142,11 +216,23 @@ export type WinnerPolicyGmgnRiskScore = {
     costs: number;
     walletAge: number;
   };
+  deductionDetails: {
+    executionSpeed: string;
+    hyperactivity: string;
+    tradeQuality: string;
+    tokenRisk: string;
+    costs: string;
+    walletAge: string;
+  };
 };
 
 export type WinnerPolicyResult = {
   policyVersion: typeof WINNER_POLICY_VERSION;
   status: WinnerPolicyStatus;
+  /** Operational Dune evidence state; kept separate from the profitability proof status. */
+  duneEvidenceStatus: OperationalDuneEvidenceStatus;
+  /** Review evidence keeps the proof visible but prevents automatic selection. */
+  actionability: 'ACTIONABLE' | 'REVIEW' | 'NOT_ACTIONABLE';
   finalScore: number | null;
   proofGates: WinnerPolicyProofGates;
   profitabilityScore: WinnerPolicyProfitabilityScore | null;
@@ -174,25 +260,298 @@ const round2 = (value: number): number => Math.round(value * 100) / 100;
  *  to whole points; sub-component breakdowns keep round2 precision for detail display. */
 const roundScore = (value: number): number => Math.round(value);
 
+const roundMetric = (value: number): number => Math.round(value * 100) / 100;
+
+const signalText = (label: string, value: number | null, suffix = ''): string =>
+  value === null ? `${label}: unavailable` : `${label}: ${value.toFixed(1)}${suffix}`;
+
+const buildGmgnDeductionDetails = (args: {
+  activitySignals: WinnerPolicyActivitySignals | null;
+  riskBundle: GmgnRiskBundleEvidence | null;
+  tradeQuality: WinnerPolicyTradeQualitySignals;
+  gasRatioPercent: number | null;
+  deductions: WinnerPolicyGmgnRiskScore['deductions'];
+}): WinnerPolicyGmgnRiskScore['deductionDetails'] => {
+  const { activitySignals, riskBundle, tradeQuality, gasRatioPercent, deductions } = args;
+  const speedSignals = activitySignals
+    ? [
+        signalText('fast round trips', activitySignals.fastRoundTripPercent, '%'),
+        signalText('under-15s trades', activitySignals.under15SecondsPercent, '%'),
+        signalText('median hold', activitySignals.medianHoldSeconds, 's'),
+        signalText(
+          'GMGN fast transactions',
+          riskBundle?.fastTxRatio === null || !riskBundle ? null : riskBundle.fastTxRatio * 100,
+          '%',
+        ),
+      ]
+    : ['execution-speed signals: unavailable'];
+  return {
+    executionSpeed:
+      deductions.executionSpeed > 0
+        ? `${speedSignals.join(' · ')}; highest applicable speed signal produced −${deductions.executionSpeed} of 12.`
+        : `${speedSignals.join(' · ')}; no speed deduction applied.`,
+    hyperactivity:
+      activitySignals?.tradesPerActiveDay === null || !activitySignals
+        ? 'Trades per active day: unavailable; no hyperactivity deduction applied.'
+        : `${activitySignals.tradesPerActiveDay.toFixed(1)} trades per active day; −${deductions.hyperactivity} of 3.`,
+    tradeQuality:
+      tradeQuality.largeLossRatePercent === null && tradeQuality.profitableTokenPercent === null
+        ? 'Large-loss and profitable-token rates: unavailable; no trade-quality deduction applied.'
+        : `${signalText('large-loss rate', tradeQuality.largeLossRatePercent, '%')} · ${signalText('profitable-token rate', tradeQuality.profitableTokenPercent, '%')} · −${deductions.tradeQuality} of 4.`,
+    tokenRisk: !riskBundle
+      ? 'GMGN risk bundle unavailable; no token-risk deduction applied.'
+      : `${signalText('no-buy/hold', riskBundle.noBuyHoldRatio === null ? null : riskBundle.noBuyHoldRatio * 100, '%')} · ${signalText('sell>buy', riskBundle.sellPassBuyRatio === null ? null : riskBundle.sellPassBuyRatio * 100, '%')} · −${deductions.tokenRisk} of 4.`,
+    costs:
+      gasRatioPercent === null
+        ? 'Gas/fee ratio: unavailable; no cost deduction applied.'
+        : `Gas/fee ratio: ${gasRatioPercent.toFixed(1)}%; −${deductions.costs} of 2.`,
+    walletAge:
+      activitySignals?.walletAgeDays === null || !activitySignals
+        ? 'Wallet age: unavailable; no maturity deduction applied.'
+        : `Wallet age: ${activitySignals.walletAgeDays.toFixed(1)} days; −${deductions.walletAge} of 5.`,
+  };
+};
+const parseTradeTimestamp = (value: string): number | null => {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed / 1000 : null;
+};
+
+/** Shared v3 decay primitive used by profitability and coverage-quality comparisons. */
+export const computeRecencyWeightedMedian = (
+  values: readonly { value: number; timestamp: number }[],
+  evaluationSeconds: number,
+): number | null => {
+  if (!values.length) return null;
+  const ordered = values
+    .map((item) => ({
+      value: item.value,
+      weight: Math.pow(
+        0.5,
+        Math.max(0, evaluationSeconds - item.timestamp) /
+          86_400 /
+          WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+      ),
+    }))
+    .sort((a, b) => a.value - b.value);
+  const total = ordered.reduce((sum, item) => sum + item.weight, 0);
+  let cumulative = 0;
+  for (const item of ordered) {
+    cumulative += item.weight;
+    if (cumulative >= total / 2) return item.value;
+  }
+  return ordered[ordered.length - 1]?.value ?? null;
+};
+
+const coveragePerformance = (
+  trades: readonly CopySimulationTradeResult[],
+  evaluationSeconds: number,
+): CoveragePerformance => {
+  const observed = trades.flatMap((trade) => {
+    const value = trade.walletReturnPercent;
+    const timestamp = trade.buyAt ? parseTradeTimestamp(trade.buyAt) : null;
+    return value !== null && timestamp !== null && trade.holdSeconds !== undefined
+      ? [{ trade, value, timestamp }]
+      : [];
+  });
+  const rate = (predicate: (item: (typeof observed)[number]) => boolean): number | null =>
+    observed.length
+      ? roundMetric((observed.filter(predicate).length / observed.length) * 100)
+      : null;
+  const holds = observed.map((item) => item.trade.holdSeconds as number).sort((a, b) => a - b);
+  const weights = observed.map((item) =>
+    Math.pow(
+      0.5,
+      Math.max(0, evaluationSeconds - item.timestamp) /
+        86_400 /
+        WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+    ),
+  );
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const effectiveSampleSize =
+    weightTotal > 0
+      ? roundMetric(
+          (weightTotal * weightTotal) / weights.reduce((sum, weight) => sum + weight * weight, 0),
+        )
+      : 0;
+  const middle = holds.length ? Math.floor(holds.length / 2) : 0;
+  return {
+    count: observed.length,
+    effectiveSampleSize,
+    medianReturn: observed.length ? roundMetric(median(observed.map((item) => item.value))!) : null,
+    weightedMedianReturn: computeRecencyWeightedMedian(
+      observed.map((item) => ({ value: item.value, timestamp: item.timestamp })),
+      evaluationSeconds,
+    ),
+    winRate: rate((item) => item.value > 0),
+    lossRate: rate((item) => item.value < 0),
+    largeLossRate: rate(
+      (item) => item.value <= WINNER_POLICY_V2_CONFIG.largeLossReturnThresholdPercent,
+    ),
+    bigWinnerRate: rate((item) => item.value > 50),
+    medianHoldSeconds: holds.length
+      ? holds.length % 2
+        ? (holds[middle] ?? null)
+        : roundMetric(((holds[middle - 1] ?? 0) + (holds[middle] ?? 0)) / 2)
+      : null,
+    fastRoundTripRate: rate(
+      (item) => (item.trade.holdSeconds ?? Infinity) <= UNCOPYABLE_TRADE_MAX_HOLD_SECONDS,
+    ),
+  };
+};
+
+/** Classifies Dune coverage without treating pending queries as confirmed misses. */
+export const evaluateCoverageQuality = (
+  trades: readonly CopySimulationTradeResult[],
+  evaluationTimestamp: Date = new Date(),
+): CoverageQuality => {
+  const covered = trades.filter((trade) => trade.status === 'simulated');
+  const confirmedMissing = trades.filter(
+    (trade) => trade.status === 'missing_entry_match' || trade.status === 'missing_exit_match',
+  );
+  const pendingTrips = trades.filter((trade) => trade.status === 'not_yet_queried').length;
+  const evaluationSeconds = Math.floor(evaluationTimestamp.getTime() / 1000);
+  const coveredNativePerformance = coveragePerformance(covered, evaluationSeconds);
+  const missingNativePerformance = coveragePerformance(confirmedMissing, evaluationSeconds);
+  const diff = (a: number | null, b: number | null): number | null =>
+    a !== null && b !== null ? roundMetric(b - a) : null;
+  const differences = {
+    medianReturnGap: diff(
+      coveredNativePerformance.medianReturn,
+      missingNativePerformance.medianReturn,
+    ),
+    weightedMedianReturnGap: diff(
+      coveredNativePerformance.weightedMedianReturn,
+      missingNativePerformance.weightedMedianReturn,
+    ),
+    winRateGap: diff(coveredNativePerformance.winRate, missingNativePerformance.winRate),
+    lossRateGap: diff(coveredNativePerformance.lossRate, missingNativePerformance.lossRate),
+    largeLossRateGap: diff(
+      coveredNativePerformance.largeLossRate,
+      missingNativePerformance.largeLossRate,
+    ),
+  };
+  const sufficientSampleForBiasTest =
+    missingNativePerformance.effectiveSampleSize >=
+      WINNER_POLICY_V2_CONFIG.coverageBiasMinimumConfirmedMissing &&
+    coveredNativePerformance.effectiveSampleSize >=
+      WINNER_POLICY_V2_CONFIG.coverageBiasMinimumConfirmedMissing;
+  const positiveSignals = [
+    differences.weightedMedianReturnGap,
+    differences.lossRateGap,
+    differences.largeLossRateGap,
+  ];
+  const requiredMedianGap =
+    [...WINNER_POLICY_V2_CONFIG.coverageBiasGapTiers]
+      .reverse()
+      .find((tier) => missingNativePerformance.effectiveSampleSize >= tier.effectiveMissingN)
+      ?.requiredMedianGap ?? 30;
+  const medianGapTriggers =
+    differences.weightedMedianReturnGap !== null &&
+    differences.weightedMedianReturnGap <= -requiredMedianGap;
+  const confirmingDeterioration = [differences.lossRateGap, differences.largeLossRateGap].some(
+    (gap) => gap !== null && gap >= WINNER_POLICY_V2_CONFIG.coverageBiasConfirmationGapPercent,
+  );
+  const optimisticBiasDetected =
+    sufficientSampleForBiasTest && medianGapTriggers && confirmingDeterioration;
+  const conservativeBiasDetected =
+    sufficientSampleForBiasTest &&
+    positiveSignals.every(
+      (gap) => gap === null || gap >= WINNER_POLICY_V2_CONFIG.coverageBiasConservativeGapPercent,
+    );
+  const pendingMaterial =
+    pendingTrips >= WINNER_POLICY_V2_CONFIG.coveragePendingMaterialMinimum &&
+    pendingTrips / Math.max(1, trades.length) >=
+      WINNER_POLICY_V2_CONFIG.coveragePendingMaterialShare;
+  const missingReturns = confirmedMissing
+    .map((trade) => trade.walletReturnPercent)
+    .filter((value): value is number => value !== null);
+  const concerningTrades = missingReturns.filter((value) => value <= -50).length;
+  const worstNativeReturn = missingReturns.length ? Math.min(...missingReturns) : null;
+  const materialitySeverity: 'LOW' | 'MODERATE' | 'HIGH' =
+    concerningTrades >= 2 || (concerningTrades >= 1 && coveredNativePerformance.count < 50)
+      ? 'HIGH'
+      : worstNativeReturn !== null && worstNativeReturn <= -30
+        ? 'MODERATE'
+        : 'LOW';
+  const missingTradeMateriality = {
+    applicable: !sufficientSampleForBiasTest && confirmedMissing.length > 0,
+    missingCount: confirmedMissing.length,
+    severity: materialitySeverity,
+    concerningTrades,
+    worstNativeReturn,
+    aggregateInterpretation:
+      materialitySeverity === 'HIGH'
+        ? 'Specific missing trades may materially overturn the observed Dune conclusion.'
+        : materialitySeverity === 'MODERATE'
+          ? 'Specific missing trades are concerning, but their impact is not conclusive.'
+          : 'Available GMGN-native outcomes for the missing trades do not appear materially harmful.',
+  };
+  let status: CoverageQualityStatus;
+  let reason: string;
+  let operationalStatus: OperationalDuneEvidenceStatus;
+  if (pendingMaterial) {
+    status = 'PENDING_DUNE';
+    operationalStatus = 'PENDING';
+    reason = `${pendingTrips} eligible trips still have no Dune query result.`;
+  } else if (optimisticBiasDetected) {
+    status = 'POSSIBLE_OPTIMISTIC_BIAS';
+    operationalStatus = 'UNPROVEN';
+    reason =
+      'Confirmed Dune-missing trades are materially worse on native GMGN outcomes than covered trades.';
+  } else if (conservativeBiasDetected) {
+    status = 'POSSIBLE_CONSERVATIVE_BIAS';
+    operationalStatus = 'GOOD';
+    reason =
+      'Confirmed Dune-missing trades look materially better than covered trades; no bonus is applied.';
+  } else if (confirmedMissing.length === 0) {
+    status = 'GOOD_COVERAGE_NO_OBVIOUS_BIAS';
+    operationalStatus = 'GOOD';
+    reason = 'No confirmed Dune-missing trades are present.';
+  } else if (!sufficientSampleForBiasTest) {
+    status = 'INSUFFICIENT_DATA_TO_ASSESS';
+    operationalStatus =
+      materialitySeverity === 'HIGH'
+        ? 'UNPROVEN'
+        : materialitySeverity === 'MODERATE'
+          ? 'REVIEW'
+          : 'GOOD';
+    reason = `Only ${missingNativePerformance.effectiveSampleSize} effective confirmed-missing observations are available; ${missingTradeMateriality.aggregateInterpretation}`;
+  } else if (medianGapTriggers) {
+    status = 'INCOMPLETE_COVERAGE_REQUIRES_REVIEW';
+    operationalStatus = 'REVIEW';
+    reason = `The missing population is large enough to review: weighted native median gap is ${differences.weightedMedianReturnGap} points, but no confirming deterioration metric met the ${WINNER_POLICY_V2_CONFIG.coverageBiasConfirmationGapPercent}-point threshold.`;
+  } else {
+    status = 'PARTIAL_COVERAGE_MISSING_SET_SIMILAR';
+    operationalStatus = 'GOOD';
+    reason = 'Covered and confirmed-missing trades do not show a material directional difference.';
+  }
+  return {
+    status,
+    operationalStatus,
+    eligibleTrips: trades.length,
+    simulatedTrips: covered.length,
+    confirmedMissing: {
+      total: confirmedMissing.length,
+      missingEntry: confirmedMissing.filter((trade) => trade.status === 'missing_entry_match')
+        .length,
+      missingExit: confirmedMissing.filter((trade) => trade.status === 'missing_exit_match').length,
+    },
+    pendingTrips,
+    coveragePercent: trades.length ? roundMetric((covered.length / trades.length) * 100) : null,
+    coveredNativePerformance,
+    missingNativePerformance,
+    differences,
+    sufficientSampleForBiasTest,
+    optimisticBiasDetected,
+    reason,
+    missingTradeMateriality,
+  };
+};
+
 /** Gradual, capped growth curve: 0 at x<=0, approaches but never reaches maxPoints. Used for every
  *  profitability sub-score so one extreme value can never dominate or blow past its budget. */
 const saturating = (x: number, maxPoints: number, k: number): number =>
   maxPoints * (1 - Math.exp(-k * Math.max(0, x)));
-
-export const computeMedianReturnScore = (medianReturnPercent: number | null): number => {
-  if (medianReturnPercent === null) return 0;
-  return round2(
-    clamp(
-      saturating(
-        medianReturnPercent,
-        WINNER_POLICY_V2_CONFIG.medianReturnMaxPoints,
-        WINNER_POLICY_V2_CONFIG.medianReturnCurveK,
-      ),
-      0,
-      WINNER_POLICY_V2_CONFIG.medianReturnMaxPoints,
-    ),
-  );
-};
 
 export const computePortfolioReturnScore = (
   startingCapitalUsd: number,
@@ -210,6 +569,108 @@ export const computePortfolioReturnScore = (
       0,
       WINNER_POLICY_V2_CONFIG.portfolioReturnMaxPoints,
     ),
+  );
+};
+
+export const computeProfitFactorMetrics = (
+  outcomes: NonNullable<WinnerPolicyEvidence['copiedOutcomeEconomics']>,
+  evaluationSeconds: number,
+): {
+  profitFactor: number | null;
+  score: number;
+  bestTradeProfitSharePercent: number | null;
+  bestThreeProfitSharePercent: number | null;
+} => {
+  const weighted = outcomes.map((outcome) => ({
+    pnl: outcome.netPnlUsd,
+    weightedPnl:
+      outcome.netPnlUsd *
+      Math.pow(
+        0.5,
+        Math.max(0, evaluationSeconds - outcome.timestamp) /
+          86_400 /
+          WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+      ),
+  }));
+  const weightedProfit = weighted.reduce((sum, item) => sum + Math.max(0, item.weightedPnl), 0);
+  const weightedLoss = weighted.reduce((sum, item) => sum + Math.max(0, -item.weightedPnl), 0);
+  const profitFactor =
+    weightedProfit <= 0
+      ? 0
+      : weightedLoss <= 1e-9
+        ? WINNER_POLICY_V2_CONFIG.profitFactorCalculationCap
+        : weightedProfit / weightedLoss;
+  const cappedProfitFactor = Math.min(
+    WINNER_POLICY_V2_CONFIG.profitFactorCalculationCap,
+    profitFactor,
+  );
+  const score =
+    cappedProfitFactor <= 1
+      ? 0
+      : WINNER_POLICY_V2_CONFIG.profitFactorMaxPoints *
+        (1 - Math.exp(-WINNER_POLICY_V2_CONFIG.profitFactorCurveK * (cappedProfitFactor - 1)));
+  const profits = weighted
+    .map((item) => Math.max(0, item.weightedPnl))
+    .filter((value) => value > 0)
+    .sort((left, right) => right - left);
+  const totalProfit = profits.reduce((sum, value) => sum + value, 0);
+  return {
+    profitFactor: Number.isFinite(profitFactor) ? round2(profitFactor) : null,
+    score: round2(clamp(score, 0, WINNER_POLICY_V2_CONFIG.profitFactorMaxPoints)),
+    bestTradeProfitSharePercent: totalProfit
+      ? round2(((profits[0] ?? 0) / totalProfit) * 100)
+      : null,
+    bestThreeProfitSharePercent: totalProfit
+      ? round2((profits.slice(0, 3).reduce((sum, value) => sum + value, 0) / totalProfit) * 100)
+      : null,
+  };
+};
+
+const descendingShareScore = (
+  sharePercent: number | null,
+  fullAtShare: number,
+  zeroAtShare: number,
+  maxPoints: number,
+): number => {
+  if (sharePercent === null) return 0;
+  const share = sharePercent / 100;
+  return maxPoints * clamp01((zeroAtShare - share) / (zeroAtShare - fullAtShare));
+};
+
+export const computeTailRobustnessScore = (options: {
+  startingCapitalUsd: number;
+  endingCapitalUsd: number | null;
+  endingCapitalWithoutBestTradeUsd: number | null;
+  bestTradeProfitSharePercent: number | null;
+  bestThreeProfitSharePercent: number | null;
+}): number => {
+  const bestTrade = descendingShareScore(
+    options.bestTradeProfitSharePercent,
+    WINNER_POLICY_V2_CONFIG.robustnessBestTradeFullAtShare,
+    WINNER_POLICY_V2_CONFIG.robustnessBestTradeZeroAtShare,
+    WINNER_POLICY_V2_CONFIG.robustnessBestTradePoints,
+  );
+  const bestThree = descendingShareScore(
+    options.bestThreeProfitSharePercent,
+    WINNER_POLICY_V2_CONFIG.robustnessTopThreeFullAtShare,
+    WINNER_POLICY_V2_CONFIG.robustnessTopThreeZeroAtShare,
+    WINNER_POLICY_V2_CONFIG.robustnessTopThreePoints,
+  );
+  const originalProfit =
+    options.endingCapitalUsd === null
+      ? 0
+      : Math.max(0, options.endingCapitalUsd - options.startingCapitalUsd);
+  const withoutBestProfit =
+    options.endingCapitalWithoutBestTradeUsd === null
+      ? 0
+      : Math.max(0, options.endingCapitalWithoutBestTradeUsd - options.startingCapitalUsd);
+  const leaveOneOut =
+    originalProfit > 0
+      ? WINNER_POLICY_V2_CONFIG.robustnessLeaveOneOutPoints *
+        clamp01(withoutBestProfit / originalProfit)
+      : 0;
+  return round2(
+    clamp(bestTrade + bestThree + leaveOneOut, 0, WINNER_POLICY_V2_CONFIG.robustnessMaxPoints),
   );
 };
 
@@ -367,8 +828,9 @@ export const computeWalletAgePenalty = (
 };
 
 /**
- * Evaluate the fixed v2 policy. Only 3 hard gates (minimum evidence, positive median, profitable
- * $100 portfolio) decide WINNER/REJECTED/UNPROVEN; holdout stability and execution feasibility are
+ * Evaluate the authoritative policy. The hard gates are minimum copied evidence, a profitable
+ * chronological $100 portfolio, actionable Dune evidence, and independence from uncopyable
+ * sub-60-second trades. Median return remains diagnostic.
  * shown as context/warnings only. Wallets that clear the gates receive a 0-100 score: up to 70
  * points from Dune delayed-copy profitability, plus up to 30 points that START at 30 and are
  * discounted by transparent, capped GMGN execution/risk penalties -- GMGN data can only lower an
@@ -400,22 +862,25 @@ export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPoli
     );
   }
 
-  // Gate B -- positive delayed-copy median.
+  // Diagnostic only -- asymmetric memecoin strategies can be profitable with a negative median.
   const medianValue = evidence.recencyWeightedMedianReturnPercent ?? evidence.medianReturnPercent;
   const medianAvailable = medianValue !== null;
   const medianPositive = medianAvailable && medianValue! > 0;
   gates.push(
     gate(
       'delayed_copy_median',
-      'Positive delayed-copy median',
-      !medianAvailable ? 'unproven' : medianPositive ? 'pass' : 'fail',
+      'Delayed-copy median (diagnostic only)',
+      !medianAvailable ? 'unproven' : medianPositive ? 'pass' : 'warning',
       !medianAvailable
         ? 'No canonical delayed-copy median is available.'
         : `Recency-weighted delayed-copy median is ${medianValue!.toFixed(2)}%${medianPositive ? '' : ', not positive'}.`,
     ),
   );
-  if (!medianAvailable) unprovenReasons.push('The canonical delayed-copy median is missing.');
-  else if (!medianPositive) rejectionReasons.push('Canonical delayed-copy median is not positive.');
+  if (!medianAvailable) warnings.push('The delayed-copy median diagnostic is unavailable.');
+  else if (!medianPositive)
+    warnings.push(
+      'The delayed-copy median is non-positive; asymmetric edge must come from larger winners.',
+    );
   else positiveReasons.push('Canonical delayed-copy median is positive.');
 
   // Gate C -- profitable canonical $100 portfolio.
@@ -441,7 +906,6 @@ export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPoli
     positiveReasons.push(
       `Canonical fixed-stake portfolio grew from $${evidence.startingCapitalUsd} to $${endingCapitalUsd!.toFixed(2)}.`,
     );
-
   // Feasibility -- context/warning only in v2, never a hard gate.
   if (evidence.feasibility.status === 'warning' || evidence.feasibility.status === 'fail') {
     gates.push(
@@ -457,43 +921,103 @@ export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPoli
     gates.push(gate('feasibility', 'Execution feasibility', 'pass', evidence.feasibility.detail));
   }
 
+  const coverageQuality = evidence.coverageQuality ?? evaluateCoverageQuality([]);
+  const duneActionable = coverageQuality.operationalStatus === 'GOOD';
+  const uncopyableCounterfactualAvailable =
+    evidence.portfolioWithoutUncopyableTradesEndingCapitalUsd !== null &&
+    evidence.portfolioWithoutUncopyableTradesEndingCapitalUsd !== undefined &&
+    evidence.uncopyableTradeCount !== undefined &&
+    evidence.uncopyableProfitDependencyPercent !== undefined &&
+    evidence.uncopyableProfitDependencyPercent !== null;
+  const uncopyableProfitDependencyDetected =
+    portfolioPositive &&
+    uncopyableCounterfactualAvailable &&
+    evidence.uncopyableProfitDependencyPercent! > 50 &&
+    evidence.portfolioWithoutUncopyableTradesEndingCapitalUsd! <= evidence.startingCapitalUsd;
+  if (uncopyableProfitDependencyDetected) {
+    rejectionReasons.push(
+      `Profitability depends on sub-${UNCOPYABLE_TRADE_MAX_HOLD_SECONDS}-second trades: excluding them ends the canonical portfolio at $${evidence.portfolioWithoutUncopyableTradesEndingCapitalUsd!.toFixed(2)}.`,
+    );
+  }
   const proofGates: WinnerPolicyProofGates = {
     completedCopiedTrades: { status: evidenceOk ? 'pass' : 'unproven', detail: evidenceDetail },
-    medianDelayedCopyPositive: {
-      status: !medianAvailable ? 'unproven' : medianPositive ? 'pass' : 'fail',
-      detail: gates[1].detail,
-    },
     simulatedPortfolioPositive: {
       status: !portfolioAvailable ? 'unproven' : portfolioPositive ? 'pass' : 'fail',
       detail: gates[2].detail,
     },
+    duneEvidenceActionable: {
+      status: duneActionable ? 'pass' : 'unproven',
+      detail: `Dune evidence is ${coverageQuality.operationalStatus.toLowerCase()}: ${coverageQuality.reason}`,
+    },
+    uncopyableProfitDependency: {
+      status: !uncopyableCounterfactualAvailable
+        ? 'unproven'
+        : uncopyableProfitDependencyDetected
+          ? 'fail'
+          : 'pass',
+      detail: !uncopyableCounterfactualAvailable
+        ? 'No exact portfolio rerun excluding sub-60-second trades is available.'
+        : uncopyableProfitDependencyDetected
+          ? `${evidence.uncopyableTradeCount} sub-${UNCOPYABLE_TRADE_MAX_HOLD_SECONDS}-second copied trades account for ${evidence.uncopyableProfitDependencyPercent!.toFixed(1)}% of the profitable result; excluding them ends at $${evidence.portfolioWithoutUncopyableTradesEndingCapitalUsd!.toFixed(2)}.`
+          : `${evidence.uncopyableTradeCount} sub-${UNCOPYABLE_TRADE_MAX_HOLD_SECONDS}-second copied trades do not erase portfolio profitability when excluded.`,
+    },
   };
 
-  const dataMissing = !evidenceOk || !medianAvailable || !portfolioAvailable;
+  const dataMissing = !evidenceOk || !portfolioAvailable || !uncopyableCounterfactualAvailable;
   const hardFailed =
-    (medianAvailable && !medianPositive) || (portfolioAvailable && !portfolioPositive);
-  const status: WinnerPolicyStatus = dataMissing ? 'UNPROVEN' : hardFailed ? 'REJECTED' : 'WINNER';
+    (portfolioAvailable && !portfolioPositive) || uncopyableProfitDependencyDetected;
+  if (!uncopyableCounterfactualAvailable) {
+    unprovenReasons.push(
+      'Winner proof is unavailable until the exact sub-60-second trade counterfactual is computed.',
+    );
+  }
+  let status: WinnerPolicyStatus = dataMissing ? 'UNPROVEN' : hardFailed ? 'REJECTED' : 'WINNER';
+  if (status === 'WINNER' && coverageQuality.operationalStatus === 'UNPROVEN') {
+    status = 'UNPROVEN';
+    unprovenReasons.push(
+      'Winner proof is withheld because confirmed Dune-missing trades are materially worse on native GMGN outcomes.',
+    );
+  } else if (status === 'WINNER' && coverageQuality.operationalStatus === 'PENDING') {
+    status = 'UNPROVEN';
+    unprovenReasons.push(
+      'Winner proof is pending because a material population of eligible trades still needs Dune results.',
+    );
+  }
+  if (coverageQuality.operationalStatus !== 'GOOD') {
+    warnings.push(`Dune coverage quality: ${coverageQuality.reason}`);
+  }
 
   let profitabilityScore: WinnerPolicyProfitabilityScore | null = null;
   let gmgnRiskScore: WinnerPolicyGmgnRiskScore | null = null;
   let finalScore: number | null = null;
 
   if (!dataMissing) {
-    const medianReturnScore = computeMedianReturnScore(
-      evidence.recencyWeightedMedianReturnPercent ?? evidence.medianReturnPercent,
-    );
     const portfolioScore = computePortfolioReturnScore(
       evidence.startingCapitalUsd,
       evidence.endingCapitalUsd,
+    );
+    const evaluationSeconds = Math.floor(
+      Date.parse(evidence.recency?.evaluationTimestamp ?? new Date().toISOString()) / 1000,
+    );
+    const profitFactorMetrics = computeProfitFactorMetrics(
+      evidence.copiedOutcomeEconomics ?? [],
+      evaluationSeconds,
     );
     const evidenceConfidenceScore = computeEvidenceConfidenceScore(
       evidence.completedCopiedBuyOutcomes,
       evidence.feasibility.status,
       evidence.coverageStatus,
     );
+    const robustnessScore = computeTailRobustnessScore({
+      startingCapitalUsd: evidence.startingCapitalUsd,
+      endingCapitalUsd: evidence.endingCapitalUsd,
+      endingCapitalWithoutBestTradeUsd: evidence.portfolioWithoutBestTradeEndingCapitalUsd ?? null,
+      bestTradeProfitSharePercent: profitFactorMetrics.bestTradeProfitSharePercent,
+      bestThreeProfitSharePercent: profitFactorMetrics.bestThreeProfitSharePercent,
+    });
     const profitTotal = roundScore(
       clamp(
-        medianReturnScore + portfolioScore + evidenceConfidenceScore,
+        portfolioScore + profitFactorMetrics.score + evidenceConfidenceScore + robustnessScore,
         0,
         WINNER_POLICY_V2_CONFIG.profitabilityWeight,
       ),
@@ -501,9 +1025,15 @@ export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPoli
     profitabilityScore = {
       score: profitTotal,
       max: WINNER_POLICY_V2_CONFIG.profitabilityWeight,
-      medianReturnScore,
       portfolioScore,
+      profitFactorScore: profitFactorMetrics.score,
       evidenceConfidenceScore,
+      robustnessScore,
+      weightedProfitFactor: profitFactorMetrics.profitFactor,
+      bestTradeProfitSharePercent: profitFactorMetrics.bestTradeProfitSharePercent,
+      bestThreeProfitSharePercent: profitFactorMetrics.bestThreeProfitSharePercent,
+      portfolioWithoutBestTradeEndingCapitalUsd:
+        evidence.portfolioWithoutBestTradeEndingCapitalUsd ?? null,
     };
 
     const speedRiskFraction = computeExecutionSpeedRiskFraction({
@@ -536,6 +1066,13 @@ export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPoli
       max: WINNER_POLICY_V2_CONFIG.gmgnRiskWeight,
       walletAgeDays: evidence.activitySignals?.walletAgeDays ?? null,
       deductions: { executionSpeed, hyperactivity, tradeQuality, tokenRisk, costs, walletAge },
+      deductionDetails: buildGmgnDeductionDetails({
+        activitySignals: evidence.activitySignals,
+        riskBundle: evidence.riskBundle,
+        tradeQuality: evidence.tradeQualitySignals,
+        gasRatioPercent: evidence.executionFrictionSignals.gasRatioPercent,
+        deductions: { executionSpeed, hyperactivity, tradeQuality, tokenRisk, costs, walletAge },
+      }),
     };
 
     finalScore = roundScore(clamp(profitTotal + gmgnTotal, 0, 100));
@@ -559,6 +1096,13 @@ export const evaluateWinnerPolicy = (evidence: WinnerPolicyEvidence): WinnerPoli
   return {
     policyVersion: WINNER_POLICY_VERSION,
     status,
+    duneEvidenceStatus: coverageQuality.operationalStatus,
+    actionability:
+      status !== 'WINNER'
+        ? 'NOT_ACTIONABLE'
+        : coverageQuality.operationalStatus === 'REVIEW'
+          ? 'REVIEW'
+          : 'ACTIONABLE',
     finalScore,
     proofGates,
     profitabilityScore,

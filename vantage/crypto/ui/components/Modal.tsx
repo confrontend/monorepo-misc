@@ -1,4 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react';
+import { Dialog, DialogContent, DialogOverlay, DialogPortal, DialogTitle } from './ui/dialog.js';
 
 type ModalProps = {
   onClose: () => void;
@@ -17,22 +18,19 @@ export const Modal = ({
   dialogClassName,
   dialogAs = 'div',
 }: ModalProps) => {
-  const Dialog = dialogAs;
+  const DialogElement = dialogAs === 'article' ? 'article' : 'div';
   return (
-    <div
-      className={`copytrade-modal-backdrop${backdropClassName ? ` ${backdropClassName}` : ''}`}
-      role="presentation"
-      onClick={onClose}
-    >
-      <Dialog
-        className={`copytrade-modal${dialogClassName ? ` ${dialogClassName}` : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-        onClick={(event: MouseEvent) => event.stopPropagation()}
-      >
-        {children}
-      </Dialog>
-    </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPortal>
+        <DialogOverlay className={backdropClassName}>
+          <DialogContent className={dialogClassName} asChild={dialogAs !== 'div'}>
+            <DialogElement onClick={(event: MouseEvent) => event.stopPropagation()}>
+              <DialogTitle className="visually-hidden">{ariaLabel}</DialogTitle>
+              {children}
+            </DialogElement>
+          </DialogContent>
+        </DialogOverlay>
+      </DialogPortal>
+    </Dialog>
   );
 };

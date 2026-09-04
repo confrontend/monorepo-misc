@@ -92,7 +92,9 @@ import { projectFetchDuration } from '../copytrade/screening/estimate.js';
 import {
   computeCopySimulationReport,
   computeLiquidityImpactReport,
+  planCopySimulationTargets,
   runCopySimulationBatch,
+  DEFAULT_COPIER_DELAY_SECONDS,
 } from '../copytrade/simulation/copySimulation.js';
 import {
   computeEliminationReport,
@@ -1107,6 +1109,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       });
       respond(200, {
         ...state.counts.coverage.inventory,
+        depthMode: state.depthMode,
         availabilitySemantics: {
           oldestRowMeaning: 'availability_only',
           oldestRowProvesContinuousCoverage: false,
@@ -1134,14 +1137,21 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const checks = [
         {
           key: 'history',
-          label: 'Requested history depth',
+          label:
+            state.depthMode === 'maximum_available'
+              ? 'Available history depth'
+              : 'Requested history depth',
           status: state.counts.coverage.ready ? 'pass' : 'fail',
           required: true,
           available: state.counts.coverage.ready,
           value: `${state.counts.coverage.completeWallets}/${state.counts.coverage.requiredWallets}`,
           detail: state.counts.coverage.ready
-            ? 'Coverage threshold met.'
-            : `Need ${state.counts.coverage.requiredWallets} completed wallets at ${state.counts.coverage.thresholdPercent}%.`,
+            ? state.depthMode === 'maximum_available'
+              ? 'Fetch reached the provider-available end for every wallet.'
+              : 'Coverage threshold met.'
+            : state.depthMode === 'maximum_available'
+              ? `Fetch has not reached the provider-available end for ${state.counts.coverage.requiredWallets - state.counts.coverage.completeWallets} wallet(s).`
+              : `Need ${state.counts.coverage.requiredWallets} completed wallets at ${state.counts.coverage.thresholdPercent}%.`,
         },
         {
           key: 'metadata',
@@ -1236,17 +1246,16 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         targetDays?: unknown;
         traderLimit?: unknown;
         walletAddresses?: unknown;
+        depthMode?: unknown;
       };
-      const targetDays = Number(payload.targetDays);
+      const requestedTargetDays = Number(payload.targetDays);
+      const targetDays = [30, 60, 90].includes(requestedTargetDays) ? requestedTargetDays : 90;
       const traderLimit = Number(payload.traderLimit ?? 100);
-      if (
-        ![30, 60, 90].includes(targetDays) ||
-        !Number.isInteger(traderLimit) ||
-        traderLimit <= 0 ||
-        traderLimit > 500
-      ) {
+      const depthMode =
+        payload.depthMode === 'maximum_available' ? 'maximum_available' : 'requested';
+      if (!Number.isInteger(traderLimit) || traderLimit <= 0 || traderLimit > 500) {
         respond(400, {
-          error: 'targetDays must be 30, 60, or 90 and traderLimit must be between 1 and 500.',
+          error: 'traderLimit must be between 1 and 500.',
         });
         return;
       }
@@ -1289,6 +1298,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
             targetDays,
             traderLimit,
             walletAddresses: walletAddresses ?? undefined,
+            depthMode,
           }),
         );
       } catch (error) {
@@ -1367,9 +1377,18 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/dune') {
-      const payload = (await readJsonBody(request)) as { runId?: unknown };
+      const payload = (await readJsonBody(request)) as {
+        runId?: unknown;
+        allowPartialDepth?: unknown;
+      };
       try {
-        respond(202, runDataWorkflowDune(database, { runId: Number(payload.runId) }));
+        respond(
+          202,
+          runDataWorkflowDune(database, {
+            runId: Number(payload.runId),
+            allowPartialDepth: payload.allowPartialDepth === true,
+          }),
+        );
       } catch (error) {
         respond(409, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -2042,6 +2061,129 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       );
       return;
     }
+    if (
+      (request.method === 'GET' || request.method === 'POST') &&
+      requestUrl.pathname === '/api/copytrade/decision/dune'
+    ) {
+      const body =
+        request.method === 'POST' ? ((await readJsonBody(request)) as Record<string, unknown>) : {};
+      const rawAddresses =
+        request.method === 'GET'
+          ? (requestUrl.searchParams.get('walletAddresses') ?? '')
+          : Array.isArray(body.walletAddresses)
+            ? body.walletAddresses.join(',')
+            : '';
+      const walletAddresses = [
+        ...new Set(
+          rawAddresses
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (!walletAddresses.length || walletAddresses.length > 100) {
+        respond(400, { error: 'Select between 1 and 100 wallets.' });
+        return;
+      }
+      const plan = planCopySimulationTargets(database, {
+        walletAddresses,
+        chain: 'sol',
+        periodDays: 365,
+        copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
+      });
+      if (request.method === 'GET') {
+        const walletPlans = walletAddresses.map((walletAddress) => {
+          const walletPlan = planCopySimulationTargets(database, {
+            walletAddresses: [walletAddress],
+            chain: 'sol',
+            periodDays: 365,
+            copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
+          });
+          return {
+            walletAddress,
+            pendingTargets: walletPlan.targets.length,
+            tradeCount: walletPlan.roundTrips.length,
+          };
+        });
+        respond(200, {
+          walletCount: walletAddresses.length,
+          pendingTargets: plan.targets.length,
+          tradeCount: plan.roundTrips.length,
+          wallets: walletPlans,
+          message: plan.targets.length
+            ? `${plan.targets.length} Dune price observations will be fetched.`
+            : 'No new Dune observations are pending for these wallets.',
+        });
+        return;
+      }
+      if (!plan.targets.length) {
+        respond(200, {
+          accepted: false,
+          pendingTargets: 0,
+          message: 'No new Dune observations are pending.',
+        });
+        return;
+      }
+      if (hasActiveFetchRun(database) || readGmgnStatsFetchStatus().running) {
+        respond(409, { error: 'Another provider fetch is already running.' });
+        return;
+      }
+      copySimulationRunState = {
+        ...idleCopySimulationRunState,
+        running: true,
+        outcome: 'running',
+        targetsTotal: plan.targets.length,
+        remainingTargets: plan.targets.length,
+        message: `Fetching ${plan.targets.length} selected Dune observations…`,
+        startedAt: new Date().toISOString(),
+      };
+      void runCopySimulationBatch(database, {
+        walletAddresses,
+        chain: 'sol',
+        periodDays: 365,
+        copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
+        onProgress: (progress) => {
+          copySimulationRunState = {
+            ...copySimulationRunState,
+            ...progress,
+            remainingTargets: Math.max(0, progress.targetsTotal - progress.targetsProcessed),
+            message: `Fetched ${progress.targetsProcessed} of ${progress.targetsTotal} Dune observations`,
+          };
+        },
+      })
+        .then((result) => {
+          copySimulationRunState = {
+            ...copySimulationRunState,
+            running: false,
+            outcome: result.failedBatches.length ? 'partial' : 'complete',
+            targetsTotal: result.targetsTotal,
+            targetsProcessed: result.targetsSubmitted,
+            storedTargets: result.targetsSubmitted,
+            failedTargets: result.failedBatches.length,
+            remainingTargets: 0,
+            finishedAt: new Date().toISOString(),
+            message: result.failedBatches.length
+              ? `Fetch finished with ${result.failedBatches.length} failed batch${result.failedBatches.length === 1 ? '' : 'es'}`
+              : 'Fetch complete',
+          };
+        })
+        .catch((error: unknown) => {
+          copySimulationRunState = {
+            ...copySimulationRunState,
+            running: false,
+            outcome: 'error',
+            finishedAt: new Date().toISOString(),
+            message: error instanceof Error ? error.message : 'Selected Dune fetch failed',
+          };
+          console.error('[decision] selected Dune fetch failed:', error);
+        });
+      respond(202, {
+        accepted: true,
+        pendingTargets: plan.targets.length,
+        message: `Started Dune fetch for ${plan.targets.length} price observations.`,
+      });
+      return;
+    }
     if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/elimination') {
       // Runs against the whole cohort, not just current screen-pass candidates — the point is
       // to decide which wallets still deserve further Dune investment before they ever reach
@@ -2217,7 +2359,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         Number.isInteger(snapshotRaw) && snapshotRaw > 0 ? snapshotRaw : undefined;
       // This endpoint is intentionally not wired to any fetch runner. It only computes a
       // separately named experiment from saved SQLite evidence and cannot spend provider credits.
-      const weightingVersion = `${readExperimentalDecisionCacheVersion(database, cachePeriodDays)}:${WINNER_POLICY_VERSION}`;
+      const weightingVersion = `${readExperimentalDecisionCacheVersion(database, cachePeriodDays)}:${WINNER_POLICY_VERSION}:coverage-quality-v2:deduction-details-v1`;
       const refresh = requestUrl.searchParams.get('refresh') === '1';
       const savedReportCandidate =
         !refresh && rosterSnapshotId === undefined
@@ -2227,7 +2369,12 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           : null;
       const savedReport =
         savedReportCandidate?.featureEngineVersion === WALLET_FEATURE_ENGINE_VERSION &&
-        savedReportCandidate.winnerPolicyVersion === WINNER_POLICY_VERSION
+        savedReportCandidate.winnerPolicyVersion === WINNER_POLICY_VERSION &&
+        savedReportCandidate.wallets.every(
+          (wallet) =>
+            wallet.winnerPolicy?.evidence?.coverageQuality !== undefined &&
+            wallet.winnerPolicy.gmgnRiskScore?.deductionDetails !== undefined,
+        )
           ? savedReportCandidate
           : null;
       const baseReport =

@@ -16,7 +16,11 @@ import type {
   WinnerPolicyHoldout,
   WinnerPolicyTradeQualitySignals,
 } from './winnerPolicy.js';
-import { WINNER_POLICY_RECENCY_HALF_LIFE_DAYS } from './winnerPolicy.js';
+import {
+  computeRecencyWeightedMedian,
+  evaluateCoverageQuality,
+  WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
+} from './winnerPolicy.js';
 
 type DatedCanonicalOutcome = {
   buyTradeId: number;
@@ -32,31 +36,6 @@ const timestamp = (value: string | undefined): number | null => {
 
 const medianReturn = (outcomes: readonly DatedCanonicalOutcome[]): number | null =>
   median(outcomes.map((outcome) => outcome.returnPercent));
-
-const weightedMedianReturn = (
-  outcomes: readonly DatedCanonicalOutcome[],
-  evaluationSeconds: number,
-): number | null => {
-  if (!outcomes.length) return null;
-  const ordered = outcomes
-    .map((outcome) => ({
-      value: outcome.returnPercent,
-      weight: Math.pow(
-        0.5,
-        Math.max(0, evaluationSeconds - outcome.timestamp) /
-          86_400 /
-          WINNER_POLICY_RECENCY_HALF_LIFE_DAYS,
-      ),
-    }))
-    .sort((a, b) => a.value - b.value);
-  const total = ordered.reduce((sum, item) => sum + item.weight, 0);
-  let cumulative = 0;
-  for (const item of ordered) {
-    cumulative += item.weight;
-    if (cumulative >= total / 2) return item.value;
-  }
-  return ordered[ordered.length - 1]?.value ?? null;
-};
 
 const holdoutFor = (
   index: number,
@@ -209,9 +188,11 @@ export const buildWinnerPolicyEvidence = (
   options: {
     activitySignals?: WinnerPolicyActivitySignals | null;
     riskBundle?: GmgnRiskBundleEvidence | null;
+    evaluationTimestamp?: Date;
   } = {},
 ): WinnerPolicyEvidence => {
-  const evaluationSeconds = Math.floor(Date.now() / 1000);
+  const evaluationTimestamp = options.evaluationTimestamp ?? new Date();
+  const evaluationSeconds = Math.floor(evaluationTimestamp.getTime() / 1000);
   const outcomes = (wallet.canonicalCopiedBuyOutcomes ?? [])
     .filter((outcome) => outcome.simulatedReturnRatio !== null)
     .flatMap((outcome) => {
@@ -231,6 +212,10 @@ export const buildWinnerPolicyEvidence = (
   const holdouts = splitIntoThree(outcomes).map((window, index) =>
     holdoutFor(index + 1, window, wallet.trades),
   );
+  const copiedOutcomeEconomics = outcomes.map((outcome) => ({
+    ...outcome,
+    netPnlUsd: wallet.portfolio.stakePerTradeUsd * (outcome.returnPercent / 100),
+  }));
   const warning =
     wallet.coverageStatus && wallet.coverageStatus !== 'fully_covered'
       ? `Delayed-copy evidence is ${wallet.coverageStatus}: ${wallet.coverageStatusReason ?? 'coverage is not complete.'}`
@@ -250,9 +235,20 @@ export const buildWinnerPolicyEvidence = (
     },
     completedCopiedBuyOutcomes: outcomes.length,
     medianReturnPercent: medianReturn(outcomes),
-    recencyWeightedMedianReturnPercent: weightedMedianReturn(outcomes, evaluationSeconds),
+    recencyWeightedMedianReturnPercent: computeRecencyWeightedMedian(
+      outcomes.map((outcome) => ({ value: outcome.returnPercent, timestamp: outcome.timestamp })),
+      evaluationSeconds,
+    ),
     startingCapitalUsd: wallet.portfolio.startingCapitalUsd,
     endingCapitalUsd: wallet.portfolio.endingCapitalUsd,
+    capitalPath: wallet.portfolio.capitalPath ?? [],
+    copiedOutcomeEconomics,
+    portfolioWithoutBestTradeEndingCapitalUsd:
+      wallet.portfolioWithoutBestTradeEndingCapitalUsd ?? null,
+    portfolioWithoutUncopyableTradesEndingCapitalUsd:
+      wallet.portfolioWithoutUncopyableTradesEndingCapitalUsd ?? null,
+    uncopyableTradeCount: wallet.uncopyableTradeCount ?? 0,
+    uncopyableProfitDependencyPercent: wallet.uncopyableProfitDependencyPercent ?? 0,
     holdouts,
     coverageStatus: wallet.coverageStatus ?? null,
     feasibility: warning
@@ -265,6 +261,7 @@ export const buildWinnerPolicyEvidence = (
     riskBundle: options.riskBundle ?? null,
     tradeQualitySignals: computeTradeQualitySignals(wallet.trades),
     executionFrictionSignals: computeExecutionFrictionSignals(wallet.trades),
+    coverageQuality: evaluateCoverageQuality(wallet.trades, evaluationTimestamp),
     provenance: {
       delayedCopy: 'Persisted Dune matches evaluated by the canonical copy simulation.',
       portfolio:
@@ -292,6 +289,10 @@ export const emptyWinnerPolicyEvidence = (
   recencyWeightedMedianReturnPercent: null,
   startingCapitalUsd: 100,
   endingCapitalUsd: null,
+  capitalPath: [],
+  portfolioWithoutUncopyableTradesEndingCapitalUsd: null,
+  uncopyableTradeCount: 0,
+  uncopyableProfitDependencyPercent: 0,
   holdouts: [],
   coverageStatus: null,
   feasibility: { status: 'unavailable', detail: 'No persisted simulation report exists.' },
@@ -304,6 +305,7 @@ export const emptyWinnerPolicyEvidence = (
     distinctTokenCount: 0,
   },
   executionFrictionSignals: { gasRatioPercent: null, tradesWithGasData: 0 },
+  coverageQuality: evaluateCoverageQuality([]),
   provenance: {
     delayedCopy: 'Persisted Dune matches evaluated by the canonical copy simulation.',
     portfolio: 'Existing fixed-stake canonical copy simulation.',

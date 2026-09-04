@@ -3,7 +3,7 @@ import type { CopyTradeSubTab } from '../types.js';
 type AppNavigationProps = {
   copyTradeSubTab: CopyTradeSubTab;
   activeMenu: string;
-  signalMenuActive: boolean;
+  signalMenuActive?: boolean;
   onCopyTradeTabChange: (tab: CopyTradeSubTab) => void;
   onMenuChange: (menu: string) => void;
 };
@@ -36,25 +36,6 @@ export function AppNavigation({
           </button>
         ))}
       </nav>
-      {signalMenuActive && (
-        <nav className="subsection-nav" aria-label="Signal workspace">
-          <span className="subsection-label">Signal</span>
-          {[
-            ['imports', 'Imports'],
-            ['capture', 'GMGN Capture'],
-            ['dune-capture', 'Dune Capture'],
-            ['patterns', 'Patterns'],
-          ].map(([menu, label]) => (
-            <button
-              key={menu}
-              className={`nav-button ${activeMenu === menu ? 'active' : ''}`}
-              onClick={() => onMenuChange(menu)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
     </>
   );
 }

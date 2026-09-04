@@ -5,16 +5,26 @@
  * v2 implementation write-up and its stated limitations.
  */
 export const WINNER_POLICY_V2_CONFIG = Object.freeze({
-  policyVersion: 'winner-policy-v3' as const,
+  policyVersion: 'winner-policy-v5' as const,
   recencyHalfLifeDays: 45,
 
   minimumCompletedCopiedTrades: 20,
   profitabilityWeight: 70,
   gmgnRiskWeight: 30,
 
-  medianReturnMaxPoints: 30,
-  portfolioReturnMaxPoints: 25,
-  confidenceMaxPoints: 15,
+  portfolioReturnMaxPoints: 30,
+  profitFactorMaxPoints: 20,
+  confidenceMaxPoints: 10,
+  robustnessMaxPoints: 10,
+  profitFactorCurveK: 0.8,
+  profitFactorCalculationCap: 5,
+  robustnessBestTradePoints: 3,
+  robustnessTopThreePoints: 2,
+  robustnessLeaveOneOutPoints: 5,
+  robustnessBestTradeFullAtShare: 0.3,
+  robustnessBestTradeZeroAtShare: 0.8,
+  robustnessTopThreeFullAtShare: 0.6,
+  robustnessTopThreeZeroAtShare: 0.95,
 
   maxExecutionSpeedPenalty: 12,
   maxHyperactivityPenalty: 3,
@@ -23,12 +33,23 @@ export const WINNER_POLICY_V2_CONFIG = Object.freeze({
   maxCostPenalty: 2,
   maxWalletAgePenalty: 5,
 
+  // Coverage-quality protection: pending work is distinct from confirmed Dune no-matches.
+  coverageBiasMinimumConfirmedMissing: 10,
+  coverageBiasConfirmationGapPercent: 10,
+  coverageBiasConservativeGapPercent: 30,
+  coverageBiasGapTiers: [
+    { effectiveMissingN: 10, requiredMedianGap: 30 },
+    { effectiveMissingN: 100, requiredMedianGap: 20 },
+    { effectiveMissingN: 1000, requiredMedianGap: 10 },
+  ],
+  coveragePendingMaterialMinimum: 10,
+  coveragePendingMaterialShare: 0.2,
+
   // Profitability curves: score = maxPoints * (1 - e^(-k * max(0, x))) -- gradual, capped, and
   // resistant to one extreme value dominating (median return is already outlier-resistant by
   // construction; the curve itself also saturates rather than growing unbounded).
-  medianReturnCurveK: 0.022, // 45% -> 18.9pts, 80% -> 24.8pts, asymptotic -> 30pts
   portfolioReturnCurveK: 0.022, // same shape, applied to (ending-starting)/starting as a percent
-  confidenceVolumeCurveK: 0.0347, // n=20 -> 7.5pts, n=21 -> 7.76pts, n=200 -> 14.99pts
+  confidenceVolumeCurveK: 0.0347, // n=20 -> 5pts, n=21 -> 5.17pts, n=200 -> ~10pts
   confidenceQualityMultiplier: {
     fully_covered: 1.0,
     partially_covered: 0.75,

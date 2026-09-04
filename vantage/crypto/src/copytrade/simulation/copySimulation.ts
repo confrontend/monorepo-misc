@@ -18,6 +18,7 @@ import {
   type CanonicalCopiedBuyDiagnostics,
 } from './canonicalCopiedBuyOutcome.js';
 import { CALCULATION_MANIFEST_VERSION, CALCULATION_VERSIONS } from '../calculationVersions.js';
+import { UNCOPYABLE_TRADE_MAX_HOLD_SECONDS } from './constants.js';
 
 /**
  * Historical Copy Simulation: for the top qualifying wallets, estimate what a copier —
@@ -562,7 +563,7 @@ type CopySimulationTargetPlan = {
 /** Build the exact queue that the Dune runner will submit. Keeping this in one place is
  * important: a report row represents a round trip, but Dune needs separate buy/sell legs
  * (plus cutoff marks for open positions). */
-const planCopySimulationTargets = (
+export const planCopySimulationTargets = (
   database: DatabaseSync,
   options: {
     walletAddresses: string[];
@@ -950,6 +951,14 @@ export type CopySimulationWalletReport = {
   localHistoryStopReason?: string | null;
   /** The realistic small-account result using the same delayed Dune prices as the trade stats. */
   portfolio: FixedStakePortfolioReport;
+  /** Exact chronological portfolio rerun after excluding the best copied-buy position. */
+  portfolioWithoutBestTradeEndingCapitalUsd?: number | null;
+  /** Exact chronological portfolio rerun after excluding sub-60-second copied round trips. */
+  portfolioWithoutUncopyableTradesEndingCapitalUsd?: number | null;
+  /** Number of simulated round trips excluded by the uncopyable-trade counterfactual. */
+  uncopyableTradeCount?: number;
+  /** Share of profitable portfolio outcome attributable to the excluded trades. */
+  uncopyableProfitDependencyPercent?: number | null;
   trades: CopySimulationTradeResult[];
   /** Leg-level Dune coverage for THIS wallet only, using the exact same definitions as the
    *  report-level pendingDuneTargets/duneNoMatchTargets/duneMatchedTargets fields (see their own
@@ -1587,6 +1596,45 @@ export const computeCopySimulationReport = (
         remainingFraction: position.remainingFraction,
       })),
     );
+    const bestCanonicalOutcome = canonicalCopiedBuyAggregation.outcomes
+      .filter((outcome) => outcome.simulatedReturnRatio !== null)
+      .sort(
+        (left, right) =>
+          (right.simulatedReturnRatio ?? -Infinity) - (left.simulatedReturnRatio ?? -Infinity),
+      )[0];
+    const portfolio = simulateFixedStakePortfolio(portfolioTrades);
+    const portfolioWithoutBestTradeEndingCapitalUsd = bestCanonicalOutcome
+      ? simulateFixedStakePortfolio(
+          portfolioTrades.filter((trade) => trade.positionId !== bestCanonicalOutcome.buyTradeId),
+        ).endingCapitalUsd
+      : null;
+    const uncopyableTradeIds = new Set(
+      tradeResults
+        .filter(
+          (trade) =>
+            trade.status === 'simulated' &&
+            trade.sellTradeId !== undefined &&
+            trade.holdSeconds !== undefined &&
+            trade.holdSeconds <= UNCOPYABLE_TRADE_MAX_HOLD_SECONDS,
+        )
+        .map((trade) => trade.sellTradeId!),
+    );
+    const portfolioWithoutUncopyableTradesEndingCapitalUsd = simulateFixedStakePortfolio(
+      portfolioTrades.filter((trade) => !uncopyableTradeIds.has(trade.id)),
+    ).endingCapitalUsd;
+    const portfolioProfitUsd = portfolio.endingCapitalUsd - portfolio.startingCapitalUsd;
+    const uncopyableProfitDependencyPercent =
+      portfolioProfitUsd > 0
+        ? round(
+            (Math.max(
+              0,
+              portfolio.endingCapitalUsd - portfolioWithoutUncopyableTradesEndingCapitalUsd,
+            ) /
+              portfolioProfitUsd) *
+              100,
+            1,
+          )
+        : 0;
 
     return {
       walletAddress,
@@ -1614,7 +1662,11 @@ export const computeCopySimulationReport = (
       coverageStatusReason,
       localHistoryTruncated,
       localHistoryStopReason: coverage?.stopReason ?? null,
-      portfolio: simulateFixedStakePortfolio(portfolioTrades),
+      portfolio,
+      portfolioWithoutBestTradeEndingCapitalUsd,
+      portfolioWithoutUncopyableTradesEndingCapitalUsd,
+      uncopyableTradeCount: uncopyableTradeIds.size,
+      uncopyableProfitDependencyPercent,
       delayCostPercentagePoints:
         walletMedianReturnPercent !== null && simulatedMedianReturnPercent !== null
           ? round(simulatedMedianReturnPercent - walletMedianReturnPercent, 2)

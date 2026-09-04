@@ -291,7 +291,10 @@ test('Decision Lab keeps the selected horizon in the report and reads matching p
     });
     const report = computeExperimentalDecisionReport(database, { periodDays: 60 });
     assert.equal(report.periodDays, 60);
-    assert.match(report.methodology[0] ?? '', /^60-day saved GMGN report/);
+    assert.match(
+      report.methodology[0] ?? '',
+      /^All available saved GMGN history is evaluated through the shared point-in-time wallet feature engine;/,
+    );
   } finally {
     database.close();
   }

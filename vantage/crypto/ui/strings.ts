@@ -74,11 +74,12 @@ export const strings = {
       complete: 'Gate failed',
     },
     analyticalSummary: 'Exploratory context only — these scores do not decide Winner Policy.',
-    winnerPolicyIntro: 'Winner requires all three gates:',
+    winnerPolicyIntro: 'Winner requires all four gates:',
     winnerPolicyGates: [
       '20+ completed copied-buy outcomes',
-      'Positive delayed-copy median',
       '$100 portfolio ends above $100',
+      'Dune evidence is actionable',
+      'Profit survives without sub-60s trades',
     ],
     winnerPolicyScoreSummary:
       'Score: 70 delayed-copy points + 30 GMGN risk deductions. Holdouts are context only; GMGN can only lower the score.',
@@ -94,7 +95,7 @@ export const strings = {
       copyability: 'holding time and validated trading penalties',
     },
     candidateGates:
-      '20+ completed copied-buy outcomes, a positive delayed-copy median, and a canonical $100 portfolio ending above $100.',
+      '20+ completed copied-buy outcomes, a canonical $100 portfolio ending above $100, and actionable Dune evidence.',
     missingEvidence:
       'Missing evidence stays unavailable—not zero—and prevents a raw overall score until all four components can be calculated.',
     weightsTitle: 'Weights currently in use',
@@ -102,6 +103,7 @@ export const strings = {
     winnersOnly: 'Winners only',
     walletFilterPlaceholder: 'Filter wallet or name',
     exportAllWithDetails: 'Export all with details',
+    exportWinnersData: 'Export winners data',
     generatedAt: (date: string) => `Report generated ${date}.`,
   },
   dataWorkflow: {
