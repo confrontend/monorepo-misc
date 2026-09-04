@@ -613,6 +613,7 @@ export function ExperimentalDecisionLab({
   const [dunePlansByWallet, setDunePlansByWallet] = useState<
     Map<string, { pendingTargets: number; tradeCount: number }>
   >(new Map());
+  const [dunePreflightLoading, setDunePreflightLoading] = useState<Set<string>>(new Set());
   const [duneFetchBusy, setDuneFetchBusy] = useState(false);
   const [duneFetchProgress, setDuneFetchProgress] = useState<{
     processed: number;
@@ -620,8 +621,8 @@ export function ExperimentalDecisionLab({
     failed: number;
   } | null>(null);
   const duneFetchObservedRunning = useRef(false);
-  const load = (refresh = false) => {
-    setLoading(true);
+  const load = (refresh = false, showPageLoading = true) => {
+    if (showPageLoading) setLoading(true);
     setError(null);
     void api<LabResponse>(
       `/api/copytrade/experimental-decision?limit=100${refresh ? '&refresh=1' : ''}`,
@@ -630,7 +631,9 @@ export function ExperimentalDecisionLab({
       .catch((reason: unknown) =>
         setError(reason instanceof Error ? reason.message : String(reason)),
       )
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (showPageLoading) setLoading(false);
+      });
   };
   useEffect(() => {
     load();
@@ -673,10 +676,27 @@ export function ExperimentalDecisionLab({
     void fetch(`/api/copytrade/decision/dune?walletAddresses=${query}`)
       .then(async (result) => {
         if (!result.ok) throw new Error(`Dune preflight failed (${result.status}).`);
-        return (await result.json()) as { pendingTargets: number; message: string };
+        return (await result.json()) as {
+          pendingTargets: number;
+          tradeCount?: number;
+          message: string;
+        };
       })
       .then((plan) => {
-        if (!disposed) setDunePlan(plan);
+        if (!disposed) {
+          setDunePlan(plan);
+          if (selectedForDune.size === 1) {
+            const walletAddress = [...selectedForDune][0];
+            if (walletAddress) {
+              setDunePlansByWallet((current) =>
+                new Map(current).set(walletAddress, {
+                  pendingTargets: plan.pendingTargets,
+                  tradeCount: plan.tradeCount ?? 0,
+                }),
+              );
+            }
+          }
+        }
       })
       .catch(() => {
         if (!disposed) setDunePlan({ pendingTargets: 0, message: 'Dune preflight unavailable.' });
@@ -688,12 +708,13 @@ export function ExperimentalDecisionLab({
   useEffect(() => {
     if (!response?.wallets.length) {
       setDunePlansByWallet(new Map());
+      setDunePreflightLoading(new Set());
       return undefined;
     }
     let disposed = false;
-    const query = encodeURIComponent(
-      response.wallets.map((wallet) => wallet.walletAddress).join(','),
-    );
+    const addresses = response.wallets.map((wallet) => wallet.walletAddress);
+    setDunePreflightLoading(new Set(addresses));
+    const query = encodeURIComponent(addresses.join(','));
     void fetch(`/api/copytrade/decision/dune?walletAddresses=${query}`)
       .then(async (result) => {
         if (!result.ok) throw new Error('Dune preflight unavailable.');
@@ -702,22 +723,21 @@ export function ExperimentalDecisionLab({
         };
       })
       .then((plan) => {
-        if (!disposed) {
-          setDunePlansByWallet(
-            new Map(
-              (plan.wallets ?? []).map((wallet) => [
-                wallet.walletAddress,
-                {
-                  pendingTargets: wallet.pendingTargets,
-                  tradeCount: wallet.tradeCount,
-                },
-              ]),
-            ),
-          );
-        }
+        if (disposed) return;
+        setDunePlansByWallet(
+          new Map(
+            (plan.wallets ?? []).map((wallet) => [
+              wallet.walletAddress,
+              { pendingTargets: wallet.pendingTargets, tradeCount: wallet.tradeCount },
+            ]),
+          ),
+        );
       })
       .catch(() => {
         if (!disposed) setDunePlansByWallet(new Map());
+      })
+      .finally(() => {
+        if (!disposed) setDunePreflightLoading(new Set());
       });
     return () => {
       disposed = true;
@@ -726,7 +746,6 @@ export function ExperimentalDecisionLab({
   const startSelectedDuneFetch = async () => {
     if (!selectedForDune.size || !dunePlan?.pendingTargets) return;
     setDuneFetchBusy(true);
-    setLoading(true);
     setError(null);
     duneFetchObservedRunning.current = false;
     setDuneFetchProgress({ processed: 0, total: dunePlan.pendingTargets, failed: 0 });
@@ -772,7 +791,7 @@ export function ExperimentalDecisionLab({
         ) {
           setDuneFetchBusy(false);
           setDuneFetchProgress(null);
-          load(true);
+          load(true, false);
         }
       } catch {
         // Keep the button in its current state; the next poll retries.
@@ -1202,9 +1221,16 @@ export function ExperimentalDecisionLab({
                 key: 'dunePreflight',
                 header: 'Dune preflight',
                 render: (wallet) => {
+                  if (dunePreflightLoading.has(wallet.walletAddress)) {
+                    return (
+                      <span className="experimental-preflight-loading" role="status">
+                        <span className="loading-spinner" aria-hidden="true" /> Checking…
+                      </span>
+                    );
+                  }
                   const plan = dunePlansByWallet.get(wallet.walletAddress);
                   if (!plan) return '—';
-                  if (plan.pendingTargets === 0) return 'Complete · 0 pending';
+                  if (plan.pendingTargets === 0) return 'Complete';
                   return `${plan.pendingTargets.toLocaleString()} pending`;
                 },
               },

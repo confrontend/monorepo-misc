@@ -274,7 +274,14 @@ const researchDataFingerprint = (): string => {
       (SELECT COUNT(*) FROM copytrade_gmgn_risk_stats) AS gmgnRiskCount,
       (SELECT COALESCE(MAX(fetched_at), '') FROM copytrade_gmgn_risk_stats) AS gmgnRiskMaxFetchedAt,
       (SELECT COUNT(*) FROM copytrade_copy_simulation_runs) AS simulationCount,
-      (SELECT COALESCE(MAX(id), 0) FROM copytrade_copy_simulation_runs) AS simulationMaxId
+      (SELECT COALESCE(MAX(id), 0) FROM copytrade_copy_simulation_runs) AS simulationMaxId,
+      (SELECT COUNT(*) FROM copytrade_copy_simulation_matches) AS simulationMatchesCount,
+      (SELECT COALESCE(MAX(rowid), 0) FROM copytrade_copy_simulation_matches) AS simulationMatchesMaxRowid,
+      (SELECT COALESCE(MAX(completed_at), '') FROM copytrade_copy_simulation_matches) AS simulationMatchesMaxCompletedAt,
+      (SELECT COALESCE(SUM(CASE WHEN status = 'matched' THEN 1 ELSE 0 END), 0) FROM copytrade_copy_simulation_matches) AS simulationMatchesMatched,
+      (SELECT COALESCE(SUM(CASE WHEN status = 'no_trade_in_window' THEN 1 ELSE 0 END), 0) FROM copytrade_copy_simulation_matches) AS simulationMatchesNoTrade,
+      (SELECT COALESCE(SUM(length(COALESCE(status, '')) + length(COALESCE(match_source, '')) + length(COALESCE(matched_tx_id, ''))), 0) FROM copytrade_copy_simulation_matches) AS simulationMatchesTextWeight,
+      (SELECT COALESCE(SUM(COALESCE(matched_price_usd, 0) + COALESCE(matched_trade_amount_usd, 0)), 0) FROM copytrade_copy_simulation_matches) AS simulationMatchesValueWeight
   `,
     )
     .get() as Record<string, unknown>;
@@ -2085,37 +2092,53 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         respond(400, { error: 'Select between 1 and 100 wallets.' });
         return;
       }
+      if (request.method === 'GET') {
+        const cacheKey = [
+          'decision-dune-preflight:v1',
+          'sol',
+          '365',
+          String(DEFAULT_COPIER_DELAY_SECONDS),
+          ...[...walletAddresses].sort(),
+        ].join(':');
+        const result = readCachedResearch(cacheKey, () => {
+          const plan = planCopySimulationTargets(database, {
+            walletAddresses,
+            chain: 'sol',
+            periodDays: 365,
+            copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
+          });
+          const walletPlans = walletAddresses.map((walletAddress) => {
+            const walletPlan = planCopySimulationTargets(database, {
+              walletAddresses: [walletAddress],
+              chain: 'sol',
+              periodDays: 365,
+              copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
+            });
+            return {
+              walletAddress,
+              pendingTargets: walletPlan.targets.length,
+              tradeCount: walletPlan.roundTrips.length,
+            };
+          });
+          return {
+            walletCount: walletAddresses.length,
+            pendingTargets: plan.targets.length,
+            tradeCount: plan.roundTrips.length,
+            wallets: walletPlans,
+            message: plan.targets.length
+              ? `${plan.targets.length} Dune price observations will be fetched.`
+              : 'No new Dune observations are pending for these wallets.',
+          };
+        });
+        respond(200, result);
+        return;
+      }
       const plan = planCopySimulationTargets(database, {
         walletAddresses,
         chain: 'sol',
         periodDays: 365,
         copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
       });
-      if (request.method === 'GET') {
-        const walletPlans = walletAddresses.map((walletAddress) => {
-          const walletPlan = planCopySimulationTargets(database, {
-            walletAddresses: [walletAddress],
-            chain: 'sol',
-            periodDays: 365,
-            copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
-          });
-          return {
-            walletAddress,
-            pendingTargets: walletPlan.targets.length,
-            tradeCount: walletPlan.roundTrips.length,
-          };
-        });
-        respond(200, {
-          walletCount: walletAddresses.length,
-          pendingTargets: plan.targets.length,
-          tradeCount: plan.roundTrips.length,
-          wallets: walletPlans,
-          message: plan.targets.length
-            ? `${plan.targets.length} Dune price observations will be fetched.`
-            : 'No new Dune observations are pending for these wallets.',
-        });
-        return;
-      }
       if (!plan.targets.length) {
         respond(200, {
           accepted: false,
