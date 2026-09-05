@@ -122,6 +122,20 @@ export const API_CATALOG: ApiDoc[] = [
   ),
   route(
     'GET',
+    '/api/copytrade/solana-benchmark',
+    'Solana RPC delayed-price benchmark',
+    'Research-only comparison of the provider-neutral Solana RPC prototype with persisted Dune matches. It never changes Winner Policy or production simulation results.',
+    { run: null },
+  ),
+  route(
+    'POST',
+    '/api/copytrade/solana-benchmark',
+    'Start Solana benchmark',
+    'Starts a background benchmark or returns the active run. Partial results and failures are saved in SQLite; GET reads progress without starting RPC calls.',
+    { run: { status: 'running', completed: 0, total: 20 } },
+  ),
+  route(
+    'GET',
     '/api/copytrade/liquidity-impact',
     'Trade-size liquidity proxy',
     'Compares delayed-copy results across low, medium, and high entry trade-size bands. This is a proxy, not historical pool liquidity.',

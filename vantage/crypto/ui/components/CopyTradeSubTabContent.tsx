@@ -4,6 +4,7 @@ import { ApiReference } from './ApiReference.js';
 import { ExperimentalDecisionLab } from './ExperimentalDecisionLab.js';
 import { LiveEvaluation } from './LiveEvaluation.js';
 import { DataWorkflow } from './data/DataWorkflow.js';
+import { SolanaBenchmark } from './SolanaBenchmark.js';
 import type { CopyTradeSubTab } from '../types.js';
 
 type CopyTradeSubTabContentProps = {
@@ -37,5 +38,6 @@ export function CopyTradeSubTabContent({
       />
     );
   if (activeTab === 'live-evaluation') return <LiveEvaluation api={scopedApi} />;
+  if (activeTab === 'solana-benchmark') return <SolanaBenchmark api={scopedApi} />;
   return null;
 }

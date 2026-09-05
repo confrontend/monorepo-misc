@@ -9,25 +9,43 @@ import { DiagnosticsRoute } from './routes/DiagnosticsRoute.js';
 import { useAppRoute } from './app/useAppRoute.js';
 import { useThemeMode } from './app/useThemeMode.js';
 import { usePatternDiscoveryController } from './hooks/usePatternDiscoveryController.js';
-import type {
-  CopyTradeSubTab,
-} from './types.js';
+import type { CopyTradeSubTab } from './types.js';
 
 export function App() {
   const { themeMode, toggleTheme } = useThemeMode();
   const { activeMenu, copyTradeSubTab, navigateTo, navigateCopyTradeSubTab } = useAppRoute();
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [copyTradePeriodDays, setCopyTradePeriodDays] = useState(30);
-  const patternDiscovery = usePatternDiscoveryController({ api, periodDays: copyTradePeriodDays, copyTradeSubTab });
+  const patternDiscovery = usePatternDiscoveryController({
+    api,
+    periodDays: copyTradePeriodDays,
+    copyTradeSubTab,
+  });
   const {
-    patternReport, patternSnapshots, patternHorizon, refreshPatternReport,
-    patternDiscoveryExport, patternDiscoveryProgress, patternDiscoveryLoadingDetail,
-    patternDiscoveryReport, patternDiscoverySensitivity, patternDiscoveryFreshness,
-    patternDiscoveryExecution, patternDiscoveryRunLoading, patternDiscoveryElapsedSeconds,
-    patternDiscoveryRunError, patternHistoryAvailable, setPatternHistoryAvailable,
-    selectedPatternRule, setSelectedPatternRule, patternDiscoverySourceOpen,
-    setPatternDiscoverySourceOpen, patternDiscoveryIsActive, exportPatternDiscoveryPage,
-    runPatternDiscovery, stopPatternDiscovery,
+    patternReport,
+    patternSnapshots,
+    patternHorizon,
+    refreshPatternReport,
+    patternDiscoveryExport,
+    patternDiscoveryProgress,
+    patternDiscoveryLoadingDetail,
+    patternDiscoveryReport,
+    patternDiscoverySensitivity,
+    patternDiscoveryFreshness,
+    patternDiscoveryExecution,
+    patternDiscoveryRunLoading,
+    patternDiscoveryElapsedSeconds,
+    patternDiscoveryRunError,
+    patternHistoryAvailable,
+    setPatternHistoryAvailable,
+    selectedPatternRule,
+    setSelectedPatternRule,
+    patternDiscoverySourceOpen,
+    setPatternDiscoverySourceOpen,
+    patternDiscoveryIsActive,
+    exportPatternDiscoveryPage,
+    runPatternDiscovery,
+    stopPatternDiscovery,
   } = patternDiscovery;
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [message, setMessage] = useState('Ready. Data is saved locally in SQLite.');
@@ -55,10 +73,7 @@ export function App() {
   }, [activeMenu]);
   return (
     <main className={`shell routed-view page-${activeMenu}`}>
-      <AppHeader
-        themeMode={themeMode}
-        onToggleTheme={toggleTheme}
-      />
+      <AppHeader themeMode={themeMode} onToggleTheme={toggleTheme} />
 
       <AppNavigation
         copyTradeSubTab={copyTradeSubTab}
@@ -105,9 +120,12 @@ export function App() {
         />
       )}
 
-      <ArchivesRoute setMessage={setMessage} />
-
-      <DiagnosticsRoute setMessage={setMessage} />
+      {copyTradeSubTab === 'data' && (
+        <>
+          <ArchivesRoute setMessage={setMessage} />
+          <DiagnosticsRoute setMessage={setMessage} />
+        </>
+      )}
 
       <footer>
         <span>{message}</span>

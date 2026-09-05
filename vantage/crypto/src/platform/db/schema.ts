@@ -1504,6 +1504,16 @@ const migrations: Migration[] = [
       `),
   },
   {
+    description: 'Prevent concurrent Dune copy-simulation fetches across server processes',
+    up: (database) =>
+      database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_copy_simulation_leases (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        acquired_at TEXT NOT NULL
+      );
+      `),
+  },
+  {
     description: 'Align Pattern Discovery revisions with actual feature and outcome inputs',
     up: (database) =>
       database.exec(`
@@ -1841,6 +1851,16 @@ const migrations: Migration[] = [
     },
   },
 ];
+
+migrations.push({
+  description: 'Persist experimental Solana benchmark runs and partial results',
+  up: (database) => {
+    database.exec(`CREATE TABLE IF NOT EXISTS solana_benchmark_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_json TEXT NOT NULL
+    )`);
+  },
+});
 
 export const latestSchemaVersion = migrations.length;
 

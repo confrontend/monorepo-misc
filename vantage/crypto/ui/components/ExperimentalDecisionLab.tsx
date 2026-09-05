@@ -441,7 +441,8 @@ const SavedFactsCell = ({ wallet }: { wallet: LabWallet }) => (
           {pct(wallet.facts.activityMedianReturnPercent)} ·{' '}
           {usd(wallet.facts.officialGmgnRealizedProfitUsd ?? null)}
           <small>
-            {wallet.facts.activityTradeCount} local activity trades ({wallet.facts.activityPeriodDays}d)
+            {wallet.facts.activityTradeCount} local activity trades (
+            {wallet.facts.activityPeriodDays}d)
           </small>
         </span>
       </span>
@@ -605,6 +606,7 @@ export function ExperimentalDecisionLab({
   const [scoringInfoOpen, setScoringInfoOpen] = useState(false);
   const [riskImportInfoOpen, setRiskImportInfoOpen] = useState(false);
   const [winnersOnly, setWinnersOnly] = useState(false);
+  const [potentialWinnersOnly, setPotentialWinnersOnly] = useState(false);
   const [walletFilter, setWalletFilter] = useState('');
   const [selectedForDune, setSelectedForDune] = useState<Set<string>>(new Set());
   const [dunePlan, setDunePlan] = useState<{ pendingTargets: number; message: string } | null>(
@@ -614,6 +616,14 @@ export function ExperimentalDecisionLab({
     Map<string, { pendingTargets: number; tradeCount: number }>
   >(new Map());
   const [dunePreflightLoading, setDunePreflightLoading] = useState<Set<string>>(new Set());
+  const [duneFetchingWallets, setDuneFetchingWallets] = useState<Set<string>>(new Set());
+  const [duneFetchTotalsByWallet, setDuneFetchTotalsByWallet] = useState<Map<string, number>>(
+    new Map(),
+  );
+  const [duneFetchStartedAt, setDuneFetchStartedAt] = useState<string | null>(null);
+  const [duneFetchProgressByWallet, setDuneFetchProgressByWallet] = useState<Map<string, number>>(
+    new Map(),
+  );
   const [duneFetchBusy, setDuneFetchBusy] = useState(false);
   const [duneFetchProgress, setDuneFetchProgress] = useState<{
     processed: number;
@@ -659,6 +669,12 @@ export function ExperimentalDecisionLab({
         )
       : sortedWallets
   ).filter((wallet) => {
+    if (potentialWinnersOnly) {
+      const plan = dunePlansByWallet.get(wallet.walletAddress);
+      if (wallet.winnerPolicy.status === 'REJECTED' || !plan || plan.pendingTargets <= 0) {
+        return false;
+      }
+    }
     const query = walletFilter.trim().toLowerCase();
     if (!query) return true;
     return (
@@ -666,6 +682,17 @@ export function ExperimentalDecisionLab({
       (wallet.name?.toLowerCase().includes(query) ?? false)
     );
   });
+  const selectableVisibleAddresses = displayedWallets
+    .filter(
+      (wallet) =>
+        !potentialWinnersOnly ||
+        (wallet.winnerPolicy.status !== 'REJECTED' &&
+          (dunePlansByWallet.get(wallet.walletAddress)?.pendingTargets ?? 0) > 0),
+    )
+    .map((wallet) => wallet.walletAddress);
+  const selectedVisibleCount = selectableVisibleAddresses.filter((address) =>
+    selectedForDune.has(address),
+  ).length;
   useEffect(() => {
     let disposed = false;
     if (!selectedForDune.size) {
@@ -745,7 +772,19 @@ export function ExperimentalDecisionLab({
   }, [response]);
   const startSelectedDuneFetch = async () => {
     if (!selectedForDune.size || !dunePlan?.pendingTargets) return;
+    const fetchingWallets = new Set(selectedForDune);
+    const fetchTotals = new Map(
+      [...fetchingWallets].map((address) => [
+        address,
+        dunePlansByWallet.get(address)?.pendingTargets ?? 0,
+      ]),
+    );
+    const startedAt = new Date().toISOString();
     setDuneFetchBusy(true);
+    setDuneFetchingWallets(fetchingWallets);
+    setDuneFetchTotalsByWallet(fetchTotals);
+    setDuneFetchStartedAt(startedAt);
+    setDuneFetchProgressByWallet(new Map());
     setError(null);
     duneFetchObservedRunning.current = false;
     setDuneFetchProgress({ processed: 0, total: dunePlan.pendingTargets, failed: 0 });
@@ -756,12 +795,14 @@ export function ExperimentalDecisionLab({
         body: JSON.stringify({ walletAddresses: [...selectedForDune] }),
       });
       if (!result.ok) throw new Error(`Dune fetch could not start (${result.status}).`);
-      setSelectedForDune(new Set());
-      setDunePlan(null);
     } catch (reason) {
       setImportMessage(reason instanceof Error ? reason.message : 'Dune fetch could not start.');
       setDuneFetchBusy(false);
       setDuneFetchProgress(null);
+      setDuneFetchingWallets(new Set());
+      setDuneFetchTotalsByWallet(new Map());
+      setDuneFetchStartedAt(null);
+      setDuneFetchProgressByWallet(new Map());
       setLoading(false);
     }
   };
@@ -770,13 +811,19 @@ export function ExperimentalDecisionLab({
     let disposed = false;
     const poll = async () => {
       try {
-        const result = await fetch('/api/copytrade/copy-simulation/status');
+        const walletQuery = [...duneFetchingWallets].join(',');
+        const statusQuery = new URLSearchParams({ walletAddresses: walletQuery });
+        if (duneFetchStartedAt) statusQuery.set('startedAt', duneFetchStartedAt);
+        const result = await fetch(
+          `/api/copytrade/copy-simulation/status?${statusQuery.toString()}`,
+        );
         if (!result.ok) return;
         const status = (await result.json()) as {
           running?: boolean;
           targetsTotal?: number;
           targetsProcessed?: number;
           failedTargets?: number;
+          walletProgress?: Array<{ walletAddress: string; processed: number }>;
         };
         if (disposed) return;
         setDuneFetchProgress((previous) => ({
@@ -784,6 +831,11 @@ export function ExperimentalDecisionLab({
           total: status.targetsTotal ?? previous?.total ?? 0,
           failed: status.failedTargets ?? previous?.failed ?? 0,
         }));
+        setDuneFetchProgressByWallet(
+          new Map(
+            (status.walletProgress ?? []).map((item) => [item.walletAddress, item.processed]),
+          ),
+        );
         if (status.running === true) duneFetchObservedRunning.current = true;
         if (
           status.running === false &&
@@ -791,6 +843,10 @@ export function ExperimentalDecisionLab({
         ) {
           setDuneFetchBusy(false);
           setDuneFetchProgress(null);
+          setDuneFetchingWallets(new Set());
+          setDuneFetchTotalsByWallet(new Map());
+          setDuneFetchStartedAt(null);
+          setDuneFetchProgressByWallet(new Map());
           load(true, false);
         }
       } catch {
@@ -803,7 +859,7 @@ export function ExperimentalDecisionLab({
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [duneFetchBusy]);
+  }, [duneFetchBusy, duneFetchStartedAt, duneFetchingWallets]);
   const toggleSort = (key: LabSortKey) =>
     setSort((current) =>
       current.key === key
@@ -1067,6 +1123,19 @@ export function ExperimentalDecisionLab({
                 </span>
                 <span>{strings.decisionLab.winnersOnly}</span>
               </label>
+              <label
+                className={`experimental-winners-toggle${potentialWinnersOnly ? ' active' : ''}`}
+                title="Show wallets that are not rejected and still have pending Dune observations"
+              >
+                <Switch
+                  checked={potentialWinnersOnly}
+                  onChange={(event) => setPotentialWinnersOnly(event.target.checked)}
+                />
+                <span className="experimental-toggle-track" aria-hidden="true">
+                  <i />
+                </span>
+                <span>Potential winners only</span>
+              </label>
               {response && (
                 <button
                   type="button"
@@ -1112,11 +1181,40 @@ export function ExperimentalDecisionLab({
             columns={[
               {
                 key: 'duneSelect',
-                header: 'Select',
+                header: (
+                  <Checkbox
+                    aria-label="Select all visible wallets for Dune fetch"
+                    checked={
+                      selectableVisibleAddresses.length > 0 &&
+                      selectedVisibleCount === selectableVisibleAddresses.length
+                    }
+                    indeterminate={
+                      selectedVisibleCount > 0 &&
+                      selectedVisibleCount < selectableVisibleAddresses.length
+                    }
+                    disabled={!selectableVisibleAddresses.length}
+                    onChange={(event) => {
+                      const shouldSelect = event.target.checked;
+                      setSelectedForDune((current) => {
+                        const next = new Set(current);
+                        for (const address of selectableVisibleAddresses) {
+                          if (shouldSelect) next.add(address);
+                          else next.delete(address);
+                        }
+                        return next;
+                      });
+                    }}
+                  />
+                ),
                 render: (wallet) => (
                   <Checkbox
                     aria-label={`Select ${wallet.name?.trim() || short(wallet.walletAddress)} for Dune fetch`}
                     checked={selectedForDune.has(wallet.walletAddress)}
+                    disabled={
+                      potentialWinnersOnly &&
+                      (wallet.winnerPolicy.status === 'REJECTED' ||
+                        (dunePlansByWallet.get(wallet.walletAddress)?.pendingTargets ?? 0) <= 0)
+                    }
                     onClick={(event) => event.stopPropagation()}
                     onChange={(event) => {
                       event.stopPropagation();
@@ -1221,6 +1319,16 @@ export function ExperimentalDecisionLab({
                 key: 'dunePreflight',
                 header: 'Dune preflight',
                 render: (wallet) => {
+                  if (duneFetchingWallets.has(wallet.walletAddress)) {
+                    const processed = duneFetchProgressByWallet.get(wallet.walletAddress) ?? 0;
+                    const total = duneFetchTotalsByWallet.get(wallet.walletAddress) ?? 0;
+                    return (
+                      <span className="experimental-preflight-loading" role="status">
+                        <span className="loading-spinner" aria-hidden="true" /> Fetching {processed}
+                        /{total}
+                      </span>
+                    );
+                  }
                   if (dunePreflightLoading.has(wallet.walletAddress)) {
                     return (
                       <span className="experimental-preflight-loading" role="status">

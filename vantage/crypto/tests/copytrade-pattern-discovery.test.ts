@@ -188,6 +188,76 @@ test('pattern discovery cache changes when persisted evidence changes', () => {
   }
 });
 
+test('the evidence revision stays stable until a real evidence mutation occurs', () => {
+  const database = setup();
+  try {
+    const initial = readPatternDiscoveryDataFingerprint(database);
+    assert.equal(readPatternDiscoveryDataFingerprint(database), initial);
+
+    database
+      .prepare(
+        `INSERT INTO copytrade_trades
+         (wallet_address, chain, tx_hash, event_type, token_address, observed_timestamp,
+          raw_payload, fetched_at, dedup_key)
+       VALUES ('REVISION_WALLET', 'sol', 'REVISION_TX', 'buy', 'REVISION_TOKEN', 1700000000, '{}', ?, 'REVISION_DEDUP')`,
+      )
+      .run('2026-08-21T00:00:00.000Z');
+    const afterInsert = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(afterInsert, initial);
+    assert.equal(readPatternDiscoveryDataFingerprint(database), afterInsert);
+
+    database.prepare(`UPDATE copytrade_trades SET token_symbol = 'changed' WHERE tx_hash = ?`).run(
+      'REVISION_TX',
+    );
+    const afterUpdate = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(afterUpdate, afterInsert);
+
+    database.prepare(`DELETE FROM copytrade_trades WHERE tx_hash = ?`).run('REVISION_TX');
+    const afterDelete = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(afterDelete, afterUpdate);
+  } finally {
+    database.close();
+  }
+});
+
+test('simulation match mutations invalidate the same shared evidence revision', () => {
+  const database = setup();
+  try {
+    const initial = readPatternDiscoveryDataFingerprint(database);
+    database
+      .prepare(
+        `INSERT INTO copytrade_copy_simulation_runs
+         (trade_refs, query_sql, status, requested_at)
+         VALUES ('[]', '', 'completed', '2026-08-21T00:00:00.000Z')`,
+      )
+      .run();
+    const runId = Number(
+      (database.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number }).id,
+    );
+    database
+      .prepare(
+        `INSERT INTO copytrade_copy_simulation_matches
+         (run_id, trade_id, matched_trade_at, matched_price_usd, status, match_source, completed_at)
+         VALUES (?, 1, ?, 1, 'matched', 'test', ?)`,
+      )
+      .run(runId, '2026-08-21T00:00:15.000Z', '2026-08-21T00:00:20.000Z');
+    const afterInsert = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(afterInsert, initial);
+
+    database
+      .prepare(`UPDATE copytrade_copy_simulation_matches SET status = 'unmatched' WHERE run_id = ?`)
+      .run(runId);
+    const afterUpdate = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(afterUpdate, afterInsert);
+
+    database.prepare(`DELETE FROM copytrade_copy_simulation_matches WHERE run_id = ?`).run(runId);
+    const afterDelete = readPatternDiscoveryDataFingerprint(database);
+    assert.notEqual(afterDelete, afterUpdate);
+  } finally {
+    database.close();
+  }
+});
+
 test('pattern discovery exposes the last saved result as metadata after evidence changes', () => {
   const database = setup();
   try {

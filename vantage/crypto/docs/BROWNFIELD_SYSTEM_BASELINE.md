@@ -228,3 +228,6 @@ These are follow-up items, not silently implemented by this baseline:
   paths. Serena is configured in `.mcp.json`; this execution environment did not expose a
   callable Serena MCP server, so direct symbol tracing plus dependency-cruiser were used instead.
 - No application runtime behavior was changed by this documentation task.
+# Solana benchmark baseline (2026-09-04)
+
+The initial experimental GET route performs live RPC calls inline, caches its report for 60 seconds in memory, and loses all progress on failure or restart. The UI has no run lifecycle. The existing parser returns quote-denominated prices, so SOL prices must not be compared directly with Dune USD prices. These observations are verified from the route, RPC client, and UI source.

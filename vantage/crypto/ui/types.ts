@@ -1449,7 +1449,12 @@ export type DuneCoverageSummary = {
 } | null;
 
 export type CopyTradeSubTab =
-  'data' | 'pattern-discovery' | 'api-reference' | 'experimental-decision' | 'live-evaluation';
+  | 'data'
+  | 'pattern-discovery'
+  | 'api-reference'
+  | 'experimental-decision'
+  | 'live-evaluation'
+  | 'solana-benchmark';
 
 export type DecisionColumnKey =
   | 'rank'

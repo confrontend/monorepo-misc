@@ -1,15 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { defaultArchivePath, openDatabase } from '../platform/db/client.js';
-import { readDatabaseStats } from '../platform/db/stats.js';
-import { readDataQuality } from '../signals/quality.js';
-import { readIntegrityReport } from '../signals/integrity.js';
-import { readSnapshotAnalysis } from '../signals/analysis.js';
-import { readSignalScoringReport } from '../signals/scoring.js';
 import { archiveDuneSource } from '../dune/ingest/archive.js';
 import { importDuneContent } from '../dune/ingest/importer.js';
 import { storeGmgnSignal } from '../gmgn/capture/ingest.js';
@@ -20,24 +14,8 @@ import { probeGmgn } from '../gmgn/capture/probe.js';
 import { captureGmgnSignals } from '../gmgn/capture/capture.js';
 import { importGmgnBrowserCapture } from '../gmgn/capture/browserImport.js';
 import { listGmgnArchives } from '../gmgn/archives.js';
-import { RESEARCH_QUESTION } from '../research/question.js';
-import { logDiagnostic, readRecentDiagnostics } from '../platform/db/diagnostics.js';
+import { logDiagnostic } from '../platform/db/diagnostics.js';
 import { redactSensitiveText } from '../platform/security/redaction.js';
-import {
-  listOutcomeCandidates,
-  measureDuneOutcomes,
-  readAllDuneOutcomes,
-  readLatestDuneOutcomes,
-  reconcileStuckDuneRuns,
-} from '../dune/outcomes.js';
-import { buildMeasurementPlan } from '../dune/planner.js';
-import {
-  computeSignalPatternReport,
-  computeSignalPatternSubgroupReport,
-  listSignalPatternSnapshots,
-  saveSignalPatternSnapshot,
-  type SubgroupProperty,
-} from '../signals/patterns.js';
 import {
   listRadarSnapshots,
   listWalletRankSnapshots,
@@ -45,7 +23,6 @@ import {
   listTwitterMessages,
   readRawEndpointSummary,
 } from '../gmgn/client/rawEndpointReads.js';
-import { computeRobustPatternReport, type RobustPatternReport } from '../signals/robustPatterns.js';
 import {
   computeCopyTradeReport,
   readCopyTradeSummary,
@@ -135,12 +112,7 @@ import {
 } from '../copytrade/experimentalDecision.js';
 import { computeLiveEvaluation, parseLiveEvaluationRequest } from '../copytrade/liveEvaluation.js';
 import { WINNER_POLICY_VERSION } from '../copytrade/winnerPolicy.js';
-import {
-  readHistoryDepthCoverage,
-  readWalletFeatureCoverageInventory,
-} from '../copytrade/features/walletFeatureCoverage.js';
-import { generateWalletFeatureCalendarSnapshots } from '../copytrade/features/walletFeatureCalendar.js';
-import { listWalletFeatureSnapshots } from '../copytrade/features/walletFeatureSnapshots.js';
+import { readHistoryDepthCoverage } from '../copytrade/features/walletFeatureCoverage.js';
 import { WALLET_FEATURE_ENGINE_VERSION } from '../copytrade/features/walletFeatureDefinitions.js';
 import {
   computeEvaluationTrend,
@@ -150,7 +122,19 @@ import {
   shouldRecordEvaluationHistory,
 } from '../copytrade/liveEvaluationHistory.js';
 import { CACHE_VERSIONS, versionedCacheKey } from '../platform/cache/cacheVersions.js';
-import { API_CATALOG } from '../apiCatalog.js';
+import { createServerContext } from '../server/context.js';
+import { readJsonBody, sendJson, serveStaticFile } from '../server/http.js';
+import { createReadOnlyRoutes } from './routes/readOnlyRoutes.js';
+import { createCopyTradeRoutes } from './routes/copyTradeRoutes.js';
+import { createFeatureRoutes } from './routes/featureRoutes.js';
+import { createSimulationRoutes } from './routes/simulationRoutes.js';
+import { createDecisionLabRoutes } from './routes/decisionLabRoutes.js';
+import { createSolanaBenchmarkRoutes } from './routes/solanaBenchmarkRoutes.js';
+import {
+  attachClientDisconnectLogging,
+  logRequestComplete,
+  logRequestError,
+} from '../server/requestLogging.js';
 
 /** Scrutiny interrogates individually-pinned wallets, not a ranked top-N — so its roster scope
  *  must cover the whole roster (well above its current ~113-wallet size), unlike /winners's
@@ -244,17 +228,19 @@ const patternDiscoveryCoordinator = new PatternDiscoveryCoordinator(
   patternDiscoveryWorkerModule,
   projectRoot,
 );
-const uiRoot = path.join(projectRoot, 'dist-ui');
+const serverContext = createServerContext(database, projectRoot);
+const uiRoot = serverContext.uiRoot;
+const readOnlyRoutes = createReadOnlyRoutes();
+const copyTradeRoutes = createCopyTradeRoutes();
+const featureRoutes = createFeatureRoutes();
+const simulationRoutes = createSimulationRoutes();
+const decisionLabRoutes = createDecisionLabRoutes();
+const solanaBenchmarkRoutes = createSolanaBenchmarkRoutes();
 const port = Number(process.env.CRYPTO_RESEARCH_PORT ?? 4173);
-const maxBodyBytes = 512 * 1024 * 1024;
 
 // Short-TTL cache for the robust pattern report (see its route below) — this endpoint runs a
 // multi-second synchronous computation, so a burst of near-simultaneous requests should share
 // one result rather than each independently blocking the event loop for the full cost.
-const robustReportCache = new Map<number, { computedAtMs: number; report: RobustPatternReport }>();
-const ROBUST_REPORT_CACHE_TTL_MS = 5000;
-const ROBUST_REPORT_CACHE_MAX_ENTRIES = 8;
-
 type ResearchCacheEntry = { fingerprint: string; value: unknown };
 const researchReportCache = new Map<string, ResearchCacheEntry>();
 
@@ -288,8 +274,35 @@ const researchDataFingerprint = (): string => {
   return JSON.stringify(row);
 };
 
-const readCachedResearch = <T>(key: string, compute: () => T): T => {
-  const fingerprint = researchDataFingerprint();
+// Dune preflight only depends on local activity trades and saved simulation matches. Keeping its
+// fingerprint narrow prevents unrelated GMGN metadata/report writes from forcing a full plan
+// rebuild on every table refresh.
+const dunePreflightDataFingerprint = (): string => {
+  const row = database
+    .prepare(
+      `
+    SELECT
+      (SELECT COUNT(*) FROM copytrade_trades) AS tradesCount,
+      (SELECT COALESCE(MAX(id), 0) FROM copytrade_trades) AS tradesMaxId,
+      (SELECT COALESCE(MAX(observed_timestamp), 0) FROM copytrade_trades) AS tradesMaxObserved,
+      (SELECT COUNT(*) FROM copytrade_copy_simulation_matches) AS matchesCount,
+      (SELECT COALESCE(MAX(rowid), 0) FROM copytrade_copy_simulation_matches) AS matchesMaxRowid,
+      (SELECT COALESCE(MAX(completed_at), '') FROM copytrade_copy_simulation_matches) AS matchesMaxCompleted,
+      (SELECT COALESCE(SUM(CASE WHEN status = 'matched' THEN 1 ELSE 0 END), 0) FROM copytrade_copy_simulation_matches) AS matchedCount,
+      (SELECT COALESCE(SUM(CASE WHEN status = 'no_trade_in_window' THEN 1 ELSE 0 END), 0) FROM copytrade_copy_simulation_matches) AS noTradeCount,
+      (SELECT COALESCE(SUM(length(COALESCE(status, '')) + length(COALESCE(match_source, '')) + length(COALESCE(matched_tx_id, ''))), 0) FROM copytrade_copy_simulation_matches) AS textWeight,
+      (SELECT COALESCE(SUM(COALESCE(matched_price_usd, 0) + COALESCE(matched_trade_amount_usd, 0)), 0) FROM copytrade_copy_simulation_matches) AS valueWeight
+  `,
+    )
+    .get() as Record<string, unknown>;
+  return JSON.stringify(row);
+};
+
+const readCachedResearch = <T>(
+  key: string,
+  compute: () => T,
+  fingerprint = researchDataFingerprint(),
+): T => {
   const cached = researchReportCache.get(key);
   if (cached?.fingerprint === fingerprint) return cached.value as T;
   const persisted = database
@@ -463,48 +476,51 @@ const idleCopySimulationRunState: CopySimulationRunState = {
 let copySimulationRunState: CopySimulationRunState = { ...idleCopySimulationRunState };
 let copySimulationBatchStartedAt = 0;
 
+/** Acquire a database-backed singleton lease for Decision Lab Dune fetches. The transaction makes
+ * the check-and-claim atomic across HMR reloads and separate server processes. */
+const acquireCopySimulationLease = (database: DatabaseSync): boolean => {
+  // Keep this idempotent fallback for already-running development servers that have not yet
+  // restarted through the normal schema migration path.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS copytrade_copy_simulation_leases (
+      singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+      acquired_at TEXT NOT NULL
+    );
+  `);
+  database.exec('BEGIN IMMEDIATE;');
+  try {
+    const activeRun = database
+      .prepare(`SELECT id FROM copytrade_copy_simulation_runs WHERE status IN (?, ?) LIMIT 1`)
+      .get('submitted', 'running');
+    if (activeRun) {
+      database.exec('ROLLBACK;');
+      return false;
+    }
+    // A crashed/restarted process can leave only the lease row behind. With no active
+    // simulation run, it is safe to reclaim that orphaned lease before claiming it here.
+    database.prepare('DELETE FROM copytrade_copy_simulation_leases WHERE singleton_id = 1').run();
+    const claimed = database
+      .prepare(
+        `INSERT OR IGNORE INTO copytrade_copy_simulation_leases (singleton_id, acquired_at)
+         VALUES (1, ?)`,
+      )
+      .run(new Date().toISOString());
+    database.exec('COMMIT;');
+    return Number(claimed.changes) > 0;
+  } catch (error) {
+    database.exec('ROLLBACK;');
+    throw error;
+  }
+};
+
+const releaseCopySimulationLease = (database: DatabaseSync): void => {
+  database.prepare('DELETE FROM copytrade_copy_simulation_leases WHERE singleton_id = 1').run();
+};
+
 // Disabled for now (kept in place, not removed): unattended continuous polling needs more
 // runway on the manual one-off capture path first. /status and /stop stay live (harmless,
 // idempotent) so the UI can still reflect state; only /start is blocked. Flip this back to
 // true to re-enable — no other changes needed.
-
-const json = (response: ServerResponse, status: number, value: unknown): void => {
-  const body = JSON.stringify(value);
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
-  response.end(body);
-};
-
-const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += bytes.length;
-    if (size > maxBodyBytes)
-      throw new Error(`Request is larger than ${Math.floor(maxBodyBytes / (1024 * 1024))} MB.`);
-    chunks.push(bytes);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-};
-
-const mimeType = (filePath: string): string => {
-  if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
-  if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
-  if (filePath.endsWith('.svg')) return 'image/svg+xml';
-  return 'text/html; charset=utf-8';
-};
-
-const staticFile = (requestPath: string, response: ServerResponse): void => {
-  const relative = requestPath === '/' ? 'index.html' : requestPath.replace(/^\//, '');
-  const filePath = path.resolve(uiRoot, relative);
-  if (!filePath.startsWith(`${uiRoot}${path.sep}`) || !existsSync(filePath)) {
-    response.writeHead(404);
-    response.end('Not found');
-    return;
-  }
-  response.writeHead(200, { 'content-type': mimeType(filePath) });
-  response.end(readFileSync(filePath));
-};
 
 /** Shared by /historical-consistency and /winners so the trade-loading query and the
  *  roster/consistency join live in exactly one place, not two. */
@@ -572,157 +588,126 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
   const startedAt = Date.now();
   const requestBytes = Number(request.headers['content-length'] ?? '') || null;
   let responded = false;
+  const requestLogContext = {
+    database,
+    request,
+    response,
+    path: requestUrl.pathname,
+    startedAt,
+    requestBytes,
+  };
 
   // Detects the exact failure class that reset/ECANCELED errors are invisible for otherwise:
   // the client (or an intermediary proxy) drops the connection before a response is ever sent.
-  response.once('close', () => {
-    if (!responded) {
-      logDiagnostic(database, {
-        level: 'warn',
-        event: 'client-disconnected',
-        method: request.method ?? null,
-        path: requestUrl.pathname,
-        durationMs: Date.now() - startedAt,
-        requestBytes,
-        message: 'Connection closed before a response was sent (client abort or connection reset).',
-      });
-    }
-  });
+  attachClientDisconnectLogging(requestLogContext, () => responded);
 
   const respond = (status: number, value: unknown): void => {
     responded = true;
-    json(response, status, value);
-    if (request.method !== 'GET' || status >= 400) {
-      logDiagnostic(database, {
-        level: status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info',
-        event: 'request-complete',
-        method: request.method ?? null,
-        path: requestUrl.pathname,
-        status,
-        durationMs: Date.now() - startedAt,
-        requestBytes,
-      });
-    }
+    sendJson(response, status, value);
+    logRequestComplete(requestLogContext, status);
   };
 
   try {
-    if (request.method === 'GET' && requestUrl.pathname === '/api/docs') {
-      respond(200, {
-        generatedAt: new Date().toISOString(),
-        source: 'server API catalog',
-        count: API_CATALOG.length,
-        endpoints: API_CATALOG,
-      });
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/stats') {
-      respond(200, readDatabaseStats(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/quality') {
-      respond(200, readDataQuality(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/integrity') {
-      respond(200, readIntegrityReport(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/snapshot') {
-      respond(200, readSnapshotAnalysis(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/scores') {
-      respond(200, readSignalScoringReport(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/research-question') {
-      respond(200, RESEARCH_QUESTION);
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dune/candidates') {
-      const rawLimit = requestUrl.searchParams.get('limit');
-      const limit = rawLimit === null ? undefined : Number(rawLimit);
-      if (rawLimit !== null && (!Number.isFinite(limit) || (limit as number) <= 0)) {
-        respond(400, { error: 'limit must be a positive number when provided.' });
-        return;
-      }
-      respond(200, listOutcomeCandidates(database, limit));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dune/outcomes') {
-      const payload = (await readJsonBody(request)) as { signalIds?: unknown };
+    for (const route of readOnlyRoutes) {
       if (
-        !Array.isArray(payload.signalIds) ||
-        payload.signalIds.some((id) => typeof id !== 'number' || !Number.isInteger(id))
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          { database, respond },
+        )
       ) {
-        respond(400, { error: 'Dune outcome measurement requires signal ids.' });
         return;
       }
-      respond(200, await measureDuneOutcomes(database, payload.signalIds));
-      return;
     }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dune/outcomes/latest') {
-      respond(200, readLatestDuneOutcomes(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dune/outcomes/all') {
-      respond(200, readAllDuneOutcomes(database));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dune/reconcile') {
-      respond(200, await reconcileStuckDuneRuns(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dune/measurement-plan') {
-      respond(200, buildMeasurementPlan(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns') {
-      respond(200, computeSignalPatternReport(database));
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/analysis/patterns/snapshot') {
-      respond(200, saveSignalPatternSnapshot(database, computeSignalPatternReport(database)));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/snapshots') {
-      respond(200, listSignalPatternSnapshots(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/subgroups') {
-      const property = requestUrl.searchParams.get('property');
-      if (property !== 'launchPlatform' && property !== 'tokenAge' && property !== 'combined') {
-        respond(400, { error: 'property must be "launchPlatform", "tokenAge", or "combined".' });
+    for (const route of copyTradeRoutes) {
+      if (
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          { database, respond },
+        )
+      ) {
         return;
       }
-      respond(200, computeSignalPatternSubgroupReport(database, property));
-      return;
     }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/analysis/patterns/robust') {
-      const rawIterations = Number(requestUrl.searchParams.get('iterations') ?? '');
-      // Default kept modest (not the module's own 2000-iteration default) because this runs
-      // synchronously on Node's single event loop, same class of concern as the prescreen
-      // write-loop fix earlier this session — 1000 iterations is still a standard, reasonable
-      // bootstrap sample count for a percentile-method CI, just faster to compute at this data
-      // volume. A heavier run is available via ?iterations= for offline/one-off use, at the cost
-      // of blocking the event loop longer — the short-TTL cache below exists specifically so a
-      // burst of near-simultaneous requests (a UI double-fetch, several open tabs) only pays
-      // that cost once rather than once per request.
-      const iterations =
-        Number.isFinite(rawIterations) && rawIterations > 0 ? Math.min(rawIterations, 5000) : 1000;
-      const cached = robustReportCache.get(iterations);
-      const nowMs = Date.now();
-      if (cached && nowMs - cached.computedAtMs < ROBUST_REPORT_CACHE_TTL_MS) {
-        respond(200, cached.report);
+    for (const route of featureRoutes) {
+      if (
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          { database, respond },
+        )
+      ) {
         return;
       }
-      const report = computeRobustPatternReport(database, new Date(nowMs), {
-        bootstrapIterations: iterations,
-      });
-      if (robustReportCache.size >= ROBUST_REPORT_CACHE_MAX_ENTRIES) robustReportCache.clear(); // bounded, not a real LRU — this endpoint only ever sees a handful of distinct iteration values in practice
-      robustReportCache.set(iterations, { computedAtMs: nowMs, report });
-      respond(200, report);
-      return;
+    }
+    for (const route of simulationRoutes) {
+      if (
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          {
+            database,
+            respond,
+            getRunState: () => ({ ...copySimulationRunState }),
+            setRunState: (state) => {
+              copySimulationRunState = state as unknown as CopySimulationRunState;
+            },
+          },
+        )
+      ) {
+        return;
+      }
+    }
+    for (const route of decisionLabRoutes) {
+      if (
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          {
+            database,
+            respond,
+            readExperimentalDecisionCacheVersion,
+            readLatestPersistedResearch,
+            readCachedResearch,
+          },
+        )
+      )
+        return;
+    }
+    for (const route of solanaBenchmarkRoutes) {
+      if (
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          { database, respond },
+        )
+      )
+        return;
     }
     if (request.method === 'GET' && requestUrl.pathname === '/api/gmgn/raw-endpoints/summary') {
       respond(200, readRawEndpointSummary(database));
@@ -1476,72 +1461,8 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, { ...result, resolved });
       return;
     }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/live-evaluation') {
-      const payload = await readJsonBody(request);
-      const parsed = parseLiveEvaluationRequest(payload);
-      if (!parsed.ok) {
-        respond(400, { error: parsed.error });
-        return;
-      }
-      // Evaluation is read-only: use whatever evidence is already stored in SQLite. It must not
-      // start a provider fetch, overwrite history, or mutate a past decision just because the
-      // user inspected one wallet.
-      {
-        const result = computeLiveEvaluation(database, parsed.walletAddress, { chain: 'sol' });
-        if (
-          shouldRecordEvaluationHistory({
-            score: result.estimatedOverallScore,
-            evidenceLevel: result.evidenceLevel,
-          })
-        ) {
-          const previous =
-            readEvaluationHistory(database, parsed.walletAddress, {
-              chain: 'sol',
-              limit: 1,
-            })[0] ?? null;
-          const current = recordEvaluationHistory(database, {
-            walletAddress: parsed.walletAddress,
-            chain: 'sol',
-            source: 'live',
-            generatedAt: result.generatedAt,
-            score: result.estimatedOverallScore,
-            verdict: result.verdict,
-            evidenceLevel: result.evidenceLevel,
-            componentScores: result.componentScores,
-          });
-          result.trend = computeEvaluationTrend(current, previous);
-        }
-        respond(200, { status: 'result', result });
-        return;
-      }
-    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch/stop') {
       respond(200, requestCopyTradeFetchStop(database));
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/live-evaluation/history') {
-      const walletAddress = requestUrl.searchParams.get('walletAddress')?.trim() ?? '';
-      if (!walletAddress) {
-        respond(400, { error: 'walletAddress is required.' });
-        return;
-      }
-      const chain = requestUrl.searchParams.get('chain') ?? 'sol';
-      const requestedLimit = Number(requestUrl.searchParams.get('limit') ?? '50');
-      const limit = Number.isFinite(requestedLimit)
-        ? Math.min(200, Math.max(1, Math.floor(requestedLimit)))
-        : 50;
-      const entries = readEvaluationHistory(database, walletAddress, {
-        chain,
-        limit,
-      });
-      respond(200, {
-        walletAddress,
-        chain,
-        entries: entries.map((entry, index) => ({
-          ...entry,
-          trend: computeEvaluationTrend(entry, entries[index + 1] ?? null),
-        })),
-      });
       return;
     }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch/resume') {
@@ -2100,36 +2021,40 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           String(DEFAULT_COPIER_DELAY_SECONDS),
           ...[...walletAddresses].sort(),
         ].join(':');
-        const result = readCachedResearch(cacheKey, () => {
-          const plan = planCopySimulationTargets(database, {
-            walletAddresses,
-            chain: 'sol',
-            periodDays: 365,
-            copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
-          });
-          const walletPlans = walletAddresses.map((walletAddress) => {
-            const walletPlan = planCopySimulationTargets(database, {
-              walletAddresses: [walletAddress],
+        const result = readCachedResearch(
+          cacheKey,
+          () => {
+            const plan = planCopySimulationTargets(database, {
+              walletAddresses,
               chain: 'sol',
               periodDays: 365,
               copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
             });
+            const walletPlans = walletAddresses.map((walletAddress) => {
+              const walletPlan = planCopySimulationTargets(database, {
+                walletAddresses: [walletAddress],
+                chain: 'sol',
+                periodDays: 365,
+                copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
+              });
+              return {
+                walletAddress,
+                pendingTargets: walletPlan.targets.length,
+                tradeCount: walletPlan.roundTrips.length,
+              };
+            });
             return {
-              walletAddress,
-              pendingTargets: walletPlan.targets.length,
-              tradeCount: walletPlan.roundTrips.length,
+              walletCount: walletAddresses.length,
+              pendingTargets: plan.targets.length,
+              tradeCount: plan.roundTrips.length,
+              wallets: walletPlans,
+              message: plan.targets.length
+                ? `${plan.targets.length} Dune price observations will be fetched.`
+                : 'No new Dune observations are pending for these wallets.',
             };
-          });
-          return {
-            walletCount: walletAddresses.length,
-            pendingTargets: plan.targets.length,
-            tradeCount: plan.roundTrips.length,
-            wallets: walletPlans,
-            message: plan.targets.length
-              ? `${plan.targets.length} Dune price observations will be fetched.`
-              : 'No new Dune observations are pending for these wallets.',
-          };
-        });
+          },
+          dunePreflightDataFingerprint(),
+        );
         respond(200, result);
         return;
       }
@@ -2148,6 +2073,24 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         return;
       }
       if (hasActiveFetchRun(database) || readGmgnStatsFetchStatus().running) {
+        respond(409, { error: 'Another provider fetch is already running.' });
+        return;
+      }
+      let leaseAcquired = false;
+      try {
+        leaseAcquired = acquireCopySimulationLease(database);
+      } catch (error) {
+        respond(500, {
+          error: error instanceof Error ? error.message : 'Could not acquire Dune fetch lease.',
+        });
+        return;
+      }
+      if (!leaseAcquired) {
+        respond(409, { error: 'Another Dune fetch is already running.' });
+        return;
+      }
+      if (readGmgnStatsFetchStatus().running) {
+        releaseCopySimulationLease(database);
         respond(409, { error: 'Another provider fetch is already running.' });
         return;
       }
@@ -2189,6 +2132,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
               ? `Fetch finished with ${result.failedBatches.length} failed batch${result.failedBatches.length === 1 ? '' : 'es'}`
               : 'Fetch complete',
           };
+          releaseCopySimulationLease(database);
         })
         .catch((error: unknown) => {
           copySimulationRunState = {
@@ -2198,6 +2142,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
             finishedAt: new Date().toISOString(),
             message: error instanceof Error ? error.message : 'Selected Dune fetch failed',
           };
+          releaseCopySimulationLease(database);
           console.error('[decision] selected Dune fetch failed:', error);
         });
       respond(202, {
@@ -2426,138 +2371,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           },
         );
       respond(200, baseReport);
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/feature-coverage') {
-      const periodRaw = Number(requestUrl.searchParams.get('periodDays') ?? '30');
-      const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
-      if (!Number.isInteger(periodRaw) || periodRaw < 1 || periodRaw > 365) {
-        respond(400, { error: 'periodDays must be an integer between 1 and 365.' });
-        return;
-      }
-      const limit = Number.isFinite(limitRaw)
-        ? Math.min(500, Math.max(1, Math.floor(limitRaw)))
-        : 100;
-      const roster = listRosterWallets(database, { chain: 'sol', limit });
-      const walletAddresses = roster.map((wallet) => wallet.walletAddress);
-      const inventory = readWalletFeatureCoverageInventory(database, {
-        walletAddresses,
-        chain: 'sol',
-        periodDays: periodRaw,
-      });
-      const snapshotByWallet = new Map<
-        string,
-        { snapshotCount: number; latestFeatureSnapshotAt: string | null }
-      >();
-      if (walletAddresses.length > 0) {
-        const placeholders = walletAddresses.map(() => '?').join(', ');
-        const snapshotRows = database
-          .prepare(
-            `SELECT wallet_address AS walletAddress, COUNT(*) AS snapshotCount,
-                    MAX(as_of_timestamp) AS latestFeatureSnapshotAt
-             FROM copytrade_wallet_feature_snapshots
-             WHERE chain = 'sol' AND wallet_address IN (${placeholders})
-             GROUP BY wallet_address`,
-          )
-          .all(...walletAddresses) as unknown as Array<{
-          walletAddress: string;
-          snapshotCount: number;
-          latestFeatureSnapshotAt: string | null;
-        }>;
-        for (const row of snapshotRows) snapshotByWallet.set(row.walletAddress, row);
-      }
-      const rosterByWallet = new Map(roster.map((wallet) => [wallet.walletAddress, wallet]));
-      const rows = inventory.rows.map((row) => {
-        const wallet = rosterByWallet.get(row.walletAddress);
-        const snapshot = snapshotByWallet.get(row.walletAddress);
-        return {
-          ...row,
-          name: wallet?.name ?? null,
-          rankPosition: wallet?.rankPosition ?? null,
-          snapshotCount: Number(snapshot?.snapshotCount ?? 0),
-          latestFeatureSnapshotAt: snapshot?.latestFeatureSnapshotAt ?? null,
-        };
-      });
-      respond(200, {
-        generatedAt: new Date().toISOString(),
-        ...inventory,
-        rows,
-        summary: {
-          total: rows.length,
-          complete: rows.filter((row) => row.assessment === 'complete_requested_window').length,
-          incomplete: rows.filter((row) => row.assessment === 'incomplete').length,
-          unknown: rows.filter((row) => row.assessment === 'unknown').length,
-        },
-      });
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/feature-snapshots') {
-      const walletAddress = requestUrl.searchParams.get('walletAddress')?.trim() ?? '';
-      const limitRaw = Number(requestUrl.searchParams.get('limit') ?? '100');
-      if (!walletAddress) {
-        respond(400, { error: 'walletAddress is required.' });
-        return;
-      }
-      const limit = Number.isFinite(limitRaw)
-        ? Math.min(1_000, Math.max(1, Math.floor(limitRaw)))
-        : 100;
-      respond(200, {
-        walletAddress,
-        chain: 'sol',
-        snapshots: listWalletFeatureSnapshots(database, walletAddress, { chain: 'sol', limit }),
-      });
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/feature-snapshots') {
-      const body = (await readJsonBody(request)) as {
-        walletAddresses?: unknown;
-        asOfTimestamp?: unknown;
-        lookbackDays?: unknown;
-        triggerKind?: unknown;
-        limit?: unknown;
-      };
-      const requestedWallets = Array.isArray(body.walletAddresses)
-        ? body.walletAddresses.filter((value): value is string => typeof value === 'string')
-        : [];
-      const requestedLimit = typeof body.limit === 'number' ? body.limit : 100;
-      const limit = Number.isFinite(requestedLimit)
-        ? Math.min(500, Math.max(1, Math.floor(requestedLimit)))
-        : 100;
-      const walletAddresses =
-        requestedWallets.length > 0
-          ? [...new Set(requestedWallets.map((wallet) => wallet.trim()).filter(Boolean))].slice(
-              0,
-              limit,
-            )
-          : listRosterWallets(database, { chain: 'sol', limit }).map(
-              (wallet) => wallet.walletAddress,
-            );
-      const asOfTimestamp =
-        typeof body.asOfTimestamp === 'string' && body.asOfTimestamp.trim()
-          ? body.asOfTimestamp
-          : new Date().toISOString();
-      const lookbackDays = body.lookbackDays === null ? null : Number(body.lookbackDays ?? 30);
-      if (lookbackDays !== null && (!Number.isInteger(lookbackDays) || lookbackDays <= 0)) {
-        respond(400, { error: 'lookbackDays must be a positive integer or null.' });
-        return;
-      }
-      const triggerKind = body.triggerKind === 'current' ? 'current' : 'calendar';
-      const generated = generateWalletFeatureCalendarSnapshots(database, {
-        walletAddresses,
-        asOfTimestamp,
-        lookbackDays,
-        chain: 'sol',
-        triggerKind,
-      });
-      respond(200, {
-        asOfTimestamp: generated[0]?.snapshot.asOfTimestamp ?? asOfTimestamp,
-        featureEngineVersion:
-          generated[0]?.snapshot.featureEngineVersion ?? WALLET_FEATURE_ENGINE_VERSION,
-        requested: walletAddresses.length,
-        inserted: generated.filter((result) => result.inserted).length,
-        existing: generated.filter((result) => !result.inserted).length,
-        snapshots: generated.map((result) => result.snapshot),
-      });
       return;
     }
     if (
@@ -3101,12 +2914,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       respond(200, copySimulationRunState);
       return;
     }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/logs') {
-      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '100');
-      const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : 100;
-      respond(200, readRecentDiagnostics(database, limit));
-      return;
-    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/gmgn/probe') {
       respond(200, await probeGmgn());
       return;
@@ -3272,25 +3079,15 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
     }
     if (request.method === 'GET') {
       responded = true;
-      staticFile(requestUrl.pathname, response);
+      serveStaticFile(requestUrl.pathname, uiRoot, response);
       return;
     }
     respond(405, { error: 'Method not allowed.' });
   } catch (error) {
     responded = true;
     const message = redactSensitiveText(error instanceof Error ? error.message : String(error));
-    logDiagnostic(database, {
-      level: 'error',
-      event: 'request-error',
-      method: request.method ?? null,
-      path: requestUrl.pathname,
-      status: 400,
-      durationMs: Date.now() - startedAt,
-      requestBytes,
-      message,
-      detail: error instanceof Error ? { stack: error.stack } : undefined,
-    });
-    json(response, 400, { error: message });
+    logRequestError(requestLogContext, message, error);
+    sendJson(response, 400, { error: message });
   }
 };
 

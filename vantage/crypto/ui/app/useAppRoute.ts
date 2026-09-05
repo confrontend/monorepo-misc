@@ -10,7 +10,8 @@ export const parseCopyTradeRoute = (route: string): { menu: string; subTab: Copy
     rawSubTab === 'pattern-discovery' ||
     rawSubTab === 'api-reference' ||
     rawSubTab === 'experimental-decision' ||
-    rawSubTab === 'live-evaluation'
+    rawSubTab === 'live-evaluation' ||
+    rawSubTab === 'solana-benchmark'
       ? rawSubTab
       : 'experimental-decision';
   if (rawSubTab === 'wallet-stats')
