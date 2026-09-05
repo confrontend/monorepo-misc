@@ -28,6 +28,9 @@ export class SolanaDelayedPriceProvider {
       getBlocksCalls: after.getBlocksCalls - before.getBlocksCalls,
       getBlockTimeCalls: after.getBlockTimeCalls - before.getBlockTimeCalls,
       getBlockCalls: after.getBlockCalls - before.getBlockCalls,
+      getTransactionsForAddressCalls:
+        after.getTransactionsForAddressCalls - before.getTransactionsForAddressCalls,
+      parsedEventsCalls: after.parsedEventsCalls - before.parsedEventsCalls,
       retries: after.retries - before.retries,
       rateLimitWaitMs: after.rateLimitWaitMs - before.rateLimitWaitMs,
       cacheHits: after.cacheHits - before.cacheHits,
@@ -49,7 +52,12 @@ export class SolanaDelayedPriceProvider {
       const text = error instanceof Error ? error.message : String(error);
       if (text.includes('time limit') || text.includes('budget reached'))
         return 'RPC_TIME_BUDGET_EXCEEDED';
-      if (text.includes('RPC_RATE_LIMITED') || text.includes('429')) return 'RPC_RATE_LIMITED';
+      if (
+        text.includes('RPC_RATE_LIMITED') ||
+        text.includes('HELIUS_RATE_LIMITED') ||
+        text.includes('429')
+      )
+        return 'RPC_RATE_LIMITED';
       return 'RPC_ERROR';
     };
     let original;

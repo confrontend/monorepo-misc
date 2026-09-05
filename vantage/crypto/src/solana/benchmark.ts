@@ -17,6 +17,9 @@ export type BenchmarkFailureReason =
   | 'NATIVE_SOL_SWAP_AMBIGUOUS'
   | 'UNSUPPORTED_VENUE'
   | 'PARSER_FAILED'
+  | 'NO_RELEVANT_MARKET_ADDRESS'
+  | 'PARSED_EVENT_UNSUPPORTED'
+  | 'NO_RELIABLE_USD_CONVERSION'
   | 'RPC_RATE_LIMITED'
   | 'RPC_ERROR';
 
@@ -30,6 +33,8 @@ export type BenchmarkLeg = {
   dune: BenchmarkObservation | null;
   solana: BenchmarkObservation | null;
   rpcStats?: import('./types.js').SolanaRpcStats;
+  api?: 'helius-indexed-events' | 'helius-getTransactionsForAddress';
+  lookupDurationMs?: number;
 };
 
 export type BenchmarkObservation = {
@@ -58,6 +63,12 @@ export type BenchmarkFailureSummary = {
 export type SolanaDuneBenchmarkReport = {
   sampleSize: number;
   solanaFound: number;
+  parsedEventsSuccesses: number;
+  indexedFallbackSuccesses: number;
+  usableTokenPrices: number;
+  usableUsdPrices: number;
+  medianLookupLatencyMs: number | null;
+  averageApiCallsPerLookup: number | null;
   duneFound: number;
   bothFound: number;
   solanaCoveragePercent: number;
@@ -101,6 +112,20 @@ const increment = (record: Record<string, number>, key: string): void => {
 export const benchmarkSolanaAgainstDune = (legs: BenchmarkLeg[]): SolanaDuneBenchmarkReport => {
   const sampleSize = legs.length;
   const solanaFound = legs.filter((leg) => leg.solana?.found).length;
+  const parsedEventsSuccesses = legs.filter(
+    (leg) => leg.solana?.found && leg.api === 'helius-indexed-events',
+  ).length;
+  const indexedFallbackSuccesses = legs.filter(
+    (leg) => leg.solana?.found && leg.api === 'helius-getTransactionsForAddress',
+  ).length;
+  const usableTokenPrices = legs.filter(
+    (leg) => leg.solana?.found && leg.solana.tokenAmount != null,
+  ).length;
+  const usableUsdPrices = legs.filter(
+    (leg) => leg.solana?.found && finite(leg.solana.price),
+  ).length;
+  const latencies = legs.map((leg) => leg.lookupDurationMs).filter(finite);
+  const calls = legs.map((leg) => leg.rpcStats?.totalCalls).filter(finite);
   const duneFound = legs.filter((leg) => leg.dune?.found).length;
   const both = legs.filter((leg) => leg.solana?.found && leg.dune?.found);
   const priceDifferences: number[] = [];
@@ -164,6 +189,14 @@ export const benchmarkSolanaAgainstDune = (legs: BenchmarkLeg[]): SolanaDuneBenc
   return {
     sampleSize,
     solanaFound,
+    parsedEventsSuccesses,
+    indexedFallbackSuccesses,
+    usableTokenPrices,
+    usableUsdPrices,
+    medianLookupLatencyMs: percentile(latencies, 0.5),
+    averageApiCallsPerLookup: calls.length
+      ? Math.round((calls.reduce((a, b) => a + b, 0) / calls.length) * 100) / 100
+      : null,
     duneFound,
     bothFound: both.length,
     solanaCoveragePercent: percent(solanaFound, sampleSize),

@@ -32,6 +32,12 @@ type BenchmarkReport = {
   benchmark?: {
     sampleSize?: number;
     solanaFound?: number;
+    parsedEventsSuccesses?: number;
+    indexedFallbackSuccesses?: number;
+    usableTokenPrices?: number;
+    usableUsdPrices?: number;
+    medianLookupLatencyMs?: number | null;
+    averageApiCallsPerLookup?: number | null;
     duneFound?: number;
     bothFound?: number;
     sameSignature?: number;
@@ -109,9 +115,7 @@ export function SolanaBenchmark({ api }: { api: ApiClient }) {
         >
           {report?.status === 'running'
             ? `${strings.solanaBenchmark.running} ${report.completed}/${report.total}`
-            : report?.status === 'interrupted'
-              ? strings.solanaBenchmark.resume
-              : strings.solanaBenchmark.start}
+            : strings.solanaBenchmark.start}
         </Button>
       </div>
 
@@ -198,7 +202,13 @@ export function SolanaBenchmark({ api }: { api: ApiClient }) {
         <article className="analysis-card">
           <h3>{strings.solanaBenchmark.provider}</h3>
           <strong>{report?.provider?.name ?? strings.solanaBenchmark.publicMainnet}</strong>
-          <code>{report?.provider?.url ?? 'https://api.mainnet.solana.com'}</code>
+          <code>{report?.provider?.url ?? 'https://mainnet.helius-rpc.com/'}</code>
+          {report?.provider?.configured === false &&
+            report?.provider?.name?.startsWith('Helius') && (
+              <p role="alert">
+                Set <code>HELIUS_API_KEY</code> in <code>crypto/.env</code> before starting a run.
+              </p>
+            )}
         </article>
         <article className={`analysis-card solana-preflight-${status.toLowerCase()}`}>
           <h3>{strings.solanaBenchmark.history}</h3>
@@ -209,6 +219,9 @@ export function SolanaBenchmark({ api }: { api: ApiClient }) {
                 ? `${preflight.availableSignatures ?? 0}/${preflight.testedSignatures ?? 0} known signatures available.`
                 : strings.solanaBenchmark.unavailable)}
           </p>
+          {preflight?.firstAvailableBlock !== undefined && (
+            <small>First available confirmed slot: {preflight.firstAvailableBlock ?? '—'}</small>
+          )}
           {preflight?.oldestRequiredTimestamp && (
             <small>Oldest required: {formatTime(preflight.oldestRequiredTimestamp)}</small>
           )}
@@ -225,6 +238,24 @@ export function SolanaBenchmark({ api }: { api: ApiClient }) {
           <Metric
             label={strings.solanaBenchmark.solanaFound}
             value={numberOrDash(benchmark?.solanaFound)}
+          />
+          <Metric
+            label="Parsed Events successes"
+            value={numberOrDash(benchmark?.parsedEventsSuccesses)}
+          />
+          <Metric
+            label="Indexed fallback successes"
+            value={numberOrDash(benchmark?.indexedFallbackSuccesses)}
+          />
+          <Metric label="Usable token prices" value={numberOrDash(benchmark?.usableTokenPrices)} />
+          <Metric label="Usable USD prices" value={numberOrDash(benchmark?.usableUsdPrices)} />
+          <Metric
+            label="Median lookup latency"
+            value={numberOrDash(benchmark?.medianLookupLatencyMs, ' ms')}
+          />
+          <Metric
+            label="Average API calls"
+            value={numberOrDash(benchmark?.averageApiCallsPerLookup)}
           />
           <Metric
             label={strings.solanaBenchmark.duneFound}

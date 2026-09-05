@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseSplTokenSwap } from '../src/solana/swapParser.js';
-import { SolanaRpcClient } from '../src/solana/rpcClient.js';
+import { SolanaRpcClient, resolveSolanaRpcEndpoint } from '../src/solana/rpcClient.js';
 
 const TOKEN = 'TokenMint';
 const WSOL = 'So11111111111111111111111111111111111111112';
@@ -42,6 +42,16 @@ test('RPC client caches transactions and uses the configured provider URL', asyn
   await client.getTransaction('same');
   assert.equal(calls, 1);
   assert.deepEqual(client.cacheStats, { transactions: 1, blocks: 0, blockTimes: 0 });
+});
+
+test('resolves Helius from an API key and never exposes the key in metadata', () => {
+  const endpoint = resolveSolanaRpcEndpoint({ SOLANA_RPC_PROVIDER: 'helius', HELIUS_API_KEY: 'secret-key' });
+  assert.equal(endpoint.name, 'Helius RPC');
+  assert.equal(endpoint.configured, true);
+  assert.match(endpoint.url, /mainnet\.helius-rpc\.com/);
+  const client = new SolanaRpcClient({ url: endpoint.url, transport: async () => new Response(JSON.stringify({ result: 1 })) });
+  assert.doesNotMatch(client.endpoint, /secret-key/);
+  assert.match(client.endpoint, /REDACTED/);
 });
 
 test('delayed lookup uses bounded binary slot search and block telemetry', async () => {

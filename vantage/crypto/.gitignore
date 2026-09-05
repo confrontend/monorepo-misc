@@ -4,6 +4,7 @@ dist-ui/
 .data/
 .secrets/
 .env
+!.env.example
 *.pem
 *.key
 gmgn-api-key.txt

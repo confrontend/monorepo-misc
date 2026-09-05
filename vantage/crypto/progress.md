@@ -5077,3 +5077,32 @@ Decision Lab now tolerates persisted Winner Policy records created before GMGN d
 2026-09-04 — Added stale-run recovery for Solana benchmarks: a running record with no SQLite update for 90 seconds is marked interrupted, its partial results remain available, and a new run can be started without waiting on a hung RPC call. Server build and architecture check pass.
 2026-09-04 — Interrupted Solana benchmark runs are now resumable from the existing SQLite run: the UI shows “Resume benchmark,” completed legs are skipped, and only remaining trades are processed. This avoids discarding partial work after an API reload.
 2026-09-04 — Solana benchmark runs now resume interrupted SQLite-backed runs, skip already completed trade legs, and retain per-leg RPC telemetry for idempotent research comparisons.
+# 2026-09-05 — Helius RPC provider experiment configuration
+
+- Added provider-neutral Solana RPC endpoint resolution with `SOLANA_RPC_PROVIDER=helius` and `HELIUS_API_KEY`; the key is never committed or shown in endpoint output.
+- Helius endpoints are redacted in persisted benchmark metadata and UI. HTTP 401/403, 429, timeout, and 5xx failures now receive explicit provider error categories while retaining conservative retries.
+- New benchmark runs are separated when the configured provider changes, preventing public-RPC and Helius results from being mixed. History preflight now persists the endpoint's first available confirmed slot.
+- Delayed-price semantics, bounded search, parser behavior, Dune comparison, Winner Policy, and scoring remain unchanged.
+# 2026-09-05 — Helius is the replacement benchmark backend
+
+- The Solana delayed-price benchmark now defaults to Helius configuration rather than public Solana RPC. A key is required; no silent public-RPC fallback remains.
+- A running/interrupted public-provider run is marked superseded when Helius is selected and cannot be resumed or mixed with Helius results. Helius runs still retain normal resume behavior.
+# 2026-09-05 — Fresh-start benchmark action
+
+- Interrupted benchmark records are now historical partial results; clicking the action always creates a clean Helius run. The stale “Resume benchmark” label was removed.
+# 2026-09-05 — Helius benchmark run 7 analysis
+
+- Clean Helius run completed 50/50 legs. Helius returned one parsed Solana swap, but it used a SOL quote and therefore produced **0 comparable USD prices**; Dune had 36/50 matches (72%), and there were 0 comparable Helius+Dune pairs.
+- Failures: 45 `RPC_TIME_BUDGET_EXCEEDED`, 1 RPC request-budget error, and 3 no-market-trade-within-window. The run's recommendation is `KEEP_DUNE`.
+- The successful parsed leg used 13 RPC calls, 10 `getBlockTime` calls, 1 `getBlock`, 791 produced slots, and took about 2.1s. The result confirms Helius configuration worked, but did not solve historical price coverage or USD parity.
+- Conclusion: standard Helius RPC is not yet a viable replacement for Dune at this workload. The next diagnosis should separate provider latency from the target-slot/block-search path before considering any enhanced Helius API.
+# 2026-09-05 — Indexed Helius delayed-price experiment implementation
+
+- Replaced the experimental benchmark's target-slot/getBlock search path with Helius Parsed Events transaction history filtered by block time. Added `getTransactionsForAddress` as the fallback path when Parsed Events is unavailable.
+- Parsed Events swaps derive token/quote amounts from Helius `summary.parsedData` and preserve SOL-quote results as non-USD rather than inventing conversions. Dune and Winner Policy remain unchanged.
+- Benchmark reports now expose Parsed Events/fallback counts, usable token/USD price counts, median lookup latency, and average API calls.
+# 2026-09-05 — Parsed Events migration is ready for clean feasibility run
+
+- The benchmark now uses `POST /v1/parsed-events/transaction-history` with block-time bounds as its primary historical lookup. It falls back to Helius `getTransactionsForAddress` when Parsed Events is unavailable or does not yield a parseable swap.
+- Raw slot estimation, repeated `getBlockTime`, and repeated `getBlock` calls are no longer used by the operational benchmark path.
+- A clean 50-trade run has not been started yet because the local `crypto/.env` still contains the API-key placeholder. After a real key is supplied, the existing Start benchmark action will create a new Helius run; old public-RPC runs remain excluded.

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { SolanaRpcClient } from './rpcClient.js';
-import { SolanaDelayedPriceProvider } from './delayedPriceProvider.js';
+import { SolanaRpcClient, resolveSolanaRpcEndpoint } from './rpcClient.js';
+import { HeliusIndexedDelayedPriceProvider } from './indexedDelayedPriceProvider.js';
 import { benchmarkSolanaAgainstDune, type BenchmarkLeg } from './benchmark.js';
 
 type Sample = {
@@ -33,8 +33,14 @@ export type BenchmarkRun = {
   requests?: number;
   generatedAt: string;
   updatedAt: string;
-  provider: { name: string };
-  preflight?: { status: 'PASS' | 'FAIL'; reason: string | null };
+  provider: { name: string; url?: string; configured?: boolean };
+  preflight?: {
+    status: 'PASS' | 'FAIL';
+    reason: string | null;
+    firstAvailableBlock?: number | null;
+    historyAvailable?: boolean | null;
+    oldestRequiredSlot?: number | null;
+  };
   benchmark: ReturnType<typeof benchmarkSolanaAgainstDune>;
   legs: BenchmarkLeg[];
 };
@@ -53,9 +59,17 @@ function save(db: DatabaseSync, run: BenchmarkRun) {
 }
 
 export function readBenchmarkRun(db: DatabaseSync): BenchmarkRun | null {
-  const row = db
-    .prepare('SELECT report_json FROM solana_benchmark_runs ORDER BY id DESC LIMIT 1')
-    .get() as { report_json: string } | undefined;
+  const rows = db
+    .prepare('SELECT report_json FROM solana_benchmark_runs ORDER BY id DESC')
+    .all() as Array<{ report_json: string }>;
+  const row = rows.find((candidate) => {
+    try {
+      const provider = (JSON.parse(candidate.report_json) as Partial<BenchmarkRun>).provider?.name;
+      return provider?.startsWith('Helius RPC');
+    } catch {
+      return false;
+    }
+  });
   if (!row) return null;
   const run = JSON.parse(row.report_json) as BenchmarkRun;
   run.errors ??= [];
@@ -72,30 +86,23 @@ export function readBenchmarkRun(db: DatabaseSync): BenchmarkRun | null {
 
 export function startBenchmarkRun(db: DatabaseSync): BenchmarkRun {
   const existing = readBenchmarkRun(db);
-  if (existing?.status === 'running') return existing;
-  if (existing?.status === 'interrupted' && existing.completed < existing.total) {
-    existing.status = 'running';
-    existing.error = null;
-    existing.phase = `Resuming at trade ${existing.completed + 1}/${existing.total}`;
+  const configuredProvider = resolveSolanaRpcEndpoint();
+  const sameProvider = existing?.provider?.name === configuredProvider.name;
+  if (existing?.status === 'running') {
+    if (sameProvider) return existing;
+    // A run started with the retired public endpoint must not be resumed or
+    // allowed to compete with the replacement provider.
+    cancelledRuns.add(existing.id);
+    existing.status = 'interrupted';
+    existing.error = 'Superseded by the configured Helius RPC provider.';
+    existing.phase = 'Superseded';
     save(db, existing);
-    active.add(db);
-    setImmediate(() => {
-      void execute(db, existing);
-    });
-    return existing;
   }
-  if (existing?.status === 'interrupted') {
-    existing.status = 'running';
-    existing.error = null;
-    existing.phase = `Resuming ${existing.completed}/${existing.total}`;
-    save(db, existing);
-    active.add(db);
-    setImmediate(() => {
-      void execute(db, existing);
-    });
-    return existing;
-  }
+  // Interrupted runs remain available as historical partial results. A new
+  // click always starts a clean provider run rather than presenting stale
+  // resume semantics in the replacement workflow.
   const now = new Date().toISOString();
+  const endpoint = resolveSolanaRpcEndpoint();
   const run: BenchmarkRun = {
     id: 0,
     status: 'running',
@@ -107,7 +114,14 @@ export function startBenchmarkRun(db: DatabaseSync): BenchmarkRun {
     rpcRequests: [],
     generatedAt: now,
     updatedAt: now,
-    provider: { name: 'Solana Mainnet RPC' },
+    provider: {
+      name: endpoint.name,
+      url: endpoint.url.replace(
+        /([?&](?:api-key|api_key|apikey|key|token)=)[^&]*/i,
+        '$1[REDACTED]',
+      ),
+      configured: endpoint.configured,
+    },
     legs: [],
     benchmark: benchmarkSolanaAgainstDune([]),
   };
@@ -153,9 +167,15 @@ async function execute(db: DatabaseSync, run: BenchmarkRun) {
         save(db, run);
       },
     });
-    const provider = new SolanaDelayedPriceProvider(rpc);
-    await rpc.getFirstAvailableBlock();
-    run.preflight = { status: 'PASS', reason: null };
+    const provider = new HeliusIndexedDelayedPriceProvider(rpc);
+    const firstAvailableBlock = await rpc.getFirstAvailableBlock();
+    run.preflight = {
+      status: 'PASS',
+      reason: null,
+      firstAvailableBlock,
+      oldestRequiredSlot: null,
+      historyAvailable: true,
+    };
     for (const row of rows) {
       if (cancelledRuns.has(run.id)) return;
       if (completedIds.has(String(row.id))) continue;
@@ -205,6 +225,8 @@ async function execute(db: DatabaseSync, run: BenchmarkRun) {
             }
           : { found: false, failureReason: result.failure.reason },
         rpcStats: result.rpcStats,
+        api: result.api,
+        lookupDurationMs: result.rpcStats?.elapsedMs,
       });
       completedIds.add(String(row.id));
       run.completed++;

@@ -7,6 +7,56 @@ import type {
 } from './types.js';
 
 export const SOLANA_MAINNET_RPC_URL = 'https://api.mainnet.solana.com';
+export const HELIUS_MAINNET_RPC_URL = 'https://mainnet.helius-rpc.com/';
+
+export type SolanaRpcProviderInfo = {
+  name: string;
+  url: string;
+  configured: boolean;
+};
+
+const redactUrl = (value: string): string => {
+  try {
+    const url = new URL(value);
+    for (const key of ['api-key', 'api_key', 'apikey', 'key', 'token']) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, '[REDACTED]');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return value.replace(/(api[-_]?key|token)=([^&\s]+)/gi, '$1=[REDACTED]');
+  }
+};
+
+export function resolveSolanaRpcEndpoint(
+  env: NodeJS.ProcessEnv = process.env,
+): SolanaRpcProviderInfo {
+  const explicit = env.SOLANA_RPC_URL?.trim();
+  const provider = env.SOLANA_RPC_PROVIDER?.trim().toLowerCase();
+  const key = env.HELIUS_API_KEY?.trim();
+  if (explicit && !explicit.includes('PASTE_HELIUS_API_KEY_HERE')) {
+    const isHelius = /helius-rpc\.com/i.test(explicit) || provider === 'helius';
+    return {
+      name: isHelius ? 'Helius RPC' : 'Configured Solana RPC',
+      url: explicit,
+      configured: true,
+    };
+  }
+  if (provider === 'helius' || key) {
+    if (key && !key.includes('PASTE_')) {
+      return {
+        name: 'Helius RPC',
+        url: `${HELIUS_MAINNET_RPC_URL}?api-key=${encodeURIComponent(key)}`,
+        configured: true,
+      };
+    }
+    return {
+      name: 'Helius RPC (API key required)',
+      url: HELIUS_MAINNET_RPC_URL,
+      configured: false,
+    };
+  }
+  return { name: 'Helius RPC (API key required)', url: HELIUS_MAINNET_RPC_URL, configured: false };
+}
 
 type RpcResponse<T> = {
   jsonrpc: '2.0';
@@ -19,6 +69,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 export class SolanaRpcClient {
   private readonly url: string;
+  private readonly isHelius: boolean;
   private readonly transport: SolanaRpcTransport;
   private readonly maxRequests: number;
   private readonly windowMs: number;
@@ -52,7 +103,8 @@ export class SolanaRpcClient {
     this.maxCalls = config.maxCalls ?? Infinity;
     this.deadline = Date.now() + (config.deadlineMs ?? Infinity);
     this.onRequest = config.onRequest;
-    this.url = config.url ?? process.env.SOLANA_RPC_URL ?? SOLANA_MAINNET_RPC_URL;
+    this.url = config.url ?? resolveSolanaRpcEndpoint().url;
+    this.isHelius = /helius-rpc\.com/i.test(this.url);
     this.transport = config.transport ?? fetch;
     this.maxRequests = config.maxRequestsPerWindow ?? 30;
     this.windowMs = config.windowMs ?? 10_000;
@@ -87,11 +139,17 @@ export class SolanaRpcClient {
             await sleep(Number.isFinite(retryAfter) ? retryAfter * 1000 : 250 * 2 ** attempt);
             continue;
           }
+          if (response.status === 401 || response.status === 403)
+            throw new Error(this.isHelius ? 'HELIUS_AUTH_ERROR' : `RPC HTTP ${response.status}`);
+          if (response.status === 429)
+            throw new Error(this.isHelius ? 'HELIUS_RATE_LIMITED' : 'RPC_RATE_LIMITED');
           throw new Error(
-            response.status === 429 ? 'RPC_RATE_LIMITED' : `RPC HTTP ${response.status}`,
+            this.isHelius
+              ? `HELIUS_SERVER_ERROR: HTTP ${response.status}`
+              : `RPC HTTP ${response.status}`,
           );
         }
-        if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`RPC_ERROR: HTTP ${response.status}`);
         const body = (await response.json()) as RpcResponse<T>;
         if (body.error) throw new Error(`RPC ${body.error.code}: ${body.error.message}`);
         if (body.result === undefined) throw new Error('RPC returned no result');
@@ -102,6 +160,8 @@ export class SolanaRpcClient {
           await sleep(250 * 2 ** attempt);
           continue;
         }
+        if (error instanceof Error && error.name === 'AbortError')
+          throw new Error(this.isHelius ? 'HELIUS_TIMEOUT' : 'RPC_TIMEOUT');
         throw error;
       } finally {
         clearTimeout(timeout);
@@ -185,7 +245,72 @@ export class SolanaRpcClient {
   }
 
   async getFirstAvailableBlock(): Promise<number> {
-    return this.call<number>('getFirstAvailableBlock');
+    const result = await this.call<number | null>('getFirstAvailableBlock');
+    if (result === null) throw new Error('HELIUS_HISTORY_UNAVAILABLE');
+    return result;
+  }
+
+  async getTransactionsForAddress(
+    address: string,
+    options: Record<string, unknown>,
+  ): Promise<{ data: SolanaTransaction[]; paginationToken?: string | null }> {
+    return this.call<{ data: SolanaTransaction[]; paginationToken?: string | null }>(
+      'getTransactionsForAddress',
+      [address, options],
+    );
+  }
+
+  async getParsedTransactionHistory(
+    address: string,
+    options: Record<string, unknown>,
+  ): Promise<{ data: SolanaTransaction[]; paginationToken?: string | null }> {
+    if (this.requestId >= this.maxCalls)
+      throw new Error('RPC request budget reached. Partial results have been saved.');
+    await this.acquire();
+    if (Date.now() >= this.deadline) {
+      this.active -= 1;
+      throw new Error('RPC time limit reached. Partial results have been saved.');
+    }
+    const url = new URL(this.url);
+    url.pathname = '/v1/parsed-events/transaction-history';
+    this.onRequest?.({
+      count: this.requestId + 1,
+      method: 'parsedEvents.transactionHistory',
+      params: [address, options],
+      at: new Date().toISOString(),
+    });
+    this.requestId += 1;
+    this.methodCalls.set(
+      'parsedEvents.transactionHistory',
+      (this.methodCalls.get('parsedEvents.transactionHistory') ?? 0) + 1,
+    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.transport(url.toString(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ address, ...options }),
+        signal: controller.signal,
+      });
+      if (response.status === 401 || response.status === 403) throw new Error('HELIUS_AUTH_ERROR');
+      if (response.status === 429) throw new Error('HELIUS_RATE_LIMITED');
+      if (!response.ok) throw new Error(`HELIUS_SERVER_ERROR: HTTP ${response.status}`);
+      const body = (await response.json()) as {
+        data?: SolanaTransaction[];
+        paginationToken?: string | null;
+        error?: { message?: string };
+      };
+      if (body.error)
+        throw new Error(`HELIUS_PARSED_EVENTS_ERROR: ${body.error.message ?? 'request failed'}`);
+      return { data: body.data ?? [], paginationToken: body.paginationToken };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw new Error('HELIUS_TIMEOUT');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      this.active -= 1;
+    }
   }
 
   get cacheStats(): { transactions: number; blocks: number; blockTimes: number } {
@@ -205,6 +330,8 @@ export class SolanaRpcClient {
       getBlocksCalls: callsByMethod('getBlocks'),
       getBlockTimeCalls: callsByMethod('getBlockTime'),
       getBlockCalls: callsByMethod('getBlock'),
+      getTransactionsForAddressCalls: callsByMethod('getTransactionsForAddress'),
+      parsedEventsCalls: callsByMethod('parsedEvents.transactionHistory'),
       retries: this.retries,
       rateLimitWaitMs: this.rateLimitWaitMs,
       cacheHits: this.cacheHits,
@@ -215,7 +342,7 @@ export class SolanaRpcClient {
   }
 
   get endpoint(): string {
-    return this.url;
+    return redactUrl(this.url);
   }
 
   private async acquire(): Promise<void> {

@@ -1,5 +1,11 @@
-export { SolanaRpcClient, SOLANA_MAINNET_RPC_URL } from './rpcClient.js';
+export {
+  SolanaRpcClient,
+  SOLANA_MAINNET_RPC_URL,
+  HELIUS_MAINNET_RPC_URL,
+  resolveSolanaRpcEndpoint,
+} from './rpcClient.js';
 export { SolanaDelayedPriceProvider } from './delayedPriceProvider.js';
+export { HeliusIndexedDelayedPriceProvider } from './indexedDelayedPriceProvider.js';
 export { parseSplTokenSwap } from './swapParser.js';
 export { benchmarkSolanaAgainstDune } from './benchmark.js';
 export type { BenchmarkLeg, BenchmarkObservation, SolanaDuneBenchmarkReport } from './benchmark.js';

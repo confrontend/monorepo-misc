@@ -19,7 +19,7 @@ export const strings = {
     unavailable:
       'No benchmark report is available yet. Run the prototype benchmark to populate this view.',
     provider: 'Provider',
-    publicMainnet: 'Public Solana Mainnet RPC',
+    publicMainnet: 'Helius RPC (API key required)',
     history: 'History preflight',
     pass: 'PASS',
     fail: 'FAIL',

@@ -20,6 +20,8 @@ export type SolanaRpcStats = {
   getBlocksCalls: number;
   getBlockTimeCalls: number;
   getBlockCalls: number;
+  getTransactionsForAddressCalls: number;
+  parsedEventsCalls: number;
   retries: number;
   rateLimitWaitMs: number;
   cacheHits: number;
@@ -65,6 +67,9 @@ export type SolanaPriceFailure = {
     | 'NATIVE_SOL_SWAP_AMBIGUOUS'
     | 'UNSUPPORTED_VENUE'
     | 'PARSER_FAILED'
+    | 'NO_RELEVANT_MARKET_ADDRESS'
+    | 'PARSED_EVENT_UNSUPPORTED'
+    | 'NO_RELIABLE_USD_CONVERSION'
     | 'TARGET_SLOT_SEARCH_LIMIT_EXCEEDED'
     | 'BLOCK_SCAN_LIMIT_EXCEEDED'
     | 'RPC_TIME_BUDGET_EXCEEDED'
@@ -76,8 +81,15 @@ export type SolanaPriceFailure = {
 export type SolanaPriceResult =
   | {
       ok: true;
+      api?: 'helius-indexed-events' | 'helius-getTransactionsForAddress';
       targetTimestamp: number;
       observation: SolanaSwapObservation;
       rpcStats?: SolanaRpcStats;
     }
-  | { ok: false; targetTimestamp: number; failure: SolanaPriceFailure; rpcStats?: SolanaRpcStats };
+  | {
+      ok: false;
+      targetTimestamp: number;
+      failure: SolanaPriceFailure;
+      api?: 'helius-indexed-events' | 'helius-getTransactionsForAddress';
+      rpcStats?: SolanaRpcStats;
+    };
