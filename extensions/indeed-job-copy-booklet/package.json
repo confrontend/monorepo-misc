@@ -1,10 +1,10 @@
 {
-  "name": "linkedin",
+  "name": "indeed-job-copier",
   "version": "1.0.0",
-  "description": "",
-  "main": "bookleet.js",
+  "description": "Indeed Job Copier browser extension",
+  "main": "indeed.js",
   "scripts": {
-    "mini": "terser bookleet.js --compress --mangle --output bookleet.min.js",
+    "mini": "terser indeed.js --compress --mangle --output indeed.min.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

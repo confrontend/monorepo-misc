@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Indeed Job Copier",
+  "version": "1.0.0",
+  "description": "Save Indeed job descriptions and move through a search list with one click.",
+  "content_scripts": [{
+    "matches": ["https://*.indeed.com/*"],
+    "js": ["indeed.js"],
+    "run_at": "document_idle"
+  }],
+  "permissions": ["clipboardWrite"],
+  "host_permissions": ["https://*.indeed.com/*"]
+}
