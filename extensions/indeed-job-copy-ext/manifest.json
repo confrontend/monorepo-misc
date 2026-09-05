@@ -3,11 +3,17 @@
   "name": "Indeed Job Copier",
   "version": "1.0.0",
   "description": "Save Indeed job descriptions and move through a search list with one click.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Indeed Job Copier"
+  },
   "content_scripts": [{
     "matches": ["https://*.indeed.com/*"],
     "js": ["indeed.js"],
     "run_at": "document_idle"
   }],
-  "permissions": ["clipboardWrite"],
+  "permissions": ["clipboardWrite", "scripting"],
   "host_permissions": ["https://*.indeed.com/*"]
 }

@@ -4,7 +4,9 @@
     const SELECTORS = [
         '.jobs-details__main-content.jobs-details__main-content--single-pane.full-width', 
         '.jobs-description', 
-        '.jobs-box__html-content'
+        '.jobs-box__html-content',
+        '[id^="JobDetails_AboutTheJob_"]',
+        '[data-sdui-component*="aboutTheJob"]'
     ];
 
     let isAutopilot = false;
@@ -19,7 +21,7 @@
     };
 
     const saveMemory = data => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    
+
     const updateCount = () => {
         const counter = document.getElementById('jm-count');
         if (counter) { 
@@ -65,7 +67,35 @@
         return text;
     };
 
+    const formatJob = text => `${text}\n\nURL: ${window.location.href}`;
+
+    const getSduiJobCards = () => Array.from(document.querySelectorAll(
+        '[role="button"][componentkey^="job-card-component-ref-"]'
+    ));
+
+    const openJobCard = card => {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => card.click(), 200);
+    };
+
     const goToNext = () => {
+        const sduiCards = getSduiJobCards();
+        if (sduiCards.length > 0) {
+            const currentJobId = new URLSearchParams(window.location.search).get('currentJobId');
+            const currentIndex = currentJobId
+                ? sduiCards.findIndex(card => card.getAttribute('componentkey') === `job-card-component-ref-${currentJobId}`)
+                : -1;
+            const nextCard = currentIndex >= 0 ? sduiCards[currentIndex + 1] : sduiCards[0];
+
+            if (!nextCard) {
+                toast('• End of list. Scroll to load more.', 'rgb(239,108,0)');
+                return false;
+            }
+
+            openJobCard(nextCard);
+            return true;
+        }
+
         let activeLi = null;
 
         const currentJobId = new URLSearchParams(window.location.search).get('currentJobId');
@@ -77,7 +107,7 @@
         }
 
         if (!activeLi) {
-            let activeContainer = document.querySelector('.job-card-container--active, .jobs-search-results__list-item--active, .scaffold-layout__list-item--active');
+            let activeContainer = document.querySelector('.job-card-container--active, .jobs-search-results__list-item--active, .scaffold-layout__list-item--active, [data-job-id].job-card-container');
             activeLi = activeContainer ? activeContainer.closest('li') : null;
         }
 
@@ -108,7 +138,7 @@
     
     const copyAndNext = async (isAuto = false) => {
         try {
-            const text = extractJob();
+            const text = formatJob(extractJob());
             const memory = getMemory();
             if (memory[memory.length - 1] !== text) {
                 memory.push(text);
@@ -187,7 +217,10 @@
         panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <strong>Job Memory</strong>
-                <button id="jm-toggle" style="background:none;border:none;color:rgb(170,170,170);cursor:pointer;font-size:16px;">—</button>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <button id="jm-toggle" style="background:none;border:none;color:rgb(170,170,170);cursor:pointer;font-size:16px;">—</button>
+                    <button id="jm-close" title="Close" aria-label="Close" style="background:none;border:none;color:rgb(170,170,170);cursor:pointer;font-size:18px;line-height:1;">×</button>
+                </div>
             </div>
             <div id="jm-content">
                 <div id="jm-count" style="margin-bottom:10px;">Saved Jobs: 0</div>
@@ -202,6 +235,11 @@
         
         document.getElementById('jm-next').onclick = () => copyAndNext(false);
         document.getElementById('jm-auto').onclick = toggleAutopilot;
+        document.getElementById('jm-close').onclick = () => {
+            isAutopilot = false;
+            clearTimeout(autoTimer);
+            panel.remove();
+        };
         
         document.getElementById('jm-export').onclick = async () => {
             const memory = getMemory();
@@ -212,7 +250,6 @@
 
             const data = memory.join('\n\n====================\n\n');
             await navigator.clipboard.writeText(data);
-            
             // Execute the flush
             localStorage.removeItem(STORAGE_KEY);
             updateCount();
@@ -245,5 +282,12 @@
     
     createPanel();
     updateCount();
+    
+    chrome.runtime.onMessage.addListener(message => {
+        if (message?.type !== 'open-job-copier-panel') return;
+        createPanel();
+        updateCount();
+        toast(`✓ Ready (${getMemory().length} saved)`, 'rgb(66,66,66)');
+    });
     toast(`✓ Ready (${getMemory().length} saved)`, 'rgb(66,66,66)');
 })();

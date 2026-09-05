@@ -22,7 +22,7 @@
     };
 
     const saveMemory = data => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    
+
     const updateCount = () => {
         const counter = document.getElementById('jm-count');
         if (counter) { counter.textContent = `Saved Jobs: ${getMemory().length}`; }
@@ -56,6 +56,8 @@
         if (!text) throw new Error('No text found');
         return text;
     };
+
+    const formatJob = text => `${text}\n\nURL: ${window.location.href}`;
 
     // --- NEW: Helper function to filter out Indeed's dummy jobs ---
     const getValidLinks = () => {
@@ -103,7 +105,7 @@
     
     const copyAndNext = async (isAuto = false) => {
         try {
-            const text = extractJob();
+            const text = formatJob(extractJob());
             const memory = getMemory();
             
             if (memory[memory.length - 1] !== text) {
@@ -166,7 +168,10 @@
         panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <strong>Indeed Memory</strong>
-                <button id="jm-toggle" style="background:none;border:none;color:rgb(170,170,170);cursor:pointer;font-size:16px;">—</button>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <button id="jm-toggle" style="background:none;border:none;color:rgb(170,170,170);cursor:pointer;font-size:16px;">—</button>
+                    <button id="jm-close" title="Close" aria-label="Close" style="background:none;border:none;color:rgb(170,170,170);cursor:pointer;font-size:18px;line-height:1;">×</button>
+                </div>
             </div>
             <div id="jm-content">
                 <div id="jm-count" style="margin-bottom:10px;">Saved Jobs: 0</div>
@@ -181,6 +186,11 @@
         
         document.getElementById('jm-next').onclick = () => copyAndNext(false);
         document.getElementById('jm-auto').onclick = toggleAutopilot;
+        document.getElementById('jm-close').onclick = () => {
+            isAutopilot = false;
+            clearTimeout(autoTimer);
+            panel.remove();
+        };
         
         document.getElementById('jm-export').onclick = async () => {
             const memory = getMemory();
@@ -191,7 +201,6 @@
 
             const data = memory.join('\n\n====================\n\n');
             await navigator.clipboard.writeText(data);
-            
             localStorage.removeItem(STORAGE_KEY);
             updateCount();
             goToFirstJob();
@@ -224,6 +233,13 @@
     
     createPanel();
     updateCount();
+
+    chrome.runtime.onMessage.addListener(message => {
+        if (message?.type !== 'open-job-copier-panel') return;
+        createPanel();
+        updateCount();
+        toast(`✓ Ready (${getMemory().length} saved)`, 'rgb(66,66,66)');
+    });
     
     if (!panelAlreadyExists) {
         goToFirstJob();

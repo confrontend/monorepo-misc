@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Job Copier",
+  "version": "1.0.0",
+  "description": "Save LinkedIn job descriptions and move through a search list with one click.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open LinkedIn Job Copier"
+  },
+  "content_scripts": [{
+    "matches": [
+      "https://www.linkedin.com/jobs/*",
+      "https://*.linkedin.com/jobs/*",
+      "http://www.linkedin.com/jobs/*",
+      "http://*.linkedin.com/jobs/*"
+    ],
+    "js": ["bookleet.js"],
+    "run_at": "document_idle"
+  }],
+  "permissions": ["clipboardWrite", "scripting"],
+  "host_permissions": [
+    "https://*.linkedin.com/*",
+    "http://*.linkedin.com/*"
+  ]
+}

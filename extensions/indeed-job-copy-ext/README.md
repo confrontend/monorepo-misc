@@ -9,7 +9,7 @@ Versioned Chrome MV3 extension that saves job descriptions from Indeed, advances
 3. Click **Load unpacked** and select this directory.
 4. Open an Indeed Jobs search page and use the **Indeed Memory** panel.
 
-The extension loads `indeed.js` as its content script.
+The extension loads `indeed.js` as its content script. Saved entries and clipboard exports include the current job page URL. Use the `×` button to close the panel; closing it also stops autopilot. Click the extension toolbar icon to reopen the panel without reloading the page.
 
 ## Release version
 
