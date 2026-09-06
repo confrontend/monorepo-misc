@@ -6,7 +6,9 @@
         '.jobs-description', 
         '.jobs-box__html-content',
         '[id^="JobDetails_AboutTheJob_"]',
-        '[data-sdui-component*="aboutTheJob"]'
+        '[data-sdui-component*="aboutTheJob"]',
+        '[class*="jobs-description-content__text"]',
+        '[class*="show-more-less-html__markup"]'
     ];
 
     let isAutopilot = false;
@@ -57,13 +59,18 @@
     
     const extractJob = () => {
         let el = null;
+        let text = '';
         for (const sel of SELECTORS) {
-            el = document.querySelector(sel);
-            if (el) break;
+            const candidate = document.querySelector(sel);
+            if (!candidate) continue;
+            const candidateText = (candidate.innerText || candidate.textContent || '').trim();
+            if (candidateText.length > 30) {
+                el = candidate;
+                text = candidateText;
+                break;
+            }
         }
         if (!el) throw new Error('Job description not found');
-        const text = el.innerText.trim();
-        if (!text) throw new Error('No text found');
         return text;
     };
 
@@ -157,8 +164,12 @@
             
             return goToNext();
         } catch (e) {
-            console.error(e);
-            toast('✗ Copy failed (Loading?)', 'rgb(198,40,40)');
+            if (e?.message === 'No text found' || e?.message === 'Job description not found') {
+                toast('• Waiting for LinkedIn job details…', 'rgb(239,108,0)');
+            } else {
+                console.error(e);
+                toast('✗ Copy failed (Loading?)', 'rgb(198,40,40)');
+            }
             // If it fails on autopilot, return true so it tries again
             return isAuto; 
         }
@@ -248,7 +259,9 @@
                 return;
             }
 
-            const data = memory.join('\n\n====================\n\n');
+            const data = window.JobCopierDecisionContract
+                ? window.JobCopierDecisionContract.buildExport(memory)
+                : memory.join('\n\n====================\n\n');
             await navigator.clipboard.writeText(data);
             // Execute the flush
             localStorage.removeItem(STORAGE_KEY);

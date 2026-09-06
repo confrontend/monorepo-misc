@@ -1,17 +1,29 @@
 {
   "manifest_version": 3,
   "name": "Indeed Job Copier",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "description": "Save Indeed job descriptions and move through a search list with one click.",
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open Indeed Job Copier"
+    "default_title": "Open Indeed Job Copier",
+    "default_icon": {
+      "16": "icon.png",
+      "32": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "32": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
   },
   "content_scripts": [{
     "matches": ["https://*.indeed.com/*"],
-    "js": ["indeed.js"],
+    "js": ["decision-contract.js", "indeed.js"],
     "run_at": "document_idle"
   }],
   "permissions": ["clipboardWrite", "scripting"],

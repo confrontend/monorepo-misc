@@ -199,7 +199,9 @@
                 return;
             }
 
-            const data = memory.join('\n\n====================\n\n');
+            const data = window.JobCopierDecisionContract
+                ? window.JobCopierDecisionContract.buildExport(memory)
+                : memory.join('\n\n====================\n\n');
             await navigator.clipboard.writeText(data);
             localStorage.removeItem(STORAGE_KEY);
             updateCount();

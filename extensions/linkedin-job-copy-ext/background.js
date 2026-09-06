@@ -7,7 +7,7 @@ chrome.action.onClicked.addListener(tab => {
     // If the tab was already open when the extension was loaded, inject it now.
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ['bookleet.js']
+      files: ['decision-contract.js', 'bookleet.js']
     }).catch(() => {
       // Ignore clicks on unsupported or restricted pages.
     });
