@@ -3,50 +3,14 @@ import { api } from './httpClient.js';
 import { AppHeader } from './components/AppHeader.js';
 import { AppNavigation } from './components/AppNavigation.js';
 import { CopyTradeSubTabContent } from './components/CopyTradeSubTabContent.js';
-import { PatternDiscoverySection } from './components/PatternDiscoverySection.js';
-import { ArchivesRoute } from './routes/ArchivesRoute.js';
-import { DiagnosticsRoute } from './routes/DiagnosticsRoute.js';
 import { useAppRoute } from './app/useAppRoute.js';
 import { useThemeMode } from './app/useThemeMode.js';
-import { usePatternDiscoveryController } from './hooks/usePatternDiscoveryController.js';
 import type { CopyTradeSubTab } from './types.js';
 
 export function App() {
   const { themeMode, toggleTheme } = useThemeMode();
   const { activeMenu, copyTradeSubTab, navigateTo, navigateCopyTradeSubTab } = useAppRoute();
   const [refreshBusy, setRefreshBusy] = useState(false);
-  const [copyTradePeriodDays, setCopyTradePeriodDays] = useState(30);
-  const patternDiscovery = usePatternDiscoveryController({
-    api,
-    periodDays: copyTradePeriodDays,
-    copyTradeSubTab,
-  });
-  const {
-    patternReport,
-    patternSnapshots,
-    patternHorizon,
-    refreshPatternReport,
-    patternDiscoveryExport,
-    patternDiscoveryProgress,
-    patternDiscoveryLoadingDetail,
-    patternDiscoveryReport,
-    patternDiscoverySensitivity,
-    patternDiscoveryFreshness,
-    patternDiscoveryExecution,
-    patternDiscoveryRunLoading,
-    patternDiscoveryElapsedSeconds,
-    patternDiscoveryRunError,
-    patternHistoryAvailable,
-    setPatternHistoryAvailable,
-    selectedPatternRule,
-    setSelectedPatternRule,
-    patternDiscoverySourceOpen,
-    setPatternDiscoverySourceOpen,
-    patternDiscoveryIsActive,
-    exportPatternDiscoveryPage,
-    runPatternDiscovery,
-    stopPatternDiscovery,
-  } = patternDiscovery;
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [message, setMessage] = useState('Ready. Data is saved locally in SQLite.');
   const signalMenuActive = false;
@@ -61,7 +25,7 @@ export function App() {
   const refresh = async () => {
     setRefreshBusy(true);
     try {
-      await refreshPatternReport();
+      setMessage('Ready. Data is saved locally in SQLite.');
     } finally {
       setRefreshBusy(false);
     }
@@ -84,48 +48,8 @@ export function App() {
       />
 
       <section id="copytrade" className="menu-section panel copytrade-panel">
-        <CopyTradeSubTabContent
-          activeTab={copyTradeSubTab}
-          api={api}
-          periodDays={copyTradePeriodDays as 30 | 60 | 90}
-          onPeriodDaysChange={(periodDays) => setCopyTradePeriodDays(periodDays)}
-        />
+        <CopyTradeSubTabContent activeTab={copyTradeSubTab} api={api} />
       </section>
-      {copyTradeSubTab === 'pattern-discovery' && (
-        <PatternDiscoverySection
-          api={api}
-          periodDays={copyTradePeriodDays}
-          onPeriodDaysChange={setCopyTradePeriodDays}
-          onGoToData={() => navigateCopyTradeSubTab('data')}
-          patternHistoryAvailable={patternHistoryAvailable}
-          onAvailabilityChange={setPatternHistoryAvailable}
-          patternDiscoveryIsActive={patternDiscoveryIsActive}
-          patternDiscoveryExport={patternDiscoveryExport}
-          patternDiscoveryProgress={patternDiscoveryProgress}
-          patternDiscoveryLoadingDetail={patternDiscoveryLoadingDetail}
-          patternDiscoveryReport={patternDiscoveryReport}
-          patternDiscoverySensitivity={patternDiscoverySensitivity}
-          patternDiscoveryFreshness={patternDiscoveryFreshness}
-          patternDiscoveryExecution={patternDiscoveryExecution}
-          patternDiscoveryRunLoading={patternDiscoveryRunLoading}
-          patternDiscoveryElapsedSeconds={patternDiscoveryElapsedSeconds}
-          patternDiscoveryRunError={patternDiscoveryRunError}
-          patternDiscoverySourceOpen={patternDiscoverySourceOpen}
-          onSourceOpenChange={setPatternDiscoverySourceOpen}
-          selectedPatternRule={selectedPatternRule}
-          onSelectedPatternRuleChange={setSelectedPatternRule}
-          onExport={exportPatternDiscoveryPage}
-          onRun={() => void runPatternDiscovery()}
-          onStop={() => void stopPatternDiscovery()}
-        />
-      )}
-
-      {copyTradeSubTab === 'data' && (
-        <>
-          <ArchivesRoute setMessage={setMessage} />
-          <DiagnosticsRoute setMessage={setMessage} />
-        </>
-      )}
 
       <footer>
         <span>{message}</span>

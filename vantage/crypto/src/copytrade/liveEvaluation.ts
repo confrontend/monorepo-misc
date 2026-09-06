@@ -1,5 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  canonicalizeActivityType,
+  TransferAwareInventory,
+} from './accounting/transferInventory.js';
+import {
   summarizeTrades,
   performanceByPeriod,
   computeProfitConcentration,
@@ -294,6 +298,7 @@ type LiveTradeRow = {
   observedTimestamp: number;
   eventType: string;
   tokenAddress: string;
+  tokenAmount: string | null;
   tokenSymbol: string | null;
   costUsd: string | null;
   buyCostUsd: string | null;
@@ -314,9 +319,10 @@ export const buildLiveGmgnWalletRow = (
     .prepare(
       `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
             event_type AS eventType, token_address AS tokenAddress, token_symbol AS tokenSymbol,
+            token_amount AS tokenAmount,
             cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
      FROM copytrade_trades
-     WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell')
+     WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell', 'transfer_in')
        AND (? IS NULL OR observed_timestamp >= ?)
      ORDER BY observed_timestamp ASC, id ASC`,
     )
@@ -333,12 +339,14 @@ export const buildLiveGmgnWalletRow = (
   }> = [];
   let excluded = 0;
   let sells = 0;
+  const inventory = new TransferAwareInventory();
   for (const row of rows) {
-    if (row.eventType !== 'sell') continue;
+    const resolved = inventory.apply(row);
+    if (canonicalizeActivityType(row.eventType) !== 'sell') continue;
     sells += 1;
     const proceeds = parseAmount(row.costUsd);
     const costBasis = parseAmount(row.buyCostUsd);
-    if (proceeds === null || costBasis === null || costBasis <= 0) {
+    if (resolved?.eligible !== true || proceeds === null || costBasis === null || costBasis <= 0) {
       excluded += 1;
       continue;
     }

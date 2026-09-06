@@ -10,7 +10,7 @@ export type GmgnStatsFetchStatus = {
   walletTotal: number;
   periods: string[];
   requestsMade: number;
-  skippedFresh: number;
+  skippedExisting: number;
   error: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -24,7 +24,7 @@ let state: GmgnStatsFetchStatus = {
   walletTotal: 0,
   periods: ['7d', '30d'],
   requestsMade: 0,
-  skippedFresh: 0,
+  skippedExisting: 0,
   error: null,
   startedAt: null,
   completedAt: null,
@@ -32,11 +32,6 @@ let state: GmgnStatsFetchStatus = {
 let stopRequested = false;
 
 export const readGmgnStatsFetchStatus = (): GmgnStatsFetchStatus => ({ ...state });
-
-const isFresh = (fetchedAt: string, maxAgeHours: number): boolean => {
-  const timestamp = Date.parse(fetchedAt);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < maxAgeHours * 3_600_000;
-};
 
 export const stopGmgnStatsFetch = (workflowRunId?: number): GmgnStatsFetchStatus => {
   if (state.running && (workflowRunId === undefined || state.workflowRunId === workflowRunId))
@@ -52,7 +47,6 @@ export const startGmgnStatsFetch = (
     chain?: string;
     workflowRunId?: number;
     periods?: Array<'7d' | '30d'>;
-    maxAgeHours?: number;
   },
 ): GmgnStatsFetchStatus => {
   if (state.running) return readGmgnStatsFetchStatus();
@@ -73,7 +67,7 @@ export const startGmgnStatsFetch = (
     walletTotal: wallets.length,
     periods,
     requestsMade: 0,
-    skippedFresh: 0,
+    skippedExisting: 0,
     error: null,
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -82,7 +76,6 @@ export const startGmgnStatsFetch = (
   void (async () => {
     try {
       const apiKey = readApiKey();
-      const maxAgeHours = options.maxAgeHours ?? 24;
       for (const wallet of wallets) {
         if (stopRequested) break;
         for (const period of periods) {
@@ -92,8 +85,8 @@ export const startGmgnStatsFetch = (
               `SELECT fetched_at AS fetchedAt FROM copytrade_wallet_stats WHERE wallet_address = ? AND chain = ? AND period = ?`,
             )
             .get(wallet.walletAddress, chain, period) as { fetchedAt?: string } | undefined;
-          if (existing?.fetchedAt && isFresh(existing.fetchedAt, maxAgeHours)) {
-            state = { ...state, skippedFresh: state.skippedFresh + 1 };
+          if (existing?.fetchedAt) {
+            state = { ...state, skippedExisting: state.skippedExisting + 1 };
             continue;
           }
           state = { ...state, requestsMade: state.requestsMade + 1 };

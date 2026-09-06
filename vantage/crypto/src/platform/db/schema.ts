@@ -1235,12 +1235,38 @@ const migrations: Migration[] = [
         stored_targets INTEGER NOT NULL DEFAULT 0,
         failed_targets INTEGER NOT NULL DEFAULT 0,
         remaining_targets INTEGER NOT NULL DEFAULT 0,
+        gmgn_screen_rule_version TEXT,
+        gmgn_data_fingerprint TEXT,
+        selected_target_ids TEXT,
         status TEXT NOT NULL,
         message TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_copytrade_dune_fetch_audits_requested
-        ON copytrade_dune_fetch_audits(requested_at);
+      ON copytrade_dune_fetch_audits(requested_at);
     `),
+  },
+  {
+    description: 'Persist immutable GMGN screening context for Dune selections',
+    up: (database) => {
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_dune_fetch_audits)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has('gmgn_screen_rule_version'))
+        database.exec(
+          'ALTER TABLE copytrade_dune_fetch_audits ADD COLUMN gmgn_screen_rule_version TEXT',
+        );
+      if (!columns.has('gmgn_data_fingerprint'))
+        database.exec(
+          'ALTER TABLE copytrade_dune_fetch_audits ADD COLUMN gmgn_data_fingerprint TEXT',
+        );
+      if (!columns.has('selected_target_ids'))
+        database.exec(
+          'ALTER TABLE copytrade_dune_fetch_audits ADD COLUMN selected_target_ids TEXT',
+        );
+    },
   },
   {
     description: 'Remove deprecated historical price probe storage',
@@ -1741,61 +1767,8 @@ const migrations: Migration[] = [
     `),
   },
   {
-    description:
-      'Persist the centralized Data-tab ingestion workflow (runs, steps, and diagnostics)',
+    description: 'Persist GMGN fetch progress fields',
     up: (database) => {
-      database.exec(`
-      CREATE TABLE IF NOT EXISTS copytrade_data_workflow_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chain TEXT NOT NULL,
-        target_days INTEGER NOT NULL CHECK (target_days BETWEEN 1 AND 365),
-        trader_limit INTEGER NOT NULL,
-        roster_snapshot_id INTEGER REFERENCES gmgn_wallet_rank_snapshots(id),
-        roster_wallets_json TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (
-          status IN ('active', 'paused', 'completed', 'completed_with_warnings', 'failed', 'abandoned')
-        ),
-        completeness_threshold_percent INTEGER NOT NULL DEFAULT 90
-          CHECK (completeness_threshold_percent BETWEEN 1 AND 100),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        error TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_copytrade_data_workflow_runs_latest
-      ON copytrade_data_workflow_runs(id DESC);
-
-      CREATE TABLE IF NOT EXISTS copytrade_data_workflow_steps (
-        run_id INTEGER NOT NULL REFERENCES copytrade_data_workflow_runs(id) ON DELETE CASCADE,
-        step_key TEXT NOT NULL CHECK (
-          step_key IN (
-            'roster', 'wallet_metadata', 'activity_history',
-            'coverage_verification', 'dune_outcomes', 'readiness'
-          )
-        ),
-        step_order INTEGER NOT NULL,
-        status TEXT NOT NULL CHECK (
-          status IN ('not_started', 'running', 'paused', 'completed', 'completed_with_warnings', 'failed')
-        ),
-        started_at TEXT,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        last_success_at TEXT,
-        underlying_run_id INTEGER,
-        underlying_run_kind TEXT,
-        records_total INTEGER NOT NULL DEFAULT 0,
-        records_new INTEGER NOT NULL DEFAULT 0,
-        wallets_total INTEGER NOT NULL DEFAULT 0,
-        wallets_done INTEGER NOT NULL DEFAULT 0,
-        wallets_failed INTEGER NOT NULL DEFAULT 0,
-        warnings_json TEXT NOT NULL DEFAULT '[]',
-        error TEXT,
-        PRIMARY KEY (run_id, step_key)
-      );
-      CREATE INDEX IF NOT EXISTS idx_copytrade_data_workflow_steps_run
-      ON copytrade_data_workflow_steps(run_id, step_order);
-      `);
-
       const addIfMissing = (table: string, name: string, definition: string): void => {
         const columns = new Set(
           database
@@ -1811,43 +1784,21 @@ const migrations: Migration[] = [
       addIfMissing('copytrade_wallet_coverage', 'walk_completed_at', 'TEXT');
       addIfMissing('copytrade_wallet_coverage', 'retry_requested', 'INTEGER NOT NULL DEFAULT 0');
       addIfMissing('copytrade_wallet_coverage_events', 'error', 'TEXT');
-      addIfMissing('copytrade_fetch_runs', 'workflow_run_id', 'INTEGER');
       addIfMissing('copytrade_fetch_runs', 'current_wallet_pages', 'INTEGER');
       addIfMissing('copytrade_fetch_runs', 'current_wallet_oldest_ts', 'INTEGER');
     },
   },
   {
-    // Mirrors copytrade_fetch_runs.workflow_run_id: without this, productionJobLock cannot tell
-    // a Data workflow's own in-flight Dune batch apart from a genuinely external Dune job,
-    // producing a false "another production job is active" warning while the workflow is
-    // running its own dune_outcomes step.
-    description: 'Link Dune copy-simulation batches to the Data workflow run that submitted them',
-    up: (database) => {
-      const columns = new Set(
-        database
-          .prepare('PRAGMA table_info(copytrade_copy_simulation_runs)')
-          .all()
-          .map((row) => (row as { name: string }).name),
-      );
-      if (!columns.has('workflow_run_id'))
-        database.exec(
-          'ALTER TABLE copytrade_copy_simulation_runs ADD COLUMN workflow_run_id INTEGER',
-        );
+    description: 'Retire legacy Data workflow migration slot',
+    up: () => {
+      // Kept as a version slot so databases created before the workflow removal remain
+      // forward-compatible. The legacy workflow is no longer created or exposed.
     },
   },
   {
-    description: 'Allow Data workflow runs to fetch maximum available history depth',
-    up: (database) => {
-      const columns = new Set(
-        database
-          .prepare('PRAGMA table_info(copytrade_data_workflow_runs)')
-          .all()
-          .map((row) => (row as { name: string }).name),
-      );
-      if (!columns.has('depth_mode'))
-        database.exec(
-          "ALTER TABLE copytrade_data_workflow_runs ADD COLUMN depth_mode TEXT NOT NULL DEFAULT 'requested' CHECK (depth_mode IN ('requested', 'maximum_available'))",
-        );
+    description: 'Retire legacy Data workflow depth migration slot',
+    up: () => {
+      // Intentionally empty; see the migration above.
     },
   },
 ];
@@ -1859,6 +1810,61 @@ migrations.push({
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       report_json TEXT NOT NULL
     )`);
+  },
+});
+
+migrations.push({
+  description: 'Persist GMGN fetch phase and liveness telemetry',
+  up: (database) => {
+    const addIfMissing = (name: string, definition: string): void => {
+      const columns = new Set(
+        database
+          .prepare('PRAGMA table_info(copytrade_fetch_runs)')
+          .all()
+          .map((row) => (row as { name: string }).name),
+      );
+      if (!columns.has(name))
+        database.exec(`ALTER TABLE copytrade_fetch_runs ADD COLUMN ${name} ${definition}`);
+    };
+    addIfMissing('current_phase', 'TEXT');
+    addIfMissing('last_progress_at', 'TEXT');
+    addIfMissing('current_operation_started_at', 'TEXT');
+    addIfMissing('requests_started', 'INTEGER NOT NULL DEFAULT 0');
+    addIfMissing('requests_completed', 'INTEGER NOT NULL DEFAULT 0');
+  },
+});
+
+migrations.push({
+  description: 'Ensure Dune fetch audit target selection exists',
+  up: (database) => {
+    const columns = new Set(
+      database
+        .prepare('PRAGMA table_info(copytrade_dune_fetch_audits)')
+        .all()
+        .map((row) => (row as { name: string }).name),
+    );
+    if (!columns.has('selected_target_ids'))
+      database.exec('ALTER TABLE copytrade_dune_fetch_audits ADD COLUMN selected_target_ids TEXT');
+  },
+});
+
+migrations.push({
+  description: 'Ensure Dune fetch audit GMGN metadata exists',
+  up: (database) => {
+    const columns = new Set(
+      database
+        .prepare('PRAGMA table_info(copytrade_dune_fetch_audits)')
+        .all()
+        .map((row) => (row as { name: string }).name),
+    );
+    if (!columns.has('gmgn_screen_rule_version'))
+      database.exec(
+        'ALTER TABLE copytrade_dune_fetch_audits ADD COLUMN gmgn_screen_rule_version TEXT',
+      );
+    if (!columns.has('gmgn_data_fingerprint'))
+      database.exec(
+        'ALTER TABLE copytrade_dune_fetch_audits ADD COLUMN gmgn_data_fingerprint TEXT',
+      );
   },
 });
 

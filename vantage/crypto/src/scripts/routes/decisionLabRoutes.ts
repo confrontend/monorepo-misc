@@ -33,7 +33,7 @@ export interface DecisionLabRouteContext {
 export type DecisionLabRoute = (
   request: DecisionLabRouteRequest,
   context: DecisionLabRouteContext,
-) => Promise<boolean>;
+) => boolean | Promise<boolean>;
 
 const latestKeyPrefix = (limit: number, periodDays: 30 | 60 | 90 | null): string =>
   `${CACHE_VERSIONS.decisionLab}:${limit}:${periodDays}:latest:`;
@@ -41,7 +41,7 @@ const latestKeyPrefix = (limit: number, periodDays: 30 | 60 | 90 | null): string
 /** Authoritative Decision Lab report route. The report is persisted and fingerprint-cached;
  * this adapter only handles HTTP parsing and cache selection. */
 export const createDecisionLabRoutes = (): DecisionLabRoute[] => [
-  async (
+  (
     { method, url },
     {
       database,
@@ -61,7 +61,7 @@ export const createDecisionLabRoutes = (): DecisionLabRoute[] => [
       : 100;
     const rosterSnapshotId =
       Number.isInteger(snapshotRaw) && snapshotRaw > 0 ? snapshotRaw : undefined;
-    const weightingVersion = `${readExperimentalDecisionCacheVersion(database, cachePeriodDays)}:${WINNER_POLICY_VERSION}:coverage-quality-v2:deduction-details-v1`;
+    const weightingVersion = `${readExperimentalDecisionCacheVersion(database, cachePeriodDays)}:${WINNER_POLICY_VERSION}:coverage-quality-v2:deduction-details-v1:scenario-replay-v1`;
     const refresh = url.searchParams.get('refresh') === '1';
     const candidate =
       !refresh && rosterSnapshotId === undefined
@@ -75,7 +75,9 @@ export const createDecisionLabRoutes = (): DecisionLabRoute[] => [
       candidate.wallets.every(
         (wallet) =>
           wallet.winnerPolicy?.evidence?.coverageQuality !== undefined &&
-          wallet.winnerPolicy.gmgnRiskScore?.deductionDetails !== undefined,
+          wallet.winnerPolicy.gmgnRiskScore?.deductionDetails !== undefined &&
+          wallet.gmgnScreen?.ruleVersion === 'gmgn-screen-v1' &&
+          Array.isArray(wallet.scenarioReplayTrades),
       )
         ? candidate
         : null;

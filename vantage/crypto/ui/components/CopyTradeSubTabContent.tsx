@@ -10,16 +10,9 @@ import type { CopyTradeSubTab } from '../types.js';
 type CopyTradeSubTabContentProps = {
   activeTab: CopyTradeSubTab;
   api: ApiClient;
-  periodDays: 30 | 60 | 90;
-  onPeriodDaysChange: (periodDays: 30 | 60 | 90) => void;
 };
 
-export function CopyTradeSubTabContent({
-  activeTab,
-  api,
-  periodDays,
-  onPeriodDaysChange,
-}: CopyTradeSubTabContentProps) {
+export function CopyTradeSubTabContent({ activeTab, api }: CopyTradeSubTabContentProps) {
   const controller = useMemo(() => new AbortController(), [activeTab]);
   useEffect(() => () => controller.abort(), [controller]);
   const scopedApi = useCallback<ApiClient>(
@@ -29,14 +22,7 @@ export function CopyTradeSubTabContent({
 
   if (activeTab === 'data') return <DataWorkflow api={scopedApi} />;
   if (activeTab === 'api-reference') return <ApiReference api={scopedApi} />;
-  if (activeTab === 'experimental-decision')
-    return (
-      <ExperimentalDecisionLab
-        api={scopedApi}
-        periodDays={periodDays}
-        onPeriodDaysChange={onPeriodDaysChange}
-      />
-    );
+  if (activeTab === 'experimental-decision') return <ExperimentalDecisionLab api={scopedApi} />;
   if (activeTab === 'live-evaluation') return <LiveEvaluation api={scopedApi} />;
   if (activeTab === 'solana-benchmark') return <SolanaBenchmark api={scopedApi} />;
   return null;

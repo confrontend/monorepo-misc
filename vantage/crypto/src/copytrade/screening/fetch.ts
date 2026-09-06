@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { canonicalizeActivityType } from '../accounting/transferInventory.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { DAILY_TRADE_INSERT_CAP } from '../simulation/constants.js';
 import { estimateRemainingSeconds, recordFetchRunEstimate } from './estimate.js';
-import { listRosterWallets, syncCopyTradeRoster } from './roster.js';
+import { listRosterWallets, readLatestRankSnapshot } from './roster.js';
 import { GMGN_REQUEST_SPACING_MS, waitForGmgnRequest } from '../../gmgn/client/rateLimit.js';
 import { GENUINE_COMPLETION_STOP_REASONS } from '../features/walletFeatureCoverage.js';
 
@@ -187,6 +188,8 @@ export const fetchActivityPageRaw = async (options: {
     'buy',
     '--type',
     'sell',
+    '--type',
+    'transferIn',
     '--limit',
     String(options.limit ?? PAGE_SIZE),
     '--raw',
@@ -486,7 +489,9 @@ export const storeActivityPage = (
   for (const activity of activities) {
     const wallet = asText(activity.wallet);
     const txHash = asText(activity.tx_hash);
-    const eventType = asText(activity.event_type);
+    const rawEventType = asText(activity.event_type);
+    const canonicalEventType = canonicalizeActivityType(rawEventType);
+    const eventType = canonicalEventType === 'other' ? rawEventType : canonicalEventType;
     const token = (activity.token ?? {}) as Record<string, unknown>;
     const tokenAddress = asText(token.address);
     const timestamp =
@@ -623,6 +628,13 @@ export type FetchRunState = {
     targetDays: number | null;
     reachedTarget: boolean | null;
   } | null;
+  phase?: string | null;
+  lastProgressAt?: string | null;
+  currentOperationStartedAt?: string | null;
+  requestsStarted?: number;
+  requestsCompleted?: number;
+  stalled?: boolean;
+  rosterCapturedAt?: string | null;
 };
 
 /** Watermarks are derived from the stored trades themselves, so they can never drift from
@@ -841,7 +853,10 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
             resume_disabled AS resumeDisabled,
             completed_at AS completedAt,
             current_wallet_pages AS currentWalletPages,
-            current_wallet_oldest_ts AS currentWalletOldestTs
+            current_wallet_oldest_ts AS currentWalletOldestTs,
+            current_phase AS phase, last_progress_at AS lastProgressAt,
+            current_operation_started_at AS currentOperationStartedAt,
+            requests_started AS requestsStarted, requests_completed AS requestsCompleted
      FROM copytrade_fetch_runs ORDER BY id DESC LIMIT 1`,
     )
     .get() as
@@ -869,6 +884,11 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
         completedAt: string | null;
         currentWalletPages: number | null;
         currentWalletOldestTs: number | null;
+        phase: string | null;
+        lastProgressAt: string | null;
+        currentOperationStartedAt: string | null;
+        requestsStarted: number;
+        requestsCompleted: number;
       }
     | undefined;
 
@@ -911,6 +931,13 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
       completedWithWarnings: false,
       pagesFetchedTotal: 0,
       currentWalletDetail: null,
+      phase: null,
+      lastProgressAt: null,
+      currentOperationStartedAt: null,
+      requestsStarted: 0,
+      requestsCompleted: 0,
+      stalled: false,
+      rosterCapturedAt: readLatestRankSnapshot(database).capturedAt,
     };
   }
   const status = (
@@ -1011,6 +1038,8 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
       ? Math.min(100, (currentWalletWorkDone / currentWalletWorkTotal) * 100)
       : null;
   const elapsedSeconds = Math.max(1, (Date.now() - Date.parse(row.startedAt)) / 1000);
+  const lastProgressAt = row.lastProgressAt ?? row.startedAt;
+  const stalled = running && Date.now() - Date.parse(lastProgressAt) > 60_000;
   const overallRate = row.tradesFetched > 0 ? row.tradesFetched / elapsedSeconds : null;
   const currentElapsedSeconds = row.currentWalletStartedAt
     ? Math.max(1, (Date.now() - Date.parse(row.currentWalletStartedAt)) / 1000)
@@ -1039,7 +1068,9 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
       : null);
   const message =
     status === 'running'
-      ? `Fetching wallet ${row.walletDone + 1} of ${row.walletTotal}.`
+      ? stalled
+        ? `No progress for ${Math.floor((Date.now() - Date.parse(lastProgressAt)) / 60_000)}m; ${row.phase ?? 'worker'} may be stuck.`
+        : `Fetching wallet ${row.walletDone + 1} of ${row.walletTotal}.`
       : status === 'completed'
         ? row.tradesFetched === 0
           ? `No new trades were saved across ${row.walletDone} wallets; fetched activity was already present in the local database${failedWallets > 0 ? `; ${failedWallets} wallet${failedWallets === 1 ? '' : 's'} failed and were skipped` : ''}.`
@@ -1122,6 +1153,13 @@ export const readFetchRunState = (database: DatabaseSync): FetchRunState => {
           };
         })()
       : null,
+    phase: row.phase,
+    lastProgressAt: row.lastProgressAt,
+    currentOperationStartedAt: row.currentOperationStartedAt,
+    requestsStarted: row.requestsStarted,
+    requestsCompleted: row.requestsCompleted,
+    stalled,
+    rosterCapturedAt: readLatestRankSnapshot(database).capturedAt,
   };
 };
 
@@ -1209,7 +1247,7 @@ export const runCopyTradeFetch = async (
      *  be stubbed. Defaults to the real function for every production caller. */
     fetchPage?: typeof fetchActivityPage;
     /** Test seam for the per-wallet supporting-stats call, for the same reason as `fetchPage` --
-     *  without it, every test exercising this loop pays the real 5s GMGN rate gate once per
+     *  without it, every test exercising this loop pays the real GMGN rate gate once per
      *  wallet even though the activity walk itself is fully stubbed. Defaults to the real
      *  function for every production caller. */
     fetchStats?: typeof fetchAndStoreWalletStats;
@@ -1222,8 +1260,14 @@ export const runCopyTradeFetch = async (
   const refreshWallets = new Set(options.refreshWallets ?? []);
   const updateProgress = database.prepare(
     `UPDATE copytrade_fetch_runs
-     SET wallet_done = ?, trades_fetched = ?, trades_duplicate = ?, trades_daily_capped = ?, requests_made = ?
+     SET wallet_done = ?, trades_fetched = ?, trades_duplicate = ?, trades_daily_capped = ?, requests_made = ?,
+         last_progress_at = ?
      WHERE id = ?`,
+  );
+  const setTelemetry = database.prepare(
+    `UPDATE copytrade_fetch_runs
+     SET current_phase = ?, current_operation_started_at = ?, last_progress_at = ?,
+         requests_started = ?, requests_completed = ? WHERE id = ?`,
   );
   const updateCurrentWalletProgress = database.prepare(
     `UPDATE copytrade_fetch_runs SET current_wallet_pages = ?, current_wallet_oldest_ts = ? WHERE id = ?`,
@@ -1245,9 +1289,8 @@ export const runCopyTradeFetch = async (
     if (options.walletAddresses && options.walletAddresses.length > 0) {
       wallets = options.walletAddresses.map((walletAddress) => ({ walletAddress }));
     } else {
-      const rosterSync = syncCopyTradeRoster(database, { chain, limit: options.limit });
       wallets = listRosterWallets(database, { chain, limit: options.limit });
-      rosterSnapshotId = rosterSync.snapshotId;
+      rosterSnapshotId = readLatestRankSnapshot(database).snapshotId;
     }
     // Fetch low-volume wallets first so the user gets completed coverage quickly while the
     // expensive high-volume wallets run later. GMGN's saved 30-day stats are the preferred
@@ -1339,6 +1382,7 @@ export const runCopyTradeFetch = async (
           tradesDuplicate,
           tradesDailyCapped,
           requestsMade,
+          new Date().toISOString(),
           runId,
         );
         continue;
@@ -1375,6 +1419,15 @@ export const runCopyTradeFetch = async (
       // aggregate performance table. A failure here must never abort the trade fetch — the
       // trade history remains useful on its own.
       try {
+        const operationStartedAt = new Date().toISOString();
+        setTelemetry.run(
+          'wallet_stats',
+          operationStartedAt,
+          operationStartedAt,
+          requestsMade + 1,
+          requestsMade,
+          runId,
+        );
         requestsMade += 1;
         await fetchStats(database, {
           wallet: wallet.walletAddress,
@@ -1382,6 +1435,14 @@ export const runCopyTradeFetch = async (
           period: '30d',
           apiKey,
         });
+        setTelemetry.run(
+          'activity_prepare',
+          operationStartedAt,
+          new Date().toISOString(),
+          requestsMade,
+          requestsMade,
+          runId,
+        );
       } catch {
         /* context is optional; the trade history is not */
       }
@@ -1437,6 +1498,15 @@ export const runCopyTradeFetch = async (
       const fetchAndStore = async (
         cursorToUse: string | null,
       ): Promise<{ page: ActivityPage; stored: StoredTrade }> => {
+        const operationStartedAt = new Date().toISOString();
+        setTelemetry.run(
+          'activity_request',
+          operationStartedAt,
+          operationStartedAt,
+          requestsMade + 1,
+          requestsMade,
+          runId,
+        );
         requestsMade += 1;
         requestsThisWallet += 1;
         updateProgress.run(
@@ -1445,6 +1515,7 @@ export const runCopyTradeFetch = async (
           tradesDuplicate,
           tradesDailyCapped,
           requestsMade,
+          new Date().toISOString(),
           runId,
         );
         const page = await fetchPage({
@@ -1471,6 +1542,15 @@ export const runCopyTradeFetch = async (
           tradesFetched,
           tradesDuplicate,
           tradesDailyCapped,
+          requestsMade,
+          new Date().toISOString(),
+          runId,
+        );
+        setTelemetry.run(
+          'activity_persist',
+          operationStartedAt,
+          new Date().toISOString(),
+          requestsMade,
           requestsMade,
           runId,
         );
@@ -1647,6 +1727,7 @@ export const runCopyTradeFetch = async (
         tradesDuplicate,
         tradesDailyCapped,
         requestsMade,
+        new Date().toISOString(),
         runId,
       );
     }
@@ -1714,10 +1795,18 @@ export const createCopyTradeFetchRun = (
     .prepare(
       `INSERT INTO copytrade_fetch_runs
        (started_at, status, wallet_total, wallet_done, trades_fetched, requests_made,
-        requested_period_days, trader_limit, fetch_scope, workflow_run_id)
-     VALUES (?, 'running', 0, 0, 0, 0, ?, ?, ?, ?)`,
+        requested_period_days, trader_limit, fetch_scope, workflow_run_id,
+        current_phase, last_progress_at, requests_started, requests_completed)
+     VALUES (?, 'running', 0, 0, 0, 0, ?, ?, ?, ?, 'starting', ?, 0, 0)`,
     )
-    .run(startedAt, options.periodDays, options.limit, scope, options.workflowRunId ?? null);
+    .run(
+      startedAt,
+      options.periodDays,
+      options.limit,
+      scope,
+      options.workflowRunId ?? null,
+      startedAt,
+    );
   return Number((database.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number }).id);
 };
 

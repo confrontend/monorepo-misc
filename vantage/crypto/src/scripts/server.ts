@@ -73,6 +73,7 @@ import {
   runCopySimulationBatch,
   DEFAULT_COPIER_DELAY_SECONDS,
 } from '../copytrade/simulation/copySimulation.js';
+import { estimateDuneCredits } from '../copytrade/simulation/duneBudget.js';
 import {
   computeEliminationReport,
   estimateDuneRefetchDuration,
@@ -110,6 +111,7 @@ import {
   readExperimentalDecisionCacheVersion,
   type ExperimentalDecisionReport,
 } from '../copytrade/experimentalDecision.js';
+import { evaluateGmgnScreenV1, GMGN_SCREEN_RULE_VERSION } from '../copytrade/gmgnScreenV1.js';
 import { computeLiveEvaluation, parseLiveEvaluationRequest } from '../copytrade/liveEvaluation.js';
 import { WINNER_POLICY_VERSION } from '../copytrade/winnerPolicy.js';
 import { readHistoryDepthCoverage } from '../copytrade/features/walletFeatureCoverage.js';
@@ -147,19 +149,6 @@ import {
   type DunePollUpdate,
 } from '../copytrade/simulation/copySimulationDune.js';
 import { importBrowserWalletActivity } from '../copytrade/browserActivityImport.js';
-import {
-  pauseDataWorkflow,
-  readDataWorkflowStatus,
-  resumeDataWorkflow,
-  finishDataWorkflow,
-  cancelDataWorkflow,
-  runDataWorkflowStep,
-  runDataWorkflowDune,
-  retryDataWorkflowWallet,
-  startDataWorkflow,
-} from '../copytrade/data/dataWorkflowOrchestrator.js';
-import { reconcileStaleDataWorkflowRuns } from '../copytrade/data/dataWorkflowRunStore.js';
-import { readDataWorkflowState } from '../copytrade/data/dataWorkflowState.js';
 
 // Background fetches (roster, winners, single/Live Evaluation) run detached from any one HTTP
 // request -- an error inside one must not take down every other in-flight request. Node's
@@ -173,8 +162,7 @@ process.on('unhandledRejection', (reason) => {
 const database = openDatabase();
 // A CopyTrade fetch only runs inside the process that started it, so anything still marked
 // running at startup was orphaned by a restart and would otherwise latch the single-run guard.
-reconcileStaleDataWorkflowRuns(database);
-const interruptedFetches = reconcileStaleFetchRuns(database);
+reconcileStaleFetchRuns(database);
 // Dune executions live outside this process. Reconcile rows with execution IDs first so a server
 // restart recovers completed queries instead of turning them into duplicate submissions. Only
 // rows that never received an execution ID and have exceeded the hand-off grace period are then
@@ -191,32 +179,6 @@ void reconcileStuckCopySimulationRuns(database)
     console.error('[dune] startup reconciliation failed:', error);
     reconcileStaleCopySimulationRuns(database);
   });
-// In development, a Vite/tsx restart is common and should not turn a partially fetched GMGN
-// snapshot into a manual recovery task. Resume only the exact restart-interruption marker; a
-// user-cancelled run, reset snapshot, ordinary provider failure, or completed run remains idle.
-// The cursor and idempotent trade storage make this safe: already-saved pages are skipped or
-// deduplicated, while the next saved cursor continues the unfinished wallet.
-if (interruptedFetches > 0 && process.env.CRYPTO_AUTO_RESUME_INTERRUPTED_FETCHES !== 'false') {
-  const interrupted = database
-    .prepare(
-      `SELECT id, requested_period_days AS periodDays, trader_limit AS traderLimit
-     FROM copytrade_fetch_runs
-     WHERE fetch_scope = 'roster'
-       AND status = 'failed'
-       AND error = 'Interrupted: the server restarted while this fetch was running. Already-fetched trades were kept.'
-       AND COALESCE(resume_disabled, 0) = 0
-     ORDER BY id DESC LIMIT 1`,
-    )
-    .get() as { id: number; periodDays: number | null; traderLimit: number | null } | undefined;
-  if (interrupted) {
-    console.log(`[copytrade] automatically resuming interrupted GMGN fetch ${interrupted.id}`);
-    startCopyTradeFetch(database, {
-      limit: interrupted.traderLimit ?? 100,
-      periodDays: interrupted.periodDays ?? 30,
-      scope: 'roster',
-    });
-  }
-}
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const serverSourcePath = fileURLToPath(import.meta.url);
 const patternDiscoveryWorkerModule = path.join(
@@ -490,15 +452,31 @@ const acquireCopySimulationLease = (database: DatabaseSync): boolean => {
   database.exec('BEGIN IMMEDIATE;');
   try {
     const activeRun = database
-      .prepare(`SELECT id FROM copytrade_copy_simulation_runs WHERE status IN (?, ?) LIMIT 1`)
-      .get('submitted', 'running');
+      .prepare(
+        `SELECT id FROM copytrade_copy_simulation_runs
+         WHERE status IN ('submitted', 'running', 'timed_out') LIMIT 1`,
+      )
+      .get();
     if (activeRun) {
       database.exec('ROLLBACK;');
       return false;
     }
-    // A crashed/restarted process can leave only the lease row behind. With no active
-    // simulation run, it is safe to reclaim that orphaned lease before claiming it here.
-    database.prepare('DELETE FROM copytrade_copy_simulation_leases WHERE singleton_id = 1').run();
+    // A process can be between claiming the lease and inserting its first batch row. Never delete
+    // a fresh lease in that window; only reclaim a lease that has been orphaned long enough for a
+    // crashed process to be considered dead.
+    const existingLease = database
+      .prepare(
+        'SELECT acquired_at AS acquiredAt FROM copytrade_copy_simulation_leases WHERE singleton_id = 1',
+      )
+      .get() as { acquiredAt?: string } | undefined;
+    if (existingLease?.acquiredAt) {
+      const leaseAgeMs = Date.now() - Date.parse(existingLease.acquiredAt);
+      if (!Number.isFinite(leaseAgeMs) || leaseAgeMs < 10 * 60_000) {
+        database.exec('ROLLBACK;');
+        return false;
+      }
+      database.prepare('DELETE FROM copytrade_copy_simulation_leases WHERE singleton_id = 1').run();
+    }
     const claimed = database
       .prepare(
         `INSERT OR IGNORE INTO copytrade_copy_simulation_leases (singleton_id, acquired_at)
@@ -1019,395 +997,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       }
       return;
     }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/data-workflow/status') {
-      const runIdParam = Number(requestUrl.searchParams.get('runId') ?? '');
-      respond(
-        200,
-        readDataWorkflowStatus(database, {
-          chain: requestUrl.searchParams.get('chain') ?? 'sol',
-          targetDays: Number(requestUrl.searchParams.get('targetDays') ?? '90'),
-          runId: Number.isInteger(runIdParam) && runIdParam > 0 ? runIdParam : undefined,
-        }),
-      );
-      return;
-    }
-    if (request.method === 'GET' && requestUrl.pathname === '/api/copytrade/data-workflow/roster') {
-      const chain = requestUrl.searchParams.get('chain') ?? 'sol';
-      const periodParam = Number(requestUrl.searchParams.get('periodDays') ?? '30');
-      const periodDays = [30, 60, 90].includes(periodParam) ? periodParam : 30;
-      const limitParam = Number(requestUrl.searchParams.get('limit') ?? '100');
-      const limit =
-        Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : 100;
-      const snapshot = readLatestRankSnapshot(database);
-      const roster = listRosterWallets(database, { chain, limit });
-      const metrics = readGmgnPeriodMetrics(database, { chain, limit, periodDays });
-      const coverage = readHistoryDepthCoverage(database, {
-        chain,
-        walletAddresses: roster.map((wallet) => wallet.walletAddress),
-        targetDays: 60,
-        depthMilestones: [60],
-      });
-      const coverageByWallet = new Map(coverage.rows.map((row) => [row.walletAddress, row]));
-      respond(200, {
-        generatedAt: new Date().toISOString(),
-        chain,
-        periodDays,
-        snapshotId: snapshot.snapshotId,
-        capturedAt: snapshot.capturedAt,
-        wallets: roster.map(({ walletAddress, chain: walletChain, name, rankPosition }) => ({
-          walletAddress,
-          chain: walletChain,
-          name,
-          rankPosition,
-          verified60d: coverageByWallet.get(walletAddress)?.milestones[60] === true,
-          deepestCompletedDays: coverageByWallet.get(walletAddress)?.deepestCompletedDays ?? null,
-          ...metrics[walletAddress],
-        })),
-      });
-      return;
-    }
-    if (
-      request.method === 'GET' &&
-      requestUrl.pathname === '/api/copytrade/data-workflow/status-summary'
-    ) {
-      const targetDaysParam = Number(requestUrl.searchParams.get('targetDays') ?? '30');
-      const targetDays = [30, 60, 90].includes(targetDaysParam) ? targetDaysParam : 30;
-      const state = readDataWorkflowState(database, { chain: 'sol', targetDays });
-      respond(200, {
-        generatedAt: new Date().toISOString(),
-        targetDays,
-        rosterWallets: state.rosterWallets.length,
-        history: Object.fromEntries(
-          Object.entries(state.counts.coverage.milestones).map(([key, value]) => [key, value]),
-        ),
-        duneStatus: state.counts.dune.status,
-        patternStatus: state.counts.pattern.status,
-        decisionStatus: state.counts.decision.status,
-      });
-      return;
-    }
-    if (
-      request.method === 'GET' &&
-      requestUrl.pathname === '/api/copytrade/data-workflow/coverage'
-    ) {
-      const status = readDataWorkflowStatus(database, {
-        chain: requestUrl.searchParams.get('chain') ?? 'sol',
-        targetDays: Number(requestUrl.searchParams.get('targetDays') ?? '90'),
-      });
-      const state = readDataWorkflowState(database, {
-        chain: status.chain,
-        targetDays: status.targetDays,
-        runId: status.run?.id,
-      });
-      respond(200, {
-        ...state.counts.coverage.inventory,
-        depthMode: state.depthMode,
-        availabilitySemantics: {
-          oldestRowMeaning: 'availability_only',
-          oldestRowProvesContinuousCoverage: false,
-          description:
-            'Oldest stored activity shows provider availability; coverage completion comes from an uncapped cursor walk.',
-        },
-      });
-      return;
-    }
-    if (
-      request.method === 'GET' &&
-      requestUrl.pathname === '/api/copytrade/data-workflow/readiness'
-    ) {
-      const status = readDataWorkflowStatus(database, {
-        chain: requestUrl.searchParams.get('chain') ?? 'sol',
-        targetDays: Number(requestUrl.searchParams.get('targetDays') ?? '90'),
-      });
-      const state = readDataWorkflowState(database, {
-        runId: status.run?.id,
-        chain: status.chain,
-        targetDays: status.targetDays,
-      });
-      const pattern = state.counts.pattern;
-      const decision = state.counts.decision;
-      const checks = [
-        {
-          key: 'history',
-          label:
-            state.depthMode === 'maximum_available'
-              ? 'Available history depth'
-              : 'Requested history depth',
-          status: state.counts.coverage.ready ? 'pass' : 'fail',
-          required: true,
-          available: state.counts.coverage.ready,
-          value: `${state.counts.coverage.completeWallets}/${state.counts.coverage.requiredWallets}`,
-          detail: state.counts.coverage.ready
-            ? state.depthMode === 'maximum_available'
-              ? 'Fetch reached the provider-available end for every wallet.'
-              : 'Coverage threshold met.'
-            : state.depthMode === 'maximum_available'
-              ? `Fetch has not reached the provider-available end for ${state.counts.coverage.requiredWallets - state.counts.coverage.completeWallets} wallet(s).`
-              : `Need ${state.counts.coverage.requiredWallets} completed wallets at ${state.counts.coverage.thresholdPercent}%.`,
-        },
-        {
-          key: 'metadata',
-          label: 'Fresh GMGN metadata',
-          status: state.counts.stats.ready ? 'pass' : 'fail',
-          required: true,
-          available: state.counts.stats.ready,
-          value: `${state.counts.stats.freshDurableRows}/${state.counts.stats.requiredRows}`,
-          detail: state.counts.stats.ready
-            ? 'Fresh durable 30-day stats are available.'
-            : 'Fetch current GMGN metadata in the Data workflow.',
-        },
-        {
-          key: 'pattern',
-          label: 'Pattern Research',
-          status: pattern.ready
-            ? 'pass'
-            : pattern.status === 'ready_with_warnings'
-              ? 'warning'
-              : 'fail',
-          required: false,
-          available: pattern.ready,
-          value: pattern.promotedPatternCount,
-          detail: pattern.reason ?? 'Current Pattern Research evidence is available.',
-        },
-        {
-          key: 'decision',
-          label: 'Decision Engine',
-          status: decision.ready ? 'pass' : 'fail',
-          required: true,
-          available: decision.ready,
-          value: decision.weightingMode,
-          detail: decision.reason ?? 'Decision Engine prerequisites are available.',
-        },
-        {
-          key: 'dune',
-          label: 'Dune outcomes',
-          status: state.counts.dune.ready
-            ? 'pass'
-            : state.counts.dune.status === 'ready_with_warnings'
-              ? 'warning'
-              : 'fail',
-          required: false,
-          available: state.counts.dune.ready,
-          value: `${state.counts.dune.matchedTargetCount}/${state.counts.dune.targetCount}`,
-          detail: state.counts.dune.ready
-            ? 'All planned outcome targets have terminal results.'
-            : 'Dune outcomes are incomplete or gated by history coverage.',
-        },
-      ];
-      const blockers = checks
-        .filter((check) => check.required && !check.available)
-        .map((check) => check.detail);
-      const warnings = checks
-        .filter((check) => !check.required && !check.available)
-        .map((check) => check.detail);
-      respond(200, {
-        generatedAt: new Date().toISOString(),
-        chain: status.chain,
-        targetDays: status.targetDays,
-        status:
-          blockers.length === 0
-            ? warnings.length === 0
-              ? 'ready'
-              : 'ready_with_warnings'
-            : 'blocked',
-        completenessThresholdPercent: state.completenessThresholdPercent,
-        output: {
-          totalWallets: state.rosterWallets.length,
-          eligibleWallets: state.counts.coverage.completeWallets,
-          completeWallets: state.counts.coverage.completeWallets,
-          incompleteWallets: Math.max(
-            0,
-            state.rosterWallets.length - state.counts.coverage.completeWallets,
-          ),
-          historicalEvidenceWallets: state.counts.coverage.completeWallets,
-          currentMetadataWallets: state.counts.stats.currentRows,
-          outcomeCoveredWallets:
-            state.counts.dune.matchedTargetCount + state.counts.dune.noMatchTargetCount,
-          analysisWindowStart: new Date(Date.now() - status.targetDays * 86_400_000).toISOString(),
-          analysisWindowEnd: new Date().toISOString(),
-        },
-        checks,
-        blockers,
-        warnings,
-      });
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/start') {
-      const payload = (await readJsonBody(request)) as {
-        chain?: unknown;
-        targetDays?: unknown;
-        traderLimit?: unknown;
-        walletAddresses?: unknown;
-        depthMode?: unknown;
-      };
-      const requestedTargetDays = Number(payload.targetDays);
-      const targetDays = [30, 60, 90].includes(requestedTargetDays) ? requestedTargetDays : 90;
-      const traderLimit = Number(payload.traderLimit ?? 100);
-      const depthMode =
-        payload.depthMode === 'maximum_available' ? 'maximum_available' : 'requested';
-      if (!Number.isInteger(traderLimit) || traderLimit <= 0 || traderLimit > 500) {
-        respond(400, {
-          error: 'traderLimit must be between 1 and 500.',
-        });
-        return;
-      }
-      const walletAddresses =
-        payload.walletAddresses === undefined
-          ? undefined
-          : Array.isArray(payload.walletAddresses)
-            ? [
-                ...new Set(
-                  payload.walletAddresses.filter(
-                    (value): value is string =>
-                      typeof value === 'string' && value.trim().length > 0,
-                  ),
-                ),
-              ]
-            : null;
-      if (walletAddresses === null || walletAddresses?.length === 0) {
-        respond(400, { error: 'Select at least one wallet before starting the Data workflow.' });
-        return;
-      }
-      const status = readDataWorkflowStatus(database, {
-        chain: typeof payload.chain === 'string' ? payload.chain : 'sol',
-        targetDays,
-      });
-      if (!status.actions.start.allowed) {
-        respond(409, {
-          error: status.actions.start.message ?? 'Another production job is active.',
-        });
-        return;
-      }
-      if (readGmgnStatsFetchStatus().running) {
-        respond(409, { error: 'A GMGN metadata fetch is already running.' });
-        return;
-      }
-      try {
-        respond(
-          202,
-          startDataWorkflow(database, {
-            chain: typeof payload.chain === 'string' ? payload.chain : 'sol',
-            targetDays,
-            traderLimit,
-            walletAddresses: walletAddresses ?? undefined,
-            depthMode,
-          }),
-        );
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/step') {
-      const payload = (await readJsonBody(request)) as { runId?: unknown; stepKey?: unknown };
-      const stepKeys = [
-        'wallet_metadata',
-        'activity_history',
-        'coverage_verification',
-        'dune_outcomes',
-        'readiness',
-      ] as const;
-      if (
-        !Number.isInteger(payload.runId) ||
-        !stepKeys.includes(payload.stepKey as (typeof stepKeys)[number])
-      ) {
-        respond(400, { error: 'runId and a valid stepKey are required.' });
-        return;
-      }
-      try {
-        respond(
-          202,
-          runDataWorkflowStep(database, {
-            runId: Number(payload.runId),
-            stepKey: payload.stepKey as (typeof stepKeys)[number],
-          }),
-        );
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/pause') {
-      const payload = (await readJsonBody(request)) as { runId?: unknown };
-      try {
-        respond(202, pauseDataWorkflow(database, Number(payload.runId)));
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (
-      request.method === 'POST' &&
-      requestUrl.pathname === '/api/copytrade/data-workflow/resume'
-    ) {
-      const payload = (await readJsonBody(request)) as { runId?: unknown };
-      try {
-        respond(202, resumeDataWorkflow(database, Number(payload.runId)));
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (
-      request.method === 'POST' &&
-      (requestUrl.pathname === '/api/copytrade/data-workflow/finish' ||
-        requestUrl.pathname === '/api/copytrade/data-workflow/cancel')
-    ) {
-      const payload = (await readJsonBody(request)) as { runId?: unknown };
-      if (!Number.isInteger(payload.runId)) {
-        respond(400, { error: 'runId is required.' });
-        return;
-      }
-      try {
-        const action = requestUrl.pathname.endsWith('/finish')
-          ? finishDataWorkflow
-          : cancelDataWorkflow;
-        respond(202, action(database, Number(payload.runId)));
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/data-workflow/dune') {
-      const payload = (await readJsonBody(request)) as {
-        runId?: unknown;
-        allowPartialDepth?: unknown;
-      };
-      try {
-        respond(
-          202,
-          runDataWorkflowDune(database, {
-            runId: Number(payload.runId),
-            allowPartialDepth: payload.allowPartialDepth === true,
-          }),
-        );
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    if (
-      request.method === 'POST' &&
-      requestUrl.pathname === '/api/copytrade/data-workflow/coverage/retry'
-    ) {
-      const payload = (await readJsonBody(request)) as { runId?: unknown; walletAddress?: unknown };
-      if (typeof payload.walletAddress !== 'string' || !payload.walletAddress.trim()) {
-        respond(400, { error: 'walletAddress is required.' });
-        return;
-      }
-      try {
-        respond(
-          202,
-          retryDataWorkflowWallet(database, {
-            runId: Number(payload.runId),
-            walletAddress: payload.walletAddress.trim(),
-          }),
-        );
-      } catch (error) {
-        respond(409, { error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
     if (request.method === 'POST' && requestUrl.pathname === '/api/copytrade/fetch') {
       const payload = (await readJsonBody(request)) as { limit?: unknown; periodDays?: unknown };
       const limit = Number(payload.limit);
@@ -1505,7 +1094,6 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       const payload = (await readJsonBody(request)) as {
         limit?: unknown;
         snapshotId?: unknown;
-        maxAgeHours?: unknown;
       };
       const limit = Number(payload.limit);
       if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
@@ -1517,13 +1105,11 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         return;
       }
       const snapshotId = Number(payload.snapshotId);
-      const maxAgeHours = Number(payload.maxAgeHours);
       respond(
         200,
         startGmgnStatsFetch(database, {
           limit,
           snapshotId: Number.isInteger(snapshotId) && snapshotId > 0 ? snapshotId : undefined,
-          maxAgeHours: Number.isFinite(maxAgeHours) && maxAgeHours > 0 ? maxAgeHours : undefined,
         }),
       );
       return;
@@ -2030,6 +1616,13 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
               periodDays: 365,
               copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
             });
+            const gmgnScreenReport = computeCopyTradeReport(database, {
+              periodDays: null,
+              traderLimit: 100,
+            });
+            const gmgnByWallet = new Map(
+              gmgnScreenReport.rows.map((row) => [row.walletAddress, evaluateGmgnScreenV1(row)]),
+            );
             const walletPlans = walletAddresses.map((walletAddress) => {
               const walletPlan = planCopySimulationTargets(database, {
                 walletAddresses: [walletAddress],
@@ -2041,11 +1634,17 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
                 walletAddress,
                 pendingTargets: walletPlan.targets.length,
                 tradeCount: walletPlan.roundTrips.length,
+                gmgnScreen: gmgnByWallet.get(walletAddress) ?? {
+                  ruleVersion: GMGN_SCREEN_RULE_VERSION,
+                  classification: 'UNPROVEN' as const,
+                  reasons: ['Wallet is not present in the current GMGN roster.'],
+                },
               };
             });
             return {
               walletCount: walletAddresses.length,
               pendingTargets: plan.targets.length,
+              budget: estimateDuneCredits(plan.targets.length),
               tradeCount: plan.roundTrips.length,
               wallets: walletPlans,
               message: plan.targets.length
@@ -2068,6 +1667,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         respond(200, {
           accepted: false,
           pendingTargets: 0,
+          budget: estimateDuneCredits(0),
           message: 'No new Dune observations are pending.',
         });
         return;
@@ -2094,6 +1694,24 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         respond(409, { error: 'Another provider fetch is already running.' });
         return;
       }
+      const auditInsert = database
+        .prepare(
+          `INSERT INTO copytrade_dune_fetch_audits
+           (requested_at, mode, wallet_count, wallet_addresses, planned_targets,
+            selected_target_ids, gmgn_screen_rule_version, gmgn_data_fingerprint, status, message)
+           VALUES (?, 'decision_selected', ?, ?, ?, ?, ?, ?, 'running', ?)`,
+        )
+        .run(
+          new Date().toISOString(),
+          walletAddresses.length,
+          JSON.stringify(walletAddresses),
+          plan.targets.length,
+          JSON.stringify(plan.targets.map((target) => target.tradeId)),
+          GMGN_SCREEN_RULE_VERSION,
+          dunePreflightDataFingerprint(),
+          `Selected ${walletAddresses.length} wallets for Dune measurement (GMGN screen override allowed).`,
+        );
+      const auditId = Number(auditInsert.lastInsertRowid);
       copySimulationRunState = {
         ...idleCopySimulationRunState,
         running: true,
@@ -2109,6 +1727,18 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         periodDays: 365,
         copierDelaySeconds: DEFAULT_COPIER_DELAY_SECONDS,
         onProgress: (progress) => {
+          database
+            .prepare(
+              `UPDATE copytrade_dune_fetch_audits
+               SET submitted_targets = ?, remaining_targets = ?, status = 'running', message = ?
+               WHERE id = ?`,
+            )
+            .run(
+              progress.targetsProcessed,
+              Math.max(0, progress.targetsTotal - progress.targetsProcessed),
+              `Fetched ${progress.targetsProcessed} of ${progress.targetsTotal} Dune observations`,
+              auditId,
+            );
           copySimulationRunState = {
             ...copySimulationRunState,
             ...progress,
@@ -2132,6 +1762,26 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
               ? `Fetch finished with ${result.failedBatches.length} failed batch${result.failedBatches.length === 1 ? '' : 'es'}`
               : 'Fetch complete',
           };
+          const finishedAt = copySimulationRunState.finishedAt ?? new Date().toISOString();
+          database
+            .prepare(
+              `UPDATE copytrade_dune_fetch_audits
+               SET completed_at = ?, planned_targets = ?, submitted_targets = ?,
+                   stored_targets = ?, failed_targets = ?, remaining_targets = ?,
+                   status = ?, message = ?
+               WHERE id = ?`,
+            )
+            .run(
+              finishedAt,
+              result.targetsTotal,
+              result.targetsSubmitted,
+              result.targetsSubmitted,
+              result.failedBatches.length,
+              Math.max(0, result.targetsTotal - result.targetsSubmitted),
+              result.failedBatches.length ? 'partial' : 'complete',
+              copySimulationRunState.message,
+              auditId,
+            );
           releaseCopySimulationLease(database);
         })
         .catch((error: unknown) => {
@@ -2142,12 +1792,19 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
             finishedAt: new Date().toISOString(),
             message: error instanceof Error ? error.message : 'Selected Dune fetch failed',
           };
+          database
+            .prepare(
+              `UPDATE copytrade_dune_fetch_audits
+               SET completed_at = ?, status = 'error', message = ? WHERE id = ?`,
+            )
+            .run(copySimulationRunState.finishedAt, copySimulationRunState.message, auditId);
           releaseCopySimulationLease(database);
           console.error('[decision] selected Dune fetch failed:', error);
         });
       respond(202, {
         accepted: true,
         pendingTargets: plan.targets.length,
+        budget: estimateDuneCredits(plan.targets.length),
         message: `Started Dune fetch for ${plan.targets.length} price observations.`,
       });
       return;
@@ -2596,8 +2253,20 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           shouldStop: () => copySimulationRunState.cancelRequested,
           onPlan: (plan) => {
             database
-              .prepare('UPDATE copytrade_dune_fetch_audits SET planned_targets = ? WHERE id = ?')
-              .run(plan.targetsTotal, auditId);
+              .prepare(
+                `UPDATE copytrade_dune_fetch_audits
+                 SET planned_targets = ?, submitted_targets = 0, stored_targets = 0,
+                     failed_targets = 0, remaining_targets = ?, status = 'running', message = ?
+                 WHERE id = ?`,
+              )
+              .run(
+                plan.targetsTotal,
+                plan.targetsTotal,
+                plan.targetsTotal
+                  ? `Planned ${plan.targetsTotal} targets across ${plan.batchesTotal} Dune queries`
+                  : 'Nothing new to fetch',
+                auditId,
+              );
             copySimulationRunState = {
               ...copySimulationRunState,
               ...plan,
@@ -2612,6 +2281,18 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
           },
           onBatchStart: (progress) => {
             copySimulationBatchStartedAt = Date.now();
+            database
+              .prepare(
+                `UPDATE copytrade_dune_fetch_audits
+                 SET submitted_targets = ?, remaining_targets = ?, status = 'running', message = ?
+                 WHERE id = ?`,
+              )
+              .run(
+                progress.targetsProcessed,
+                Math.max(0, progress.targetsTotal - progress.targetsProcessed),
+                `Starting Dune query ${progress.currentBatch} of ${progress.batchesTotal} (${progress.batchTargets} targets)`,
+                auditId,
+              );
             copySimulationRunState = {
               ...copySimulationRunState,
               ...progress,
@@ -2640,6 +2321,19 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
             };
           },
           onDuneStatus: (status: DunePollUpdate) => {
+            const statusMessage =
+              status.requestPhase === 'status_requesting'
+                ? `Dune status request in flight · poll ${status.pollCount}`
+                : status.requestPhase === 'results_requesting'
+                  ? 'Dune finished execution; downloading results'
+                  : status.requestPhase === 'results_received'
+                    ? 'Dune results received; saving targets'
+                    : `Dune ${status.state.replace('QUERY_STATE_', '').toLowerCase()} · ${status.elapsedSeconds}s`;
+            database
+              .prepare(
+                `UPDATE copytrade_dune_fetch_audits SET status = 'running', message = ? WHERE id = ?`,
+              )
+              .run(statusMessage, auditId);
             copySimulationRunState = {
               ...copySimulationRunState,
               duneExecutionId: status.executionId,
@@ -2653,14 +2347,7 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
               duneLastHttpStatus: status.statusHttpStatus,
               duneLastRequestMs: status.statusRequestMs,
               duneLastPayload: status.statusPayload,
-              message:
-                status.requestPhase === 'status_requesting'
-                  ? `Dune status request in flight · poll ${status.pollCount}`
-                  : status.requestPhase === 'results_requesting'
-                    ? 'Dune finished execution; downloading raw results'
-                    : status.requestPhase === 'results_received'
-                      ? 'Dune raw results received; saving response'
-                      : `Dune ${status.state.replace('QUERY_STATE_', '').toLowerCase()} · ${status.elapsedSeconds}s · poll ${status.pollCount}`,
+              message: statusMessage,
             };
           },
           onBatchEnd: (outcome) => {
@@ -2709,6 +2396,23 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
                 copySimulationRunState.targetsTotal - storedTargets - failedTargets,
               ),
             };
+            database
+              .prepare(
+                `UPDATE copytrade_dune_fetch_audits
+                 SET submitted_targets = ?, stored_targets = ?, failed_targets = ?,
+                     remaining_targets = ?, status = 'running', message = ?
+                 WHERE id = ?`,
+              )
+              .run(
+                storedTargets + failedTargets,
+                storedTargets,
+                failedTargets,
+                Math.max(0, copySimulationRunState.targetsTotal - storedTargets - failedTargets),
+                outcome.error
+                  ? `Batch ${outcome.currentBatch} failed: ${outcome.error}`
+                  : `Saved batch ${outcome.currentBatch} · ${storedTargets} targets stored`,
+                auditId,
+              );
           },
           onProgress: (progress) => {
             copySimulationRunState = { ...copySimulationRunState, ...progress };
@@ -2788,6 +2492,32 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
       request.method === 'GET' &&
       requestUrl.pathname === '/api/copytrade/copy-simulation/status'
     ) {
+      // Recover submissions that never received a Dune execution id. This can happen when the
+      // process dies between writing the local run row and completing the Dune submit request;
+      // running recovery on reads keeps the UI from reporting a permanent "already running"
+      // state until the next server restart.
+      const orphanedRuns = reconcileStaleCopySimulationRuns(database);
+      if (orphanedRuns > 0) {
+        const recoveredAt = new Date().toISOString();
+        database
+          .prepare(
+            `UPDATE copytrade_dune_fetch_audits
+             SET completed_at = ?, status = 'failed',
+                 message = 'Dune fetch expired before an execution was recorded.'
+             WHERE status = 'running' AND completed_at IS NULL`,
+          )
+          .run(recoveredAt);
+        const remainingActive = database
+          .prepare(
+            `SELECT 1 FROM copytrade_copy_simulation_runs
+             WHERE status IN ('submitted', 'running', 'timed_out') LIMIT 1`,
+          )
+          .get();
+        if (!remainingActive)
+          database
+            .prepare('DELETE FROM copytrade_copy_simulation_leases WHERE singleton_id = 1')
+            .run();
+      }
       const latestSavedRun = database
         .prepare(
           `SELECT id, status, requested_at AS requestedAt, completed_at AS completedAt,
@@ -2825,8 +2555,112 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         status, message FROM copytrade_dune_fetch_audits ORDER BY id DESC LIMIT 1`,
         )
         .get();
+      const activeSimulationRun = database
+        .prepare(
+          `SELECT id, status, requested_at AS requestedAt, execution_id AS executionId,
+                  trade_refs AS tradeRefs, dune_last_state AS duneState,
+                  dune_status_payload AS duneStatusPayload, dune_last_status_at AS duneLastStatusAt
+           FROM copytrade_copy_simulation_runs
+           WHERE status IN ('submitted', 'running', 'timed_out')
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get() as
+        | {
+            id: number;
+            status: string;
+            requestedAt: string;
+            executionId: string | null;
+            tradeRefs: string;
+            duneState: string | null;
+            duneStatusPayload: string | null;
+            duneLastStatusAt: string | null;
+          }
+        | undefined;
+      const activeRunTradeCount = activeSimulationRun
+        ? (() => {
+            try {
+              const refs = JSON.parse(activeSimulationRun.tradeRefs) as unknown;
+              return Array.isArray(refs) ? refs.length : 0;
+            } catch {
+              return 0;
+            }
+          })()
+        : 0;
+      const persistedProgress = activeSimulationRun
+        ? (() => {
+            const planned =
+              Number((latestAudit as { plannedTargets?: number } | null)?.plannedTargets) || 0;
+            const boundary =
+              (latestAudit as { requestedAt?: string } | null)?.requestedAt ??
+              activeSimulationRun.requestedAt;
+            const priorRuns = database
+              .prepare(
+                `SELECT status, trade_refs AS tradeRefs FROM copytrade_copy_simulation_runs
+                 WHERE requested_at >= ? AND id <= ?`,
+              )
+              .all(boundary, activeSimulationRun.id) as Array<{
+              status: string;
+              tradeRefs: string;
+            }>;
+            const countRefs = (refsRaw: string): number => {
+              try {
+                const refs = JSON.parse(refsRaw) as unknown;
+                return Array.isArray(refs) ? refs.length : 0;
+              } catch {
+                return 0;
+              }
+            };
+            const completed = priorRuns
+              .filter((run) => run.status === 'completed')
+              .reduce((sum, run) => sum + countRefs(run.tradeRefs), 0);
+            const failed = priorRuns
+              .filter((run) => run.status === 'failed')
+              .reduce((sum, run) => sum + countRefs(run.tradeRefs), 0);
+            const batchesRun = priorRuns.filter(
+              (run) => run.status === 'completed' || run.status === 'failed',
+            ).length;
+            const batchesTotal = planned ? Math.ceil(planned / 150) : 0;
+            let dunePollCount = 0;
+            let duneElapsedSeconds = 0;
+            let duneCost: number | null = null;
+            if (activeSimulationRun.duneStatusPayload) {
+              try {
+                const payload = JSON.parse(activeSimulationRun.duneStatusPayload) as Record<
+                  string,
+                  unknown
+                >;
+                duneCost =
+                  typeof payload.execution_cost_credits === 'number'
+                    ? payload.execution_cost_credits
+                    : null;
+              } catch {
+                // The raw payload is diagnostic only; status remains usable if it is malformed.
+              }
+            }
+            return {
+              running: true,
+              targetsTotal: planned,
+              targetsProcessed: completed,
+              batchesRun,
+              currentBatch: batchesRun + 1,
+              batchesTotal,
+              storedTargets: completed,
+              failedTargets: failed,
+              remainingTargets: Math.max(0, planned - completed - failed),
+              duneExecutionId: activeSimulationRun.executionId,
+              duneState: activeSimulationRun.duneState,
+              dunePollCount,
+              duneElapsedSeconds,
+              duneExecutionCostCredits: duneCost,
+              duneLastStatusAt: activeSimulationRun.duneLastStatusAt,
+              duneRequestPhase: 'status_received' as const,
+              message: `Dune query ${batchesRun + 1} of ${batchesTotal || '?'} is executing · ${activeRunTradeCount} targets`,
+            };
+          })()
+        : null;
       respond(200, {
         ...copySimulationRunState,
+        ...(persistedProgress ?? {}),
         audit: latestAudit ?? null,
         persistedRun: latestSavedRun
           ? {

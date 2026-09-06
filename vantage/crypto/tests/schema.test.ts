@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { openDatabase } from '../src/platform/db/client.js';
 import { applyMigrations, latestSchemaVersion } from '../src/platform/db/schema.js';
+import { verifyDatabaseSchema } from '../src/platform/db/schemaVerification.js';
 
 test('schema initialization creates V1 tables and is idempotent', () => {
   const database = openDatabase(':memory:');
@@ -27,8 +28,6 @@ test('schema initialization creates V1 tables and is idempotent', () => {
       'copytrade_copy_simulation_match_index_runs',
       'copytrade_copy_simulation_matches',
       'copytrade_copy_simulation_runs',
-      'copytrade_data_workflow_runs',
-      'copytrade_data_workflow_steps',
       'copytrade_decision_calibration_runs',
       'copytrade_decision_calibration_wallets',
       'copytrade_dune_fetch_audits',
@@ -76,6 +75,17 @@ test('schema initialization creates V1 tables and is idempotent', () => {
     ]);
     const version = database.prepare('PRAGMA user_version').get() as { user_version: number };
     assert.equal(version.user_version, latestSchemaVersion);
+  } finally {
+    database.close();
+  }
+});
+
+test('schema verification catches drift in an existing database', () => {
+  const database = openDatabase(':memory:');
+  try {
+    verifyDatabaseSchema(database);
+    database.exec('ALTER TABLE copytrade_dune_fetch_audits DROP COLUMN gmgn_screen_rule_version');
+    assert.throws(() => verifyDatabaseSchema(database), /gmgn_screen_rule_version/);
   } finally {
     database.close();
   }

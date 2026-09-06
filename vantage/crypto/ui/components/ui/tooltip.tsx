@@ -28,11 +28,22 @@ export const TooltipContent = ({
 }: ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>) => (
   <TooltipPrimitive.Portal>
     <TooltipPrimitive.Content
+      {...props}
       side={side}
       sideOffset={sideOffset}
       collisionPadding={8}
+      // Tooltips are short, viewport-aware overlays.  Keep this invariant in
+      // the shared adapter so an older/stale stylesheet cannot turn a tooltip
+      // into a tiny scroll container with clipped facts.
+      style={{
+        ...props.style,
+        maxHeight: 'none',
+        overflow: 'visible',
+        overflowX: 'visible',
+        overflowY: 'visible',
+      }}
+      data-vantage-tooltip="true"
       className={cn('vantage-tooltip', className)}
-      {...props}
     >
       {children}
     </TooltipPrimitive.Content>

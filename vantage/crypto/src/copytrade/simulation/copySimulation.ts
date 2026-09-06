@@ -19,6 +19,31 @@ import {
 } from './canonicalCopiedBuyOutcome.js';
 import { CALCULATION_MANIFEST_VERSION, CALCULATION_VERSIONS } from '../calculationVersions.js';
 import { UNCOPYABLE_TRADE_MAX_HOLD_SECONDS } from './constants.js';
+import {
+  canonicalizeActivityType,
+  TransferAwareInventory,
+} from '../accounting/transferInventory.js';
+import {
+  COPY_PORTFOLIO_MAX_OPEN_POSITIONS,
+  COPY_PORTFOLIO_STARTING_CAPITAL_USD,
+  COPY_PORTFOLIO_STAKE_USD,
+  simulateFixedStakePortfolio,
+  type CopySimulationScenario,
+  type FixedStakePortfolioReport,
+  type FixedStakePortfolioTrade,
+} from './fixedStakePortfolio.js';
+
+export {
+  COPY_PORTFOLIO_MAX_OPEN_POSITIONS,
+  COPY_PORTFOLIO_STARTING_CAPITAL_USD,
+  COPY_PORTFOLIO_STAKE_USD,
+  simulateFixedStakePortfolio,
+};
+export type {
+  CopySimulationScenario,
+  FixedStakePortfolioReport,
+  FixedStakePortfolioTrade,
+} from './fixedStakePortfolio.js';
 
 /**
  * Historical Copy Simulation: for the top qualifying wallets, estimate what a copier —
@@ -79,249 +104,6 @@ export const DEFAULT_GAS_PRIORITY_FEE_SOL = 0.002;
  * and tests rather than being hidden as inline numbers. */
 export const TAIL_THRESHOLD_PERCENT = 100;
 export const EXTREME_TAIL_THRESHOLD_PERCENT = 300;
-export const COPY_PORTFOLIO_STARTING_CAPITAL_USD = 100;
-export const COPY_PORTFOLIO_STAKE_USD = 10;
-export const COPY_PORTFOLIO_MAX_OPEN_POSITIONS = 10;
-
-export type FixedStakePortfolioTrade = {
-  id: number;
-  entryAt: number;
-  exitAt: number;
-  returnRatio: number;
-  gasFeeSol: number;
-  gasFeeUsd?: number | null;
-  /** Optional position-aware accounting. Multiple sell fragments can share one positionId. */
-  positionId?: number;
-  stakeUsd?: number;
-  entryGasFeeSol?: number;
-  exitGasFeeSol?: number;
-  entryGasFeeUsd?: number | null;
-  exitGasFeeUsd?: number | null;
-  /** Dune mark at the period cutoff for a position that is still open. */
-  cutoffReturnRatio?: number | null;
-  isOpenAtCutoff?: boolean;
-};
-
-export type FixedStakePortfolioReport = {
-  startingCapitalUsd: number;
-  stakePerTradeUsd: number;
-  maxOpenPositions: number;
-  endingCapitalUsd: number;
-  realizedPnlUsd: number;
-  markToMarketPnlUsd?: number;
-  openPositionsMarked?: number;
-  openPositionsUnpriced?: number;
-  eligibleTrades: number;
-  copiedTrades: number;
-  skippedInsufficientCash: number;
-  skippedMaxOpenPositions: number;
-  maxConcurrentPositions: number;
-  gasFeeSol: number;
-  gasFeeUsd?: number;
-  gasCostComplete?: boolean;
-  capitalPath: { day: string; capitalUsd: number }[];
-  tradeCapitalPath?: { trade: number; tradeId?: number; day: string; capitalUsd: number }[];
-};
-
-/** Cash-constrained portfolio model: fixed $10 entries, at most ten open positions, no
- * borrowing, and no whole-bankroll reinvestment. Proportional fees and slippage are already
- * included in each returnRatio. Fixed SOL gas stays separately reported because the project
- * uses the recorded GMGN gas_usd values for each copied buy/sell when available. Open positions
- * are marked at the period cutoff only when a persisted Dune cutoff price exists; otherwise they
- * remain explicitly unpriced. Realized and mark-to-market P&L are reported separately. */
-export const simulateFixedStakePortfolio = (
-  trades: FixedStakePortfolioTrade[],
-  options: {
-    startingCapitalUsd?: number;
-    stakePerTradeUsd?: number;
-    maxOpenPositions?: number;
-  } = {},
-): FixedStakePortfolioReport => {
-  const startingCapitalUsd = options.startingCapitalUsd ?? COPY_PORTFOLIO_STARTING_CAPITAL_USD;
-  const stakePerTradeUsd = options.stakePerTradeUsd ?? COPY_PORTFOLIO_STAKE_USD;
-  const maxOpenPositions = options.maxOpenPositions ?? COPY_PORTFOLIO_MAX_OPEN_POSITIONS;
-  const valid = trades.filter(
-    (trade) => Number.isFinite(trade.returnRatio) && trade.exitAt >= trade.entryAt,
-  );
-  if (valid.length === 0)
-    return {
-      startingCapitalUsd,
-      stakePerTradeUsd,
-      maxOpenPositions,
-      endingCapitalUsd: startingCapitalUsd,
-      realizedPnlUsd: 0,
-      markToMarketPnlUsd: 0,
-      openPositionsMarked: 0,
-      openPositionsUnpriced: 0,
-      eligibleTrades: 0,
-      copiedTrades: 0,
-      skippedInsufficientCash: 0,
-      skippedMaxOpenPositions: 0,
-      maxConcurrentPositions: 0,
-      gasFeeSol: 0,
-      gasFeeUsd: 0,
-      gasCostComplete: true,
-      capitalPath: [],
-      tradeCapitalPath: [],
-    };
-
-  type PortfolioEvent = {
-    at: number;
-    kind: 'entry' | 'exit';
-    trade: FixedStakePortfolioTrade;
-    positionKey: string;
-    stakeUsd: number;
-  };
-  const stakeFor = (trade: FixedStakePortfolioTrade): number => trade.stakeUsd ?? stakePerTradeUsd;
-  const positionGroups = new Map<string, { trade: FixedStakePortfolioTrade; stakeUsd: number }>();
-  for (const trade of valid) {
-    const positionKey = String(trade.positionId ?? trade.id);
-    const group = positionGroups.get(positionKey);
-    if (group) group.stakeUsd += stakeFor(trade);
-    else positionGroups.set(positionKey, { trade, stakeUsd: stakeFor(trade) });
-  }
-  const events: PortfolioEvent[] = [];
-  for (const [positionKey, group] of positionGroups) {
-    events.push({
-      at: group.trade.entryAt,
-      kind: 'entry',
-      trade: group.trade,
-      positionKey,
-      stakeUsd: group.stakeUsd,
-    });
-  }
-  for (const trade of valid) {
-    if (trade.isOpenAtCutoff) continue;
-    events.push({
-      at: trade.exitAt,
-      kind: 'exit',
-      trade,
-      positionKey: String(trade.positionId ?? trade.id),
-      stakeUsd: stakeFor(trade),
-    });
-  }
-  events.sort(
-    (left, right) =>
-      left.at - right.at ||
-      (left.kind === right.kind ? left.trade.id - right.trade.id : left.kind === 'exit' ? -1 : 1),
-  );
-
-  let cash = startingCapitalUsd;
-  let copiedTrades = 0;
-  let skippedInsufficientCash = 0;
-  let skippedMaxOpenPositions = 0;
-  let maxConcurrentPositions = 0;
-  let gasFeeSol = 0;
-  let gasFeeUsd = 0;
-  let gasCostComplete = true;
-  const open = new Map<string, number>();
-  const acceptedPositions = new Set<string>();
-  const dailyEquity = new Map<string, number>();
-  const tradeCapitalPath: { trade: number; tradeId?: number; day: string; capitalUsd: number }[] =
-    [];
-  const firstDay = new Date(events[0].at * 1000).toISOString().slice(0, 10);
-  const equity = (): number => cash + [...open.values()].reduce((sum, value) => sum + value, 0);
-
-  for (const event of events) {
-    if (event.kind === 'entry') {
-      if (open.size >= maxOpenPositions) {
-        skippedMaxOpenPositions += 1;
-        continue;
-      }
-      if (cash + 1e-9 < event.stakeUsd) {
-        skippedInsufficientCash += 1;
-        continue;
-      }
-      cash -= event.stakeUsd;
-      open.set(event.positionKey, event.stakeUsd);
-      acceptedPositions.add(event.positionKey);
-      maxConcurrentPositions = Math.max(maxConcurrentPositions, open.size);
-      if (event.trade.entryGasFeeSol !== undefined) {
-        gasFeeSol += event.trade.entryGasFeeSol;
-        if (event.trade.entryGasFeeUsd == null) gasCostComplete = false;
-        else {
-          gasFeeUsd += event.trade.entryGasFeeUsd;
-          cash -= event.trade.entryGasFeeUsd;
-        }
-      }
-    } else if (acceptedPositions.has(event.positionKey)) {
-      const remaining = open.get(event.positionKey) ?? 0;
-      if (remaining <= 0) continue;
-      const stakeUsd = Math.min(event.stakeUsd, remaining);
-      cash += stakeUsd * Math.max(0, 1 + event.trade.returnRatio);
-      open.set(event.positionKey, Math.max(0, remaining - stakeUsd));
-      if (open.get(event.positionKey) === 0) open.delete(event.positionKey);
-      copiedTrades += 1;
-      if (event.trade.exitGasFeeSol !== undefined) {
-        gasFeeSol += event.trade.exitGasFeeSol;
-        if (event.trade.exitGasFeeUsd == null) gasCostComplete = false;
-        else {
-          gasFeeUsd += event.trade.exitGasFeeUsd;
-          cash -= event.trade.exitGasFeeUsd;
-        }
-      } else {
-        cash -= event.trade.gasFeeUsd ?? 0;
-        gasFeeSol += event.trade.gasFeeSol;
-        if (event.trade.gasFeeUsd == null) gasCostComplete = false;
-        else gasFeeUsd += event.trade.gasFeeUsd;
-      }
-      tradeCapitalPath.push({
-        trade: tradeCapitalPath.length + 1,
-        tradeId: event.trade.id,
-        day: new Date(event.at * 1000).toISOString(),
-        capitalUsd: round(equity(), 2),
-      });
-    }
-    const day = new Date(event.at * 1000).toISOString().slice(0, 10);
-    dailyEquity.set(day, equity());
-  }
-
-  let markToMarketPnlUsd = 0;
-  let openPositionsMarked = 0;
-  let openPositionsUnpriced = 0;
-  for (const [positionKey, remainingStake] of open) {
-    const entry = positionGroups.get(positionKey)?.trade;
-    if (
-      entry?.cutoffReturnRatio === null ||
-      entry?.cutoffReturnRatio === undefined ||
-      !Number.isFinite(entry.cutoffReturnRatio)
-    ) {
-      openPositionsUnpriced += 1;
-      continue;
-    }
-    cash += remainingStake * Math.max(0, 1 + entry.cutoffReturnRatio);
-    markToMarketPnlUsd += remainingStake * entry.cutoffReturnRatio;
-    open.delete(positionKey);
-    openPositionsMarked += 1;
-  }
-  const endingCapitalUsd = round(equity(), 2);
-  return {
-    startingCapitalUsd,
-    stakePerTradeUsd,
-    maxOpenPositions,
-    endingCapitalUsd,
-    realizedPnlUsd: round(endingCapitalUsd - startingCapitalUsd - markToMarketPnlUsd, 2),
-    markToMarketPnlUsd: round(markToMarketPnlUsd, 2),
-    openPositionsMarked,
-    openPositionsUnpriced,
-    eligibleTrades: valid.length,
-    copiedTrades,
-    skippedInsufficientCash,
-    skippedMaxOpenPositions,
-    maxConcurrentPositions,
-    gasFeeSol: round(gasFeeSol, 6),
-    gasFeeUsd: round(gasFeeUsd, 2),
-    gasCostComplete,
-    tradeCapitalPath,
-    capitalPath: [
-      { day: `${firstDay} start`, capitalUsd: startingCapitalUsd },
-      ...[...dailyEquity.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([day, capitalUsd]) => ({ day, capitalUsd: round(capitalUsd, 2) })),
-    ],
-  };
-};
-
 type TradeRow = {
   id: number;
   walletAddress: string;
@@ -385,10 +167,15 @@ const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): R
     remainingAmount: number | null;
   };
   const buysByWalletToken = new Map<string, BuyLot[]>();
+  const inventoryByWallet = new Map<string, TransferAwareInventory>();
   const roundTrips: RoundTrip[] = [];
   for (const row of rows) {
     const key = `${row.walletAddress}|${row.tokenAddress}`;
-    if (row.eventType === 'buy') {
+    const canonicalType = canonicalizeActivityType(row.eventType);
+    const inventory = inventoryByWallet.get(row.walletAddress) ?? new TransferAwareInventory();
+    inventoryByWallet.set(row.walletAddress, inventory);
+    const resolved = inventory.apply(row);
+    if (canonicalType === 'buy') {
       const amount = parseAmount(row.tokenAmount);
       const list = buysByWalletToken.get(key) ?? [];
       list.push({
@@ -404,9 +191,22 @@ const pairRoundTrips = (rows: TradeRow[], openPositions: OpenPosition[] = []): R
       buysByWalletToken.set(key, list);
       continue;
     }
-    if (row.eventType !== 'sell') continue;
+    if (canonicalType !== 'sell') continue;
     const lots = buysByWalletToken.get(key) ?? [];
-    if (!lots.length) continue; // no resolvable entry — excluded, not zeroed
+    if (!lots.length || resolved?.eligible !== true) {
+      // Consume known lots even when the sell is excluded, so a later sell cannot reuse inventory
+      // that was already sold through an unknown transfer-in position.
+      const sellAmount = parseAmount(row.tokenAmount);
+      let remaining = sellAmount !== null && sellAmount > 0 ? sellAmount : null;
+      for (const buy of lots) {
+        if (buy.remainingAmount === null || remaining === null) continue;
+        const consumed = Math.min(remaining, buy.remainingAmount);
+        buy.remainingAmount -= consumed;
+        remaining -= consumed;
+        if (remaining <= 1e-9) break;
+      }
+      continue; // no proven cost basis — excluded, not zeroed
+    }
 
     const proceeds = parseAmount(row.costUsd);
     const costBasis = parseAmount(row.buyCostUsd);
@@ -483,7 +283,7 @@ const readTradeRows = (
             token_address AS tokenAddress, token_symbol AS tokenSymbol, token_amount AS tokenAmount, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd,
             price_usd AS priceUsd, gas_usd AS gasUsd
      FROM copytrade_trades
-     WHERE chain = ? AND wallet_address IN (${placeholders}) AND event_type IN ('buy', 'sell')
+     WHERE chain = ? AND wallet_address IN (${placeholders}) AND event_type IN ('buy', 'sell', 'transfer_in')
      ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
     )
     .all(chain, ...walletAddresses) as unknown as TradeRow[];
@@ -951,6 +751,8 @@ export type CopySimulationWalletReport = {
   localHistoryStopReason?: string | null;
   /** The realistic small-account result using the same delayed Dune prices as the trade stats. */
   portfolio: FixedStakePortfolioReport;
+  /** Pure replay inputs exposed once so clients can run amount scenarios without Dune/API calls. */
+  replayTrades?: FixedStakePortfolioTrade[];
   /** Exact chronological portfolio rerun after excluding the best copied-buy position. */
   portfolioWithoutBestTradeEndingCapitalUsd?: number | null;
   /** Exact chronological portfolio rerun after excluding sub-60-second copied round trips. */
@@ -1000,6 +802,8 @@ export type CopySimulationReport = {
     stakePerTradeUsd: number;
     maxOpenPositions: number;
   };
+  /** Scenario parameters when this report was explicitly run with a local scenario. */
+  scenario?: CopySimulationScenario;
   wallets: CopySimulationWalletReport[];
 };
 
@@ -1200,6 +1004,8 @@ export const computeCopySimulationReport = (
     feeBps?: number;
     slippageBps?: number;
     gasPriorityFeeSolPerTx?: number;
+    /** Optional local scenario. Omitted callers retain the canonical $100/$10 baseline. */
+    scenario?: CopySimulationScenario;
     now?: Date;
     onMatchIndexProgress?: (progress: {
       completedRuns: number;
@@ -1214,6 +1020,9 @@ export const computeCopySimulationReport = (
   const feeBps = options.feeBps ?? DEFAULT_FEE_BPS;
   const slippageBps = options.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
   const gasPriorityFeeSolPerTx = options.gasPriorityFeeSolPerTx ?? DEFAULT_GAS_PRIORITY_FEE_SOL;
+  const startingCapitalUsd =
+    options.scenario?.startingBankrollUsd ?? COPY_PORTFOLIO_STARTING_CAPITAL_USD;
+  const stakePerTradeUsd = options.scenario?.copyAmountUsd ?? COPY_PORTFOLIO_STAKE_USD;
   const now = options.now ?? new Date();
 
   const roundTrips = readRecentRoundTrips(
@@ -1331,7 +1140,7 @@ export const computeCopySimulationReport = (
         sellAt,
         holdSeconds: Math.max(0, trip.sellAt - trip.buyAt),
         walletReturnPercent,
-        copyStakeUsd: round(COPY_PORTFOLIO_STAKE_USD * trip.copyFraction, 4),
+        copyStakeUsd: round(stakePerTradeUsd * trip.copyFraction, 4),
         edgeKeptPercent: null as number | null,
         entryMatchedAt: entryMatch?.matchedTradeAt ?? null,
         exitMatchedAt: exitMatch?.matchedTradeAt ?? null,
@@ -1429,7 +1238,8 @@ export const computeCopySimulationReport = (
         exitAt: trip.sellAt + delaySeconds,
         returnRatio: simulatedRatio,
         positionId: trip.buyTradeId,
-        stakeUsd: COPY_PORTFOLIO_STAKE_USD * trip.copyFraction,
+        copyFraction: trip.copyFraction,
+        stakeUsd: stakePerTradeUsd * trip.copyFraction,
         entryGasFeeSol: gasPriorityFeeSolPerTx,
         exitGasFeeSol: gasPriorityFeeSolPerTx,
         entryGasFeeUsd: trip.buyGasUsd,
@@ -1476,7 +1286,8 @@ export const computeCopySimulationReport = (
         entryAt: position.buyAt + delaySeconds,
         exitAt: now.getTime() / 1000,
         returnRatio: 0,
-        stakeUsd: COPY_PORTFOLIO_STAKE_USD * position.remainingFraction,
+        copyFraction: position.remainingFraction,
+        stakeUsd: stakePerTradeUsd * position.remainingFraction,
         entryGasFeeSol: gasPriorityFeeSolPerTx,
         entryGasFeeUsd: null,
         cutoffReturnRatio,
@@ -1563,7 +1374,14 @@ export const computeCopySimulationReport = (
           : coverageStatus === 'no_dune_match'
             ? 'Dune was queried, but no usable trade matched the precise window.'
             : coverageStatus === 'partially_covered'
-              ? `${notQueriedCount} trades still need Dune data.`
+              ? [
+                  notQueriedCount > 0
+                    ? `${notQueriedCount} trades are still pending Dune.`
+                    : 'No trades are pending Dune.',
+                  noMatchCount > 0 ? `${noMatchCount} trades have no usable Dune match.` : null,
+                ]
+                  .filter((detail): detail is string => detail !== null)
+                  .join(' ')
               : 'Every paired trade has a usable Dune match.';
 
     // Keep the canonical one-buy aggregation beside the legacy per-fragment report fields. This
@@ -1602,10 +1420,14 @@ export const computeCopySimulationReport = (
         (left, right) =>
           (right.simulatedReturnRatio ?? -Infinity) - (left.simulatedReturnRatio ?? -Infinity),
       )[0];
-    const portfolio = simulateFixedStakePortfolio(portfolioTrades);
+    const portfolio = simulateFixedStakePortfolio(portfolioTrades, {
+      startingCapitalUsd,
+      stakePerTradeUsd,
+    });
     const portfolioWithoutBestTradeEndingCapitalUsd = bestCanonicalOutcome
       ? simulateFixedStakePortfolio(
           portfolioTrades.filter((trade) => trade.positionId !== bestCanonicalOutcome.buyTradeId),
+          { startingCapitalUsd, stakePerTradeUsd },
         ).endingCapitalUsd
       : null;
     const uncopyableTradeIds = new Set(
@@ -1621,6 +1443,7 @@ export const computeCopySimulationReport = (
     );
     const portfolioWithoutUncopyableTradesEndingCapitalUsd = simulateFixedStakePortfolio(
       portfolioTrades.filter((trade) => !uncopyableTradeIds.has(trade.id)),
+      { startingCapitalUsd, stakePerTradeUsd },
     ).endingCapitalUsd;
     const portfolioProfitUsd = portfolio.endingCapitalUsd - portfolio.startingCapitalUsd;
     const uncopyableProfitDependencyPercent =
@@ -1663,6 +1486,7 @@ export const computeCopySimulationReport = (
       localHistoryTruncated,
       localHistoryStopReason: coverage?.stopReason ?? null,
       portfolio,
+      replayTrades: portfolioTrades,
       portfolioWithoutBestTradeEndingCapitalUsd,
       portfolioWithoutUncopyableTradesEndingCapitalUsd,
       uncopyableTradeCount: uncopyableTradeIds.size,
@@ -1702,10 +1526,11 @@ export const computeCopySimulationReport = (
       maxMatchGapSeconds: MAX_MATCH_GAP_SECONDS,
       maxRoundTripsPerWallet: null,
       ...(options.periodDays ? { periodDays: options.periodDays } : {}),
-      startingCapitalUsd: COPY_PORTFOLIO_STARTING_CAPITAL_USD,
-      stakePerTradeUsd: COPY_PORTFOLIO_STAKE_USD,
+      startingCapitalUsd,
+      stakePerTradeUsd,
       maxOpenPositions: COPY_PORTFOLIO_MAX_OPEN_POSITIONS,
     },
+    ...(options.scenario ? { scenario: options.scenario } : {}),
     wallets,
   };
 };

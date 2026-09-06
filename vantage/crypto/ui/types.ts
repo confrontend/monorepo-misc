@@ -1,4 +1,8 @@
 import type { PatternDiscoveryProgressView } from './components/PatternDiscoveryProgressPanel.js';
+import type {
+  CopySimulationScenario,
+  FixedStakePortfolioTrade,
+} from '../src/copytrade/simulation/fixedStakePortfolio.js';
 
 export type ScrutinyCheck<M> = {
   key: string;
@@ -421,7 +425,7 @@ export type GmgnStatsFetchStatus = {
   walletTotal: number;
   periods: string[];
   requestsMade: number;
-  skippedFresh: number;
+  skippedExisting: number;
   error: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -1209,6 +1213,8 @@ export type FixedStakePortfolioReport = {
   skippedInsufficientCash: number;
   skippedMaxOpenPositions: number;
   maxConcurrentPositions: number;
+  maxConcurrentCapitalUsd?: number;
+  totalCapitalDeployedUsd?: number;
   gasFeeSol: number;
   gasFeeUsd?: number;
   gasCostComplete?: boolean;
@@ -1245,6 +1251,7 @@ export type CopySimulationWalletReport = {
   totalGasFeeUsd?: number | null;
   gasCostComplete?: boolean;
   portfolio?: FixedStakePortfolioReport;
+  replayTrades?: FixedStakePortfolioTrade[];
   trades: CopySimulationTradeResult[];
   pendingDuneTargets?: number;
   duneNoMatchTargets?: number;
@@ -1268,6 +1275,7 @@ export type CopySimulationReport = {
     stakePerTradeUsd: number;
     maxOpenPositions: number;
   };
+  scenario?: CopySimulationScenario;
   wallets: CopySimulationWalletReport[];
 };
 
@@ -1449,12 +1457,7 @@ export type DuneCoverageSummary = {
 } | null;
 
 export type CopyTradeSubTab =
-  | 'data'
-  | 'pattern-discovery'
-  | 'api-reference'
-  | 'experimental-decision'
-  | 'live-evaluation'
-  | 'solana-benchmark';
+  'data' | 'api-reference' | 'experimental-decision' | 'live-evaluation' | 'solana-benchmark';
 
 export type DecisionColumnKey =
   | 'rank'

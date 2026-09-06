@@ -1,3 +1,5 @@
+import { canonicalizeActivityType } from '../accounting/transferInventory.js';
+
 /**
  * Deterministic local sampling for copy-trade research.
  *
@@ -116,6 +118,23 @@ export const selectRepresentativeTrades = <T extends RepresentativeTradeRow>(
           selected.set(`${buy.id ?? ''}|${buy.observedTimestamp}|${buy.tokenAddress}|buy`, buy);
           break;
         }
+      }
+    }
+    // Transfer-in rows are evidence, not trades. Retain them so the shared inventory resolver can
+    // mark a later sell as cost-basis uncertain instead of silently losing the contamination during
+    // representative sampling.
+    for (const transfer of orderedRows) {
+      if (canonicalizeActivityType(transfer.eventType) !== 'transfer_in') continue;
+      const hasLaterSelectedSell = selectedSells.some(
+        (sell) =>
+          sell.tokenAddress === transfer.tokenAddress &&
+          sell.observedTimestamp >= transfer.observedTimestamp,
+      );
+      if (hasLaterSelectedSell) {
+        selected.set(
+          `${transfer.id ?? ''}|${transfer.observedTimestamp}|${transfer.tokenAddress}|transfer_in`,
+          transfer,
+        );
       }
     }
     output.push(...[...selected.values()].sort(stableRowOrder));

@@ -10,6 +10,7 @@ import {
   recordEvaluationHistory,
   shouldRecordEvaluationHistory,
 } from '../../copytrade/liveEvaluationHistory.js';
+import { readPersistedCopySimulationStatus } from '../../copytrade/simulation/copySimulationStatus.js';
 export interface SimulationRouteRequest {
   method: string | undefined;
   url: URL;
@@ -150,8 +151,9 @@ export const createSimulationRoutes = (): SimulationRoute[] => [
         processed: Number(row.processed) || 0,
       }));
     }
+    const statusState = readPersistedCopySimulationStatus(database, getRunState());
     respond(200, {
-      ...getRunState(),
+      ...statusState,
       ...(walletProgress ? { walletProgress } : {}),
       audit: latestAudit,
       persistedRun: latestSavedRun

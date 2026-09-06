@@ -1774,10 +1774,92 @@ html[data-theme='light'] .live-evaluation-score-difference {
 .copytrade-dune-live-progress span {
   display: block;
 }
+.copytrade-dune-progress-line {
+  display: flex !important;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.copytrade-dune-live-progress small {
+  color: #9ebaae;
+  line-height: 1.4;
+}
 .copytrade-dune-live-progress progress {
   width: min(100%, 520px);
   height: 7px;
   accent-color: #72d8af;
+}
+.copytrade-data-fetch-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+.copytrade-data-fetch-toolbar .copytrade-filter-label {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 11rem;
+  color: #b7d7c6;
+  font-size: 0.78rem;
+}
+.copytrade-data-fetch-toolbar .copytrade-filter-label input {
+  width: 11rem;
+  min-height: 2.25rem;
+  box-sizing: border-box;
+  padding: 0.35rem 0.55rem;
+}
+.copytrade-data-fetch-toolbar .copytrade-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  white-space: nowrap;
+  color: #b7d7c6;
+  font-size: 0.78rem;
+}
+.copytrade-data-fetch-toolbar > .primary {
+  flex: 1 1 100%;
+}
+.copytrade-stage-collapsed {
+  padding: 0;
+}
+.copytrade-stage-collapsed-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.copytrade-stage-collapsed-toggle span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.copytrade-stage-collapsed-toggle small {
+  color: #9ebaae;
+}
+.copytrade-stage-collapsed-toggle > span:last-child,
+.copytrade-stage-collapse-button {
+  color: #72d8af;
+  font-size: 12px;
+}
+.copytrade-stage-collapse-button {
+  margin-bottom: 12px;
+}
+.copytrade-score-tooltip-trigger {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 .copytrade-dune-summary {
   display: flex;
@@ -1835,65 +1917,6 @@ html[data-theme='light'] .live-evaluation-score-difference {
   overflow: hidden;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
-.data-workflow-wallet-selection-modal {
-  width: min(980px, 94vw);
-}
-.data-workflow-wallet-selection-table {
-  max-height: min(58vh, 560px);
-}
-.data-workflow-wallet-selection-table th:first-child,
-.data-workflow-wallet-selection-table td:first-child {
-  width: 2.5rem;
-  min-width: 2.5rem;
-  text-align: center;
-}
-.data-workflow-wallet-selection-table th:nth-child(2),
-.data-workflow-wallet-selection-table td:nth-child(2) {
-  width: 4.5rem;
-  white-space: nowrap;
-}
-.data-workflow-wallet-selection-table th:nth-child(3),
-.data-workflow-wallet-selection-table td:nth-child(3) {
-  width: 9rem;
-}
-.data-workflow-wallet-selection-table th:nth-child(4),
-.data-workflow-wallet-selection-table td:nth-child(4) {
-  width: 16rem;
-}
-.data-workflow-wallet-selection-table th:nth-child(5),
-.data-workflow-wallet-selection-table td:nth-child(5) {
-  width: 12rem;
-  white-space: normal;
-}
-.data-workflow-wallet-selection-table th:nth-child(6),
-.data-workflow-wallet-selection-table td:nth-child(6) {
-  width: 7rem;
-  white-space: nowrap;
-}
-.data-workflow-wallet-selection-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.7rem 1rem;
-  padding: 0.65rem 0;
-  color: #b7e8d2;
-  font-size: 0.78rem;
-}
-.data-workflow-wallet-selection-filters label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.data-workflow-wallet-selection-checkbox-filter {
-  color: #dff8ea;
-  font-weight: 700;
-}
-.data-workflow-wallet-selection-filters input[type='number'] {
-  width: 7rem;
-}
-.data-workflow-wallet-selection-filters small {
-  color: #91aa9e;
-}
 .dune-wallet-selection-summary {
   display: flex;
   align-items: center;
@@ -1902,54 +1925,6 @@ html[data-theme='light'] .live-evaluation-score-difference {
 }
 .dune-wallet-selection-summary strong {
   color: #72d8af;
-}
-.data-workflow-fetch-estimate {
-  display: grid;
-  gap: 0.2rem;
-  margin: 0.35rem 0 0.25rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid rgba(114, 216, 175, 0.25);
-  border-radius: 0.45rem;
-  background: rgba(114, 216, 175, 0.06);
-  color: #b7e8d2;
-  font-size: 0.78rem;
-}
-.data-workflow-fetch-estimate small {
-  color: #91aa9e;
-  line-height: 1.35;
-}
-.copytrade-workflow-external-blocker {
-  display: grid;
-  gap: 0.25rem;
-  margin: 0.8rem 0;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(240, 200, 117, 0.42);
-  border-radius: 0.45rem;
-  background: rgba(95, 69, 28, 0.18);
-  color: #e7d4a9;
-}
-.copytrade-workflow-external-blocker strong {
-  color: #f0c875;
-}
-.copytrade-workflow-external-blocker small {
-  color: #c8b995;
-  line-height: 1.35;
-}
-.copytrade-workflow-state-warning {
-  display: grid;
-  gap: 0.25rem;
-  margin: 0.8rem 0;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(241, 125, 130, 0.42);
-  border-radius: 0.45rem;
-  background: rgba(96, 28, 35, 0.18);
-  color: #ffd7d9;
-}
-.copytrade-workflow-state-warning strong {
-  color: #ff9da1;
-}
-.copytrade-workflow-state-warning small {
-  line-height: 1.35;
 }
 .dune-wallet-selection-toggle {
   display: inline-flex;
@@ -1997,8 +1972,28 @@ html[data-theme='light'] .live-evaluation-score-difference {
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-.data-workflow-wallet-selection-table td:nth-child(5) {
+.table-wrap th .sortable-header,
+.copytrade-data-fetch-table th .sortable-header {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.table-wrap th .sortable-header:hover,
+.copytrade-data-fetch-table th .sortable-header:hover,
+.table-wrap th .sortable-header:focus-visible,
+.copytrade-data-fetch-table th .sortable-header:focus-visible {
+  color: #72d8af;
 }
 .dune-wallet-selection-table th:first-child,
 .dune-wallet-selection-table td:first-child {
@@ -6214,6 +6209,34 @@ footer {
   color: #9ab5aa;
   line-height: 1.35;
 }
+.copytrade-fetch-detail {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(114, 216, 175, 0.24);
+  border-radius: 0.45rem;
+  background: rgba(8, 22, 17, 0.35);
+}
+.copytrade-fetch-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+}
+.copytrade-fetch-detail-header span,
+.copytrade-fetch-detail small {
+  color: #9ab5aa;
+}
+.copytrade-fetch-detail progress {
+  width: 100%;
+  height: 0.55rem;
+  accent-color: #72d8af;
+}
+.copytrade-fetch-detail small {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .copytrade-workflow-row > .copytrade-screening-summary {
   grid-column: 1 / -1;
   margin: 0.15rem 0 0;
@@ -6687,6 +6710,117 @@ footer {
   background: linear-gradient(135deg, rgba(28, 61, 49, 0.78), rgba(16, 31, 27, 0.92));
   color: #e4f4e9;
 }
+
+.scenario-replay-panel {
+  margin: 0.85rem 0 1rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(114, 216, 175, 0.3);
+  border-radius: 0.65rem;
+  background: rgba(8, 26, 20, 0.72);
+}
+.scenario-replay-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.scenario-replay-heading h3 {
+  margin: 0.15rem 0 0.15rem;
+  font-size: 1rem;
+}
+.scenario-replay-heading small {
+  color: #a8c7b9;
+}
+.scenario-replay-badge {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(244, 199, 96, 0.45);
+  border-radius: 999px;
+  color: #f4d98e;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+.scenario-replay-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+.scenario-replay-controls label {
+  display: grid;
+  gap: 0.25rem;
+  color: #b9dfce;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.scenario-replay-controls input {
+  width: 8rem;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid rgba(114, 216, 175, 0.4);
+  border-radius: 0.35rem;
+  background: #102a20;
+  color: #ecfff7;
+}
+.scenario-replay-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.scenario-replay-presets button {
+  padding: 0.42rem 0.55rem;
+  border: 1px solid rgba(114, 216, 175, 0.35);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: #b9dfce;
+  cursor: pointer;
+}
+.scenario-replay-presets button.active,
+.scenario-replay-presets button:hover {
+  background: rgba(114, 216, 175, 0.18);
+  color: #ecfff7;
+}
+.scenario-replay-results {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+.scenario-replay-results > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.45rem;
+  border-radius: 0.35rem;
+  background: rgba(114, 216, 175, 0.08);
+}
+.scenario-replay-results span {
+  color: #93b8a8;
+  font-size: 0.68rem;
+}
+.scenario-replay-results strong {
+  color: #ecfff7;
+  font-size: 0.86rem;
+}
+.scenario-replay-results strong.positive {
+  color: #72d8af;
+}
+.scenario-replay-results strong.negative {
+  color: #ff9aa3;
+}
+.scenario-replay-warning {
+  display: block;
+  margin-top: 0.65rem;
+  color: #f4d98e;
+}
+@media (max-width: 700px) {
+  .scenario-replay-heading {
+    display: grid;
+  }
+  .scenario-replay-results {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .experimental-model-block {
   display: flex;
   align-items: flex-start;
@@ -6932,6 +7066,8 @@ footer {
   position: relative;
   display: inline-block;
   outline: none;
+  border-bottom: 1px dotted rgba(114, 216, 170, 0.8);
+  cursor: help;
 }
 .experimental-facts-cell {
   min-width: 7.5rem;
@@ -6947,7 +7083,11 @@ footer {
 }
 .experimental-table-tooltip {
   box-sizing: border-box;
-  width: min(27rem, calc(100vw - 2rem));
+  width: min(30rem, calc(100vw - 2rem));
+  max-width: min(30rem, calc(100vw - 2rem));
+  min-width: 0;
+  position: relative;
+  z-index: 10000;
   padding: 0.7rem 0.8rem;
   border: 1px solid rgba(114, 216, 170, 0.42);
   border-radius: 0.5rem;
@@ -6963,10 +7103,14 @@ footer {
      per line. `break-word` still wraps long unbroken tokens (a hash, a long number) but prefers
      word boundaries first, so a squeezed column wraps onto a few readable lines instead of
      collapsing to zero width. Applies to every descendant (small/p/em) in this shared tooltip. */
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   pointer-events: none;
-  max-height: min(22rem, calc(100vh - 3rem));
-  overflow-y: auto;
+  /* Tooltips are overlays, not scroll containers. Keep the full explanation visible and let the
+     Radix collision handler reposition it when it is close to a viewport edge. */
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-x: visible !important;
+  overflow-y: visible !important;
 }
 .experimental-table-tooltip > b {
   display: block;
@@ -6976,14 +7120,17 @@ footer {
 }
 .experimental-table-tooltip > span {
   display: grid;
-  /* Both flexible columns get a genuine floor (6rem), not `minmax(0, ...)` -- a bare 0 floor is
-     what let one of them get squeezed to zero and trigger the collapse above. 8rem label + two
-     6rem floors = 20rem, comfortably inside the tooltip's `min(27rem, ...)` width budget. */
-  grid-template-columns: 8rem minmax(6rem, 1fr) minmax(6rem, max-content);
+  /* Keep all three columns shrinkable so long values wrap instead of creating a horizontal
+     scrollbar. The tooltip remains a single readable overlay at every viewport width. */
+  grid-template-columns: minmax(8rem, 0.9fr) minmax(0, 1.2fr) minmax(5rem, 0.8fr);
   gap: 0.35rem;
   align-items: baseline;
   padding: 0.28rem 0;
   border-top: 1px solid rgba(143, 169, 156, 0.15);
+}
+.experimental-table-tooltip > span > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .experimental-table-tooltip strong {
   color: #e4f4e9;
@@ -7003,7 +7150,7 @@ footer {
   margin: 0;
   color: #9fbcad;
   line-height: 1.35;
-  white-space: normal;
+  white-space: pre-line;
 }
 .experimental-scrutiny-tooltip .experimental-table-tooltip {
   width: min(18rem, calc(100vw - 2rem));
@@ -7168,6 +7315,14 @@ footer {
 .experimental-table-tooltip-portal {
   z-index: 10000;
   max-width: min(27rem, calc(100vw - 2rem));
+}
+
+/* Radix renders tooltip content through a fixed-position wrapper. Keep that
+   wrapper shrinkable so long fact labels wrap inside the viewport rather than
+   producing a second horizontal/vertical scroll container. */
+[data-radix-popper-content-wrapper]:has(> [data-vantage-tooltip='true']) {
+  min-width: 0 !important;
+  max-width: calc(100vw - 1rem) !important;
 }
 .experimental-detail-score-grid {
   display: grid;
@@ -7796,10 +7951,24 @@ html[data-theme='light'] .api-reference-entry summary code {
 }
 
 .vantage-tooltip {
+  min-width: 0;
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-x: visible !important;
+  overflow-y: visible !important;
+  white-space: normal;
+  overflow-wrap: anywhere;
   padding: 0.45rem 0.65rem;
   font-size: 0.8rem;
   line-height: 1.35;
   pointer-events: none;
+}
+
+/* The detailed Decision Lab facts tooltip gets a little more room than the
+   compact shared tooltip while still staying inside the viewport. */
+.vantage-tooltip.experimental-table-tooltip {
+  width: min(30rem, calc(100vw - 2rem));
+  max-width: min(30rem, calc(100vw - 2rem));
 }
 
 .vantage-popover,

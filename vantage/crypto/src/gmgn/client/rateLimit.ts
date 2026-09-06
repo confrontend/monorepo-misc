@@ -1,13 +1,13 @@
 /**
  * Process-wide GMGN request gate.
  *
- * GMGN's Trading API documentation specifies one request every five seconds per API key. All
- * server-side GMGN CLI calls use this same gate, so leaderboard, wallet activity/stats, signal
- * capture, and probes cannot start requests back-to-back inside this process. This is a request-
- * start interval, not a timeout: a slow request may still be in flight when the next slot opens.
+ * Experimental request gate for the server-side GMGN calls. We use a one-second start interval
+ * to measure whether the provider tolerates a faster cadence; HTTP 429 responses still stop the
+ * run and persist a resumable rate-limit state. This is a request-start interval, not a timeout:
+ * a slow request may still be in flight when the next slot opens.
  * Browser-extension traffic and separately started Node processes are outside this server gate.
  */
-export const GMGN_REQUEST_SPACING_MS = 5_000;
+export const GMGN_REQUEST_SPACING_MS = 1_000;
 
 let nextGmgnRequestAt = 0;
 let gmgnRequestQueue: Promise<void> = Promise.resolve();

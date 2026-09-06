@@ -6,6 +6,10 @@ import {
   type PeriodPerformance,
   type ProfitConcentration,
 } from './evaluate.js';
+import {
+  canonicalizeActivityType,
+  TransferAwareInventory,
+} from '../accounting/transferInventory.js';
 
 const DAY_SECONDS = 86_400;
 const MIN_HISTORY_DAYS = 30;
@@ -18,6 +22,7 @@ export type HistoricalConsistencyTrade = {
   observedTimestamp: number;
   eventType: string;
   tokenAddress: string;
+  tokenAmount?: string | number | null;
   tokenSymbol?: string | null;
   costUsd?: string | number | null;
   buyCostUsd?: string | number | null;
@@ -152,10 +157,30 @@ const classify = (
   return 'consistently_negative';
 };
 
-const completeTrades = (trades: HistoricalConsistencyTrade[]): CompletedTrade[] =>
-  trades
-    .filter((trade) => trade.eventType === 'sell')
+const completeTrades = (trades: HistoricalConsistencyTrade[]): CompletedTrade[] => {
+  const inventories = new Map<string, TransferAwareInventory>();
+  return trades
     .map((trade, index) => {
+      const inventory = inventories.get(trade.walletAddress) ?? new TransferAwareInventory();
+      inventories.set(trade.walletAddress, inventory);
+      const resolved = inventory.apply({
+        id: trade.id,
+        eventType: trade.eventType,
+        tokenAddress: trade.tokenAddress,
+        observedTimestamp: trade.observedTimestamp,
+        tokenAmount:
+          trade.tokenAmount === undefined || trade.tokenAmount === null
+            ? null
+            : String(trade.tokenAmount),
+        costUsd:
+          trade.costUsd === undefined || trade.costUsd === null ? null : String(trade.costUsd),
+        buyCostUsd:
+          trade.buyCostUsd === undefined || trade.buyCostUsd === null
+            ? null
+            : String(trade.buyCostUsd),
+      });
+      if (canonicalizeActivityType(trade.eventType) !== 'sell' || resolved?.eligible !== true)
+        return null;
       const proceeds = parseAmount(trade.costUsd);
       const costBasis = parseAmount(trade.buyCostUsd);
       if (proceeds === null || costBasis === null || costBasis <= 0) return null;
@@ -173,6 +198,7 @@ const completeTrades = (trades: HistoricalConsistencyTrade[]): CompletedTrade[] 
     })
     .filter((trade): trade is CompletedTrade => trade !== null)
     .sort((left, right) => left.timestamp - right.timestamp || left.sourceId - right.sourceId);
+};
 
 const splitWallet = (
   trades: CompletedTrade[],
@@ -324,7 +350,7 @@ export const readHistoricalConsistencyForWallets = (
   const rows = database
     .prepare(
       `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
-              event_type AS eventType, token_address AS tokenAddress,
+              event_type AS eventType, token_address AS tokenAddress, token_amount AS tokenAmount,
               token_symbol AS tokenSymbol, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
        FROM copytrade_trades
        WHERE chain = 'sol' AND wallet_address IN (${placeholders})

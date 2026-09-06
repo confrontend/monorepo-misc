@@ -1,15 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import { GmgnTag } from './GmgnTag.js';
-import { WalletDataCoveragePanel } from './WalletDataCoveragePanel.js';
-import { DataStatusSummary } from './data/DataStatusSummary.js';
 import { Input } from './ui/input.js';
 import { Switch } from './ui/switch.js';
-import { Checkbox } from './ui/checkbox.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip.js';
 import { strings } from '../strings.js';
 import type { ApiClient } from '../httpClient.js';
+import { ScenarioReplayPanel } from './ScenarioReplayPanel.js';
+import type { FixedStakePortfolioTrade } from '../../src/copytrade/simulation/fixedStakePortfolio.js';
 
 type LabWallet = {
   walletAddress: string;
@@ -18,6 +17,11 @@ type LabWallet = {
   tags?: string[];
   evidence: { level: 'complete' | 'partial' | 'insufficient' | 'missing'; detail: string };
   candidateStatus: 'eligible' | 'rejected' | 'insufficient_evidence' | 'missing_evidence';
+  gmgnScreen: {
+    ruleVersion: string;
+    classification: 'POTENTIAL' | 'REJECTED_PRE_DUNE' | 'UNPROVEN';
+    reasons: string[];
+  };
   winnerPolicy: {
     policyVersion: string;
     status: 'WINNER' | 'REJECTED' | 'UNPROVEN';
@@ -150,6 +154,7 @@ type LabWallet = {
     matchedRoundTrips: number;
     roundTripsConsidered: number;
   };
+  scenarioReplayTrades?: FixedStakePortfolioTrade[];
   scrutiny: {
     pass: number;
     fail: number;
@@ -198,7 +203,7 @@ type LabResponse = {
   winnerPolicyVersion: string;
   methodology: string[];
   weighting?: {
-    mode: 'fixed-fallback' | 'validated-patterns';
+    mode: 'neutral-fallback' | 'validated-patterns';
     weights: { edge: number; consistency: number; robustness: number; copyability: number };
     detail: string;
     supportingThresholds: number[];
@@ -284,6 +289,52 @@ const coverageQualityExplanation = (status: string): string => {
   }
 };
 const score = (value: number | null) => (value === null ? '—' : `${Math.round(value)}`);
+const compactTooltipText = (value: string, maxLength = 180): string =>
+  value.length > maxLength ? `${value.slice(0, maxLength - 1).trimEnd()}…` : value;
+const winnerPolicyTooltipDetail = (wallet: LabWallet): string => {
+  const policy = wallet.winnerPolicy;
+  const lines = [
+    `Status: ${policy.status}${policy.actionability ? ` · ${policy.actionability}` : ''}`,
+    `Final score: ${score(policy.finalScore)}/100`,
+  ];
+  const endingCapital = policy.evidence.endingCapitalUsd;
+  if (endingCapital !== null) lines.push(`Portfolio: $100 → ${usd(endingCapital)}`);
+  const quality = policy.evidence.coverageQuality;
+  if (quality) {
+    const coverage =
+      quality.coveragePercent === null ? '—' : `${quality.coveragePercent.toFixed(0)}%`;
+    lines.push(
+      `Dune coverage: ${coverage} · ${quality.simulatedTrips.toLocaleString()}/${quality.eligibleTrips.toLocaleString()} trades`,
+    );
+  }
+  const reviewReason = quality
+    ? `${quality.pendingTrips.toLocaleString()} pending Dune; ${quality.confirmedMissing.total.toLocaleString()} trades have no usable match. ${quality.reason}`
+    : undefined;
+  const failedGate = policy.gates.find((gate) => gate.status !== 'pass');
+  const reason =
+    policy.status === 'UNPROVEN'
+      ? (policy.unprovenReasons[0] ?? failedGate?.detail ?? policy.warnings[0])
+      : policy.status === 'REJECTED'
+        ? (policy.rejectionReasons[0] ?? failedGate?.detail ?? policy.warnings[0])
+        : policy.actionability === 'REVIEW'
+          ? (reviewReason ??
+            policy.warnings.find((warning) => warning.toLowerCase().includes('dune')) ??
+            failedGate?.detail ??
+            policy.warnings[0])
+          : (policy.positiveReasons[0] ?? policy.warnings[0]);
+  if (reason) {
+    const prefix =
+      policy.status === 'UNPROVEN'
+        ? 'Why unproven'
+        : policy.status === 'REJECTED'
+          ? 'Why rejected'
+          : policy.actionability === 'REVIEW'
+            ? 'Why review'
+            : 'Why it passed';
+    lines.push(`${prefix}: ${compactTooltipText(reason)}`);
+  }
+  return lines.join('\n');
+};
 const candidateStatusLabel = (status: LabWallet['candidateStatus']) =>
   ({
     eligible: 'Eligible',
@@ -587,50 +638,15 @@ const exportDecisionLab = (response: LabResponse, winnersOnly: boolean) => {
   URL.revokeObjectURL(url);
 };
 
-export function ExperimentalDecisionLab({
-  api,
-  periodDays,
-  onPeriodDaysChange,
-}: {
-  api: ApiClient;
-  periodDays: 30 | 60 | 90;
-  onPeriodDaysChange: (periodDays: 30 | 60 | 90) => void;
-}) {
+export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   const [response, setResponse] = useState<LabResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<LabWallet | null>(null);
   const [sort, setSort] = useState<LabSort>({ key: 'winnerScore', direction: 'desc' });
-  const [importing, setImporting] = useState(false);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [scoringInfoOpen, setScoringInfoOpen] = useState(false);
-  const [riskImportInfoOpen, setRiskImportInfoOpen] = useState(false);
   const [winnersOnly, setWinnersOnly] = useState(false);
-  const [potentialWinnersOnly, setPotentialWinnersOnly] = useState(false);
   const [walletFilter, setWalletFilter] = useState('');
-  const [selectedForDune, setSelectedForDune] = useState<Set<string>>(new Set());
-  const [dunePlan, setDunePlan] = useState<{ pendingTargets: number; message: string } | null>(
-    null,
-  );
-  const [dunePlansByWallet, setDunePlansByWallet] = useState<
-    Map<string, { pendingTargets: number; tradeCount: number }>
-  >(new Map());
-  const [dunePreflightLoading, setDunePreflightLoading] = useState<Set<string>>(new Set());
-  const [duneFetchingWallets, setDuneFetchingWallets] = useState<Set<string>>(new Set());
-  const [duneFetchTotalsByWallet, setDuneFetchTotalsByWallet] = useState<Map<string, number>>(
-    new Map(),
-  );
-  const [duneFetchStartedAt, setDuneFetchStartedAt] = useState<string | null>(null);
-  const [duneFetchProgressByWallet, setDuneFetchProgressByWallet] = useState<Map<string, number>>(
-    new Map(),
-  );
-  const [duneFetchBusy, setDuneFetchBusy] = useState(false);
-  const [duneFetchProgress, setDuneFetchProgress] = useState<{
-    processed: number;
-    total: number;
-    failed: number;
-  } | null>(null);
-  const duneFetchObservedRunning = useRef(false);
   const load = (refresh = false, showPageLoading = true) => {
     if (showPageLoading) setLoading(true);
     setError(null);
@@ -647,7 +663,7 @@ export function ExperimentalDecisionLab({
   };
   useEffect(() => {
     load();
-  }, [api, periodDays]);
+  }, [api]);
   const sortedWallets = response
     ? [...response.wallets].sort((left, right) => {
         const leftHasValue = hasSortableValue(left, sort.key);
@@ -669,12 +685,6 @@ export function ExperimentalDecisionLab({
         )
       : sortedWallets
   ).filter((wallet) => {
-    if (potentialWinnersOnly) {
-      const plan = dunePlansByWallet.get(wallet.walletAddress);
-      if (wallet.winnerPolicy.status === 'REJECTED' || !plan || plan.pendingTargets <= 0) {
-        return false;
-      }
-    }
     const query = walletFilter.trim().toLowerCase();
     if (!query) return true;
     return (
@@ -682,184 +692,6 @@ export function ExperimentalDecisionLab({
       (wallet.name?.toLowerCase().includes(query) ?? false)
     );
   });
-  const selectableVisibleAddresses = displayedWallets
-    .filter(
-      (wallet) =>
-        !potentialWinnersOnly ||
-        (wallet.winnerPolicy.status !== 'REJECTED' &&
-          (dunePlansByWallet.get(wallet.walletAddress)?.pendingTargets ?? 0) > 0),
-    )
-    .map((wallet) => wallet.walletAddress);
-  const selectedVisibleCount = selectableVisibleAddresses.filter((address) =>
-    selectedForDune.has(address),
-  ).length;
-  useEffect(() => {
-    let disposed = false;
-    if (!selectedForDune.size) {
-      setDunePlan(null);
-      return undefined;
-    }
-    const query = encodeURIComponent([...selectedForDune].join(','));
-    void fetch(`/api/copytrade/decision/dune?walletAddresses=${query}`)
-      .then(async (result) => {
-        if (!result.ok) throw new Error(`Dune preflight failed (${result.status}).`);
-        return (await result.json()) as {
-          pendingTargets: number;
-          tradeCount?: number;
-          message: string;
-        };
-      })
-      .then((plan) => {
-        if (!disposed) {
-          setDunePlan(plan);
-          if (selectedForDune.size === 1) {
-            const walletAddress = [...selectedForDune][0];
-            if (walletAddress) {
-              setDunePlansByWallet((current) =>
-                new Map(current).set(walletAddress, {
-                  pendingTargets: plan.pendingTargets,
-                  tradeCount: plan.tradeCount ?? 0,
-                }),
-              );
-            }
-          }
-        }
-      })
-      .catch(() => {
-        if (!disposed) setDunePlan({ pendingTargets: 0, message: 'Dune preflight unavailable.' });
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [selectedForDune]);
-  useEffect(() => {
-    if (!response?.wallets.length) {
-      setDunePlansByWallet(new Map());
-      setDunePreflightLoading(new Set());
-      return undefined;
-    }
-    let disposed = false;
-    const addresses = response.wallets.map((wallet) => wallet.walletAddress);
-    setDunePreflightLoading(new Set(addresses));
-    const query = encodeURIComponent(addresses.join(','));
-    void fetch(`/api/copytrade/decision/dune?walletAddresses=${query}`)
-      .then(async (result) => {
-        if (!result.ok) throw new Error('Dune preflight unavailable.');
-        return (await result.json()) as {
-          wallets?: Array<{ walletAddress: string; pendingTargets: number; tradeCount: number }>;
-        };
-      })
-      .then((plan) => {
-        if (disposed) return;
-        setDunePlansByWallet(
-          new Map(
-            (plan.wallets ?? []).map((wallet) => [
-              wallet.walletAddress,
-              { pendingTargets: wallet.pendingTargets, tradeCount: wallet.tradeCount },
-            ]),
-          ),
-        );
-      })
-      .catch(() => {
-        if (!disposed) setDunePlansByWallet(new Map());
-      })
-      .finally(() => {
-        if (!disposed) setDunePreflightLoading(new Set());
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [response]);
-  const startSelectedDuneFetch = async () => {
-    if (!selectedForDune.size || !dunePlan?.pendingTargets) return;
-    const fetchingWallets = new Set(selectedForDune);
-    const fetchTotals = new Map(
-      [...fetchingWallets].map((address) => [
-        address,
-        dunePlansByWallet.get(address)?.pendingTargets ?? 0,
-      ]),
-    );
-    const startedAt = new Date().toISOString();
-    setDuneFetchBusy(true);
-    setDuneFetchingWallets(fetchingWallets);
-    setDuneFetchTotalsByWallet(fetchTotals);
-    setDuneFetchStartedAt(startedAt);
-    setDuneFetchProgressByWallet(new Map());
-    setError(null);
-    duneFetchObservedRunning.current = false;
-    setDuneFetchProgress({ processed: 0, total: dunePlan.pendingTargets, failed: 0 });
-    try {
-      const result = await fetch('/api/copytrade/decision/dune', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ walletAddresses: [...selectedForDune] }),
-      });
-      if (!result.ok) throw new Error(`Dune fetch could not start (${result.status}).`);
-    } catch (reason) {
-      setImportMessage(reason instanceof Error ? reason.message : 'Dune fetch could not start.');
-      setDuneFetchBusy(false);
-      setDuneFetchProgress(null);
-      setDuneFetchingWallets(new Set());
-      setDuneFetchTotalsByWallet(new Map());
-      setDuneFetchStartedAt(null);
-      setDuneFetchProgressByWallet(new Map());
-      setLoading(false);
-    }
-  };
-  useEffect(() => {
-    if (!duneFetchBusy) return undefined;
-    let disposed = false;
-    const poll = async () => {
-      try {
-        const walletQuery = [...duneFetchingWallets].join(',');
-        const statusQuery = new URLSearchParams({ walletAddresses: walletQuery });
-        if (duneFetchStartedAt) statusQuery.set('startedAt', duneFetchStartedAt);
-        const result = await fetch(
-          `/api/copytrade/copy-simulation/status?${statusQuery.toString()}`,
-        );
-        if (!result.ok) return;
-        const status = (await result.json()) as {
-          running?: boolean;
-          targetsTotal?: number;
-          targetsProcessed?: number;
-          failedTargets?: number;
-          walletProgress?: Array<{ walletAddress: string; processed: number }>;
-        };
-        if (disposed) return;
-        setDuneFetchProgress((previous) => ({
-          processed: status.targetsProcessed ?? previous?.processed ?? 0,
-          total: status.targetsTotal ?? previous?.total ?? 0,
-          failed: status.failedTargets ?? previous?.failed ?? 0,
-        }));
-        setDuneFetchProgressByWallet(
-          new Map(
-            (status.walletProgress ?? []).map((item) => [item.walletAddress, item.processed]),
-          ),
-        );
-        if (status.running === true) duneFetchObservedRunning.current = true;
-        if (
-          status.running === false &&
-          (duneFetchObservedRunning.current || (status.targetsTotal ?? 0) > 0)
-        ) {
-          setDuneFetchBusy(false);
-          setDuneFetchProgress(null);
-          setDuneFetchingWallets(new Set());
-          setDuneFetchTotalsByWallet(new Map());
-          setDuneFetchStartedAt(null);
-          setDuneFetchProgressByWallet(new Map());
-          load(true, false);
-        }
-      } catch {
-        // Keep the button in its current state; the next poll retries.
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [duneFetchBusy, duneFetchStartedAt, duneFetchingWallets]);
   const toggleSort = (key: LabSortKey) =>
     setSort((current) =>
       current.key === key
@@ -879,160 +711,26 @@ export function ExperimentalDecisionLab({
       </span>
     </button>
   );
-  const importRiskBundle = async (file: File) => {
-    setImporting(true);
-    setImportMessage(null);
-    try {
-      const parsed = JSON.parse(await file.text()) as unknown;
-      const root =
-        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : null;
-      const captures =
-        root && Array.isArray(root.captures) ? root.captures : Array.isArray(parsed) ? parsed : [];
-      let ignoredNon30d = 0;
-      let ignoredUnavailable = 0;
-      const results = captures.flatMap((value) => {
-        if (!value || typeof value !== 'object') return [];
-        const capture = value as {
-          walletAddress?: unknown;
-          period?: unknown;
-          status?: unknown;
-          responseBody?: unknown;
-        };
-        if (typeof capture.walletAddress !== 'string' || capture.period !== '30d') {
-          ignoredNon30d += 1;
-          return [];
-        }
-        if (capture.responseBody === undefined) {
-          ignoredUnavailable += 1;
-          return [];
-        }
-        const status = typeof capture.status === 'number' ? capture.status : 200;
-        return [
-          {
-            walletAddress: capture.walletAddress,
-            period: '30d',
-            available: status === 200,
-            metrics: capture.responseBody,
-            error: status === 200 ? undefined : `GMGN returned HTTP ${status}`,
-          },
-        ];
-      });
-      if (!results.length)
-        throw new Error('No 30-day wallet risk captures were found in this JSON file.');
-      const saved = await fetch('/api/copytrade/scrutiny/gmgn-risk/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ results }),
-      });
-      if (!saved.ok) throw new Error(`Import failed (${saved.status}).`);
-      const outcome = (await saved.json()) as {
-        imported?: number;
-        ignored?: number;
-        results?: Array<{ walletAddress?: unknown; available?: unknown; metrics?: unknown }>;
-      };
-      const ignored = (outcome.ignored ?? 0) + ignoredNon30d + ignoredUnavailable;
-      setImportMessage(
-        `Imported ${outcome.imported ?? 0} 30-day risk response(s).${ignored ? ` Ignored ${ignored} non-usable or non-30-day entr${ignored === 1 ? 'y' : 'ies'}.` : ''}`,
-      );
-      // Importing risk JSON only changes the saved GMGN-risk column. Do not recompute the
-      // entire Decision Lab report here; that expensive read is unnecessary because risk
-      // details are descriptive context and do not affect the four scores.
-      const importedByWallet = new Map(
-        (outcome.results ?? [])
-          .filter(
-            (result): result is { walletAddress: string; available: boolean; metrics?: unknown } =>
-              typeof result.walletAddress === 'string' && typeof result.available === 'boolean',
-          )
-          .map((result) => [result.walletAddress, result]),
-      );
-      if (importedByWallet.size > 0) {
-        setResponse((current) =>
-          current
-            ? {
-                ...current,
-                wallets: current.wallets.map((wallet) => {
-                  const imported = importedByWallet.get(wallet.walletAddress);
-                  return imported
-                    ? {
-                        ...wallet,
-                        riskDetails: {
-                          available: imported.available,
-                          metrics:
-                            imported.metrics && typeof imported.metrics === 'object'
-                              ? (imported.metrics as Record<string, unknown>)
-                              : null,
-                        },
-                      }
-                    : wallet;
-                }),
-              }
-            : current,
-        );
-      }
-    } catch (reason: unknown) {
-      setImportMessage(
-        reason instanceof Error ? reason.message : 'Could not import the risk JSON.',
-      );
-    } finally {
-      setImporting(false);
-    }
-  };
   return (
     <section className="menu-section panel experimental-decision-panel">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">EXPERIMENTAL · READ-ONLY</p>
+          <p className="eyebrow">DECISION CALCULATIONS · READ-ONLY</p>
           <h2>Decision Lab</h2>
         </div>
         <div className="experimental-actions">
           <span className="experimental-period-control">All available history · 45-day decay</span>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => load(true)}
-            disabled={loading || importing}
-          >
-            Reload saved evidence
-          </button>
-          <label className="experimental-import-button">
-            Import GMGN risk bundle
-            <input
-              type="file"
-              accept="application/json,.json"
-              disabled={importing}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) void importRiskBundle(file);
-                event.currentTarget.value = '';
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="experimental-info-button"
-            aria-label="How to export a GMGN risk bundle"
-            title="How to export a GMGN risk bundle"
-            onClick={() => setRiskImportInfoOpen(true)}
-          >
-            <span aria-hidden="true">i</span> How to import
+          <button type="button" className="secondary" onClick={() => load(true)} disabled={loading}>
+            Recalculate decisions
           </button>
         </div>
       </div>
-      {!loading && (
-        <>
-          <DataStatusSummary api={api} targetDays={response?.periodDays ?? 90} />
-          <WalletDataCoveragePanel api={api} periodDays={periodDays} />
-        </>
-      )}
       {loading && (
         <p className="copytrade-analysis-status running">
           <span className="loading-spinner" /> Reading saved SQLite evidence…
         </p>
       )}
       {error && <p className="copytrade-status-warning">Could not load the experiment: {error}</p>}
-      {importMessage && <p className="copytrade-analysis-status">{importMessage}</p>}
       {response && !loading && (
         <>
           <div className="experimental-scoring-card">
@@ -1093,8 +791,8 @@ export function ExperimentalDecisionLab({
                 deductions. Historical metrics use a 45-day decay.
               </p>
               <p className="muted">
-                Holdouts, Pattern Discovery, legacy analytical scores, and best-token concentration
-                are context only.
+                Holdouts and best-token concentration are context only; Pattern Research is no
+                longer part of this operational flow.
               </p>
               <small className="muted">
                 {strings.decisionLab.generatedAt(new Date(response.generatedAt).toLocaleString())}
@@ -1123,46 +821,17 @@ export function ExperimentalDecisionLab({
                 </span>
                 <span>{strings.decisionLab.winnersOnly}</span>
               </label>
-              <label
-                className={`experimental-winners-toggle${potentialWinnersOnly ? ' active' : ''}`}
-                title="Show wallets that are not rejected and still have pending Dune observations"
-              >
-                <Switch
-                  checked={potentialWinnersOnly}
-                  onChange={(event) => setPotentialWinnersOnly(event.target.checked)}
-                />
-                <span className="experimental-toggle-track" aria-hidden="true">
-                  <i />
-                </span>
-                <span>Potential winners only</span>
-              </label>
               {response && (
                 <button
                   type="button"
                   className="secondary experimental-export-table-button"
                   onClick={() => exportDecisionLab(response, winnersOnly)}
-                  disabled={loading || importing}
+                  disabled={loading}
                 >
                   {winnersOnly
                     ? strings.decisionLab.exportWinnersData
                     : strings.decisionLab.exportAllWithDetails}
                 </button>
-              )}
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void startSelectedDuneFetch()}
-                disabled={duneFetchBusy || !selectedForDune.size || !dunePlan?.pendingTargets}
-                title={dunePlan?.message ?? 'Select wallets to check pending Dune data.'}
-              >
-                {duneFetchBusy
-                  ? `Fetching Dune data (${duneFetchProgress?.processed ?? 0}/${duneFetchProgress?.total ?? dunePlan?.pendingTargets ?? 0})`
-                  : `Fetch Dune data${selectedForDune.size ? ` (${selectedForDune.size})` : ''}`}
-              </button>
-              {selectedForDune.size > 0 && (
-                <small className="experimental-dune-fetch-plan" role="status">
-                  {dunePlan?.message ?? 'Counting pending Dune observations…'}
-                </small>
               )}
             </div>
             <p className="experimental-score-legend">{strings.decisionLab.tableLegend}</p>
@@ -1179,55 +848,6 @@ export function ExperimentalDecisionLab({
               onClick: () => setSelectedWallet(wallet),
             })}
             columns={[
-              {
-                key: 'duneSelect',
-                header: (
-                  <Checkbox
-                    aria-label="Select all visible wallets for Dune fetch"
-                    checked={
-                      selectableVisibleAddresses.length > 0 &&
-                      selectedVisibleCount === selectableVisibleAddresses.length
-                    }
-                    indeterminate={
-                      selectedVisibleCount > 0 &&
-                      selectedVisibleCount < selectableVisibleAddresses.length
-                    }
-                    disabled={!selectableVisibleAddresses.length}
-                    onChange={(event) => {
-                      const shouldSelect = event.target.checked;
-                      setSelectedForDune((current) => {
-                        const next = new Set(current);
-                        for (const address of selectableVisibleAddresses) {
-                          if (shouldSelect) next.add(address);
-                          else next.delete(address);
-                        }
-                        return next;
-                      });
-                    }}
-                  />
-                ),
-                render: (wallet) => (
-                  <Checkbox
-                    aria-label={`Select ${wallet.name?.trim() || short(wallet.walletAddress)} for Dune fetch`}
-                    checked={selectedForDune.has(wallet.walletAddress)}
-                    disabled={
-                      potentialWinnersOnly &&
-                      (wallet.winnerPolicy.status === 'REJECTED' ||
-                        (dunePlansByWallet.get(wallet.walletAddress)?.pendingTargets ?? 0) <= 0)
-                    }
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      event.stopPropagation();
-                      setSelectedForDune((current) => {
-                        const next = new Set(current);
-                        if (event.target.checked) next.add(wallet.walletAddress);
-                        else next.delete(wallet.walletAddress);
-                        return next;
-                      });
-                    }}
-                  />
-                ),
-              },
               {
                 key: 'rank',
                 header: sortableHeader('rank', 'Rank'),
@@ -1272,15 +892,8 @@ export function ExperimentalDecisionLab({
                 render: (wallet) => (
                   <TableTooltip
                     className={`experimental-evidence ${wallet.winnerPolicy.status.toLowerCase()}`}
-                    label={`Winner Policy ${wallet.winnerPolicy.policyVersion}`}
-                    detail={
-                      [
-                        ...wallet.winnerPolicy.rejectionReasons,
-                        ...wallet.winnerPolicy.unprovenReasons,
-                        ...wallet.winnerPolicy.positiveReasons,
-                        ...wallet.winnerPolicy.warnings,
-                      ].join(' ') || 'All fixed policy gates passed.'
-                    }
+                    label={`Decision summary · ${wallet.rank === null ? '—' : `#${wallet.rank}`} ${short(wallet.walletAddress)}`}
+                    detail={winnerPolicyTooltipDetail(wallet)}
                   >
                     {wallet.winnerPolicy.actionability === 'REVIEW'
                       ? 'REVIEW'
@@ -1313,33 +926,6 @@ export function ExperimentalDecisionLab({
                       {coverage} · {operationalCoverageLabel(quality)}
                     </TableTooltip>
                   );
-                },
-              },
-              {
-                key: 'dunePreflight',
-                header: 'Dune preflight',
-                render: (wallet) => {
-                  if (duneFetchingWallets.has(wallet.walletAddress)) {
-                    const processed = duneFetchProgressByWallet.get(wallet.walletAddress) ?? 0;
-                    const total = duneFetchTotalsByWallet.get(wallet.walletAddress) ?? 0;
-                    return (
-                      <span className="experimental-preflight-loading" role="status">
-                        <span className="loading-spinner" aria-hidden="true" /> Fetching {processed}
-                        /{total}
-                      </span>
-                    );
-                  }
-                  if (dunePreflightLoading.has(wallet.walletAddress)) {
-                    return (
-                      <span className="experimental-preflight-loading" role="status">
-                        <span className="loading-spinner" aria-hidden="true" /> Checking…
-                      </span>
-                    );
-                  }
-                  const plan = dunePlansByWallet.get(wallet.walletAddress);
-                  if (!plan) return '—';
-                  if (plan.pendingTargets === 0) return 'Complete';
-                  return `${plan.pendingTargets.toLocaleString()} pending`;
                 },
               },
               {
@@ -1449,6 +1035,10 @@ export function ExperimentalDecisionLab({
                 </button>
               </div>
               <p className="muted">Winner Policy v3 evidence and score calculation.</p>
+              <ScenarioReplayPanel
+                walletLabel={selectedWallet.name?.trim() || short(selectedWallet.walletAddress)}
+                trades={selectedWallet.scenarioReplayTrades ?? []}
+              />
               <CapitalPathChart path={selectedWallet.winnerPolicy.evidence.capitalPath ?? []} />
               <section className="experimental-calculation-summary">
                 <div className="experimental-calculation-total">
@@ -1686,8 +1276,7 @@ export function ExperimentalDecisionLab({
                       </div>
                       <h5>Warnings, not gates</h5>
                       <p className="experimental-policy-not-gates">
-                        100 GMGN trades · holdout windows · Pattern Discovery rules · Copyability
-                        score · best-token concentration
+                        holdout windows · best-token concentration
                       </p>
                     </div>
                     {selectedWallet.winnerPolicy.finalScore !== null && (
@@ -1820,44 +1409,6 @@ export function ExperimentalDecisionLab({
             </Modal>
           )}
         </>
-      )}
-      {riskImportInfoOpen && (
-        <Modal
-          onClose={() => setRiskImportInfoOpen(false)}
-          ariaLabel="How to export a GMGN risk bundle"
-          dialogClassName="experimental-scoring-help-modal"
-        >
-          <div className="copytrade-modal-head">
-            <div>
-              <p className="eyebrow">GMGN RISK DATA</p>
-              <h3>How to get the import file</h3>
-            </div>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setRiskImportInfoOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-          <ol className="experimental-rule-list">
-            <li>Install or reload the Vantage GMGN Chrome extension.</li>
-            <li>
-              Open GMGN and enable <strong>30d risk capture</strong> in the extension popup.
-            </li>
-            <li>Open the wallet pages or wallet list you want to capture.</li>
-            <li>
-              Return to the popup and click <strong>Export 30d risk JSON</strong>.
-            </li>
-            <li>
-              Use <strong>Import GMGN risk bundle</strong> here and select that JSON file.
-            </li>
-          </ol>
-          <p className="muted">
-            The extension captures GMGN’s existing browser response; it does not request GMGN data
-            itself. Only 30-day responses are imported.
-          </p>
-        </Modal>
       )}
     </section>
   );

@@ -57,7 +57,12 @@ const is = (request: CopyTradeRouteRequest, method: string, pathname: string): b
 export const createCopyTradeRoutes = (): CopyTradeRoute[] => [
   async ({ method, url, readJsonBody }, { database, respond }) => {
     if (method !== 'POST' || url.pathname !== '/api/copytrade/fetch') return false;
-    const payload = (await readJsonBody()) as { limit?: unknown; periodDays?: unknown };
+    const payload = (await readJsonBody()) as {
+      limit?: unknown;
+      periodDays?: unknown;
+      walletAddresses?: unknown;
+      scope?: unknown;
+    };
     const limit = Number(payload.limit);
     const periodDays = Number(payload.periodDays);
     if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
@@ -72,7 +77,21 @@ export const createCopyTradeRoutes = (): CopyTradeRoute[] => [
       respond(409, { error: 'A fetch run is already in progress.' });
       return true;
     }
-    respond(200, startCopyTradeFetch(database, { limit, periodDays }));
+    const walletAddresses = Array.isArray(payload.walletAddresses)
+      ? payload.walletAddresses.filter(
+          (value): value is string => typeof value === 'string' && value.trim().length > 0,
+        )
+      : undefined;
+    respond(
+      200,
+      startCopyTradeFetch(database, {
+        limit,
+        periodDays,
+        walletAddresses,
+        scope:
+          payload.scope === 'single' ? 'single' : walletAddresses?.length ? 'winners' : 'roster',
+      }),
+    );
     return true;
   },
   async ({ method, url }, { database, respond }) => {
@@ -253,7 +272,6 @@ export const createCopyTradeRoutes = (): CopyTradeRoute[] => [
     const payload = (await readJsonBody()) as {
       limit?: unknown;
       snapshotId?: unknown;
-      maxAgeHours?: unknown;
     };
     const limit = Number(payload.limit);
     if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
@@ -265,13 +283,11 @@ export const createCopyTradeRoutes = (): CopyTradeRoute[] => [
       return true;
     }
     const snapshotId = Number(payload.snapshotId);
-    const maxAgeHours = Number(payload.maxAgeHours);
     respond(
       200,
       startGmgnStatsFetch(database, {
         limit,
         snapshotId: Number.isInteger(snapshotId) && snapshotId > 0 ? snapshotId : undefined,
-        maxAgeHours: Number.isFinite(maxAgeHours) && maxAgeHours > 0 ? maxAgeHours : undefined,
       }),
     );
     return true;

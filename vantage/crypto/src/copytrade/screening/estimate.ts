@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { MAX_REQUESTS_PER_WALLET } from '../simulation/constants.js';
+import { GMGN_REQUEST_SPACING_MS } from '../../gmgn/client/rateLimit.js';
 import { listRosterWallets } from './roster.js';
 
 export const FETCH_ESTIMATE_KEY = 'default';
@@ -17,6 +18,14 @@ export const DEFAULT_REQUESTS_PER_FRESH_WALLET = 92;
 export const DEFAULT_REQUESTS_PER_COVERED_WALLET = 1;
 /** The window the seeded fresh-wallet request count was measured at, for period scaling. */
 export const DEFAULT_OBSERVED_PERIOD_DAYS = 30;
+const HISTORICAL_REQUEST_SPACING_MS = 5_000;
+
+/** Scale old timing observations to the currently configured request gate. */
+const projectedSecondsPerRequest = (basis: FetchEstimateBasis): number =>
+  Math.max(
+    GMGN_REQUEST_SPACING_MS / 1000,
+    basis.secondsPerRequest * (GMGN_REQUEST_SPACING_MS / HISTORICAL_REQUEST_SPACING_MS),
+  );
 
 export type FetchEstimateBasis = {
   source: 'measured' | 'default';
@@ -289,6 +298,7 @@ export const projectFetchDuration = (
   const estimatedRequests = Math.round(
     freshWallets * perFresh + coveredWallets * basis.requestsPerCoveredWallet,
   );
+  const secondsPerRequest = projectedSecondsPerRequest(basis);
 
   return {
     walletCount,
@@ -296,7 +306,7 @@ export const projectFetchDuration = (
     coveredWallets,
     periodDays: options.periodDays,
     estimatedRequests,
-    estimatedSeconds: Math.round(estimatedRequests * basis.secondsPerRequest),
+    estimatedSeconds: Math.round(estimatedRequests * secondsPerRequest),
     basis,
     confidence: confidenceFor(basis.runsCounted),
   };
@@ -327,8 +337,9 @@ export const estimateRemainingSeconds = (
       return Math.round((elapsed / run.walletDone) * remaining);
   }
   const basis = readFetchEstimateBasis(database);
+  const secondsPerRequest = projectedSecondsPerRequest(basis);
   const periodScale =
     basis.observedPeriodDays > 0 && run.periodDays ? run.periodDays / basis.observedPeriodDays : 1;
   const perFresh = Math.min(MAX_REQUESTS_PER_WALLET, basis.requestsPerFreshWallet * periodScale);
-  return Math.round(remaining * perFresh * basis.secondsPerRequest);
+  return Math.round(remaining * perFresh * secondsPerRequest);
 };

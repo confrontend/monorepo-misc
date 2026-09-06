@@ -5106,3 +5106,223 @@ Decision Lab now tolerates persisted Winner Policy records created before GMGN d
 - The benchmark now uses `POST /v1/parsed-events/transaction-history` with block-time bounds as its primary historical lookup. It falls back to Helius `getTransactionsForAddress` when Parsed Events is unavailable or does not yield a parseable swap.
 - Raw slot estimation, repeated `getBlockTime`, and repeated `getBlock` calls are no longer used by the operational benchmark path.
 - A clean 50-trade run has not been started yet because the local `crypto/.env` still contains the API-key placeholder. After a real key is supplied, the existing Start benchmark action will create a new Helius run; old public-RPC runs remain excluded.
+
+# 2026-09-05 — Reusable Dune candidate preferences
+
+- Updated `crypto/AGENTS.md` to require reusable modules before component-local logic.
+- Extracted Dune candidate selection/filter persistence into `ui/state/duneCandidatePreferences.ts`; the candidate panel now consumes that module.
+- Verified with `npm run build:ui` and `npm run arch:check`.
+
+# 2026-09-05 — Dune audit schema compatibility
+
+- Extended the final idempotent SQLite migration to add missing `gmgn_screen_rule_version`, `gmgn_data_fingerprint`, and `selected_target_ids` audit columns for older databases.
+- Existing databases will be repaired automatically after the dev server restarts.
+
+# 2026-09-05 — Dune audit schema migration versioning fix
+
+- Added a new migration version for `gmgn_screen_rule_version` and `gmgn_data_fingerprint`; the earlier version had already been recorded and therefore could not be rerun after its body changed.
+- Applied migrations to the local SQLite database: schema version 65 now contains all Dune audit metadata columns.
+- Verified with `npm run build:server` and `npm run arch:check`.
+## 2026-09-05 — Startup schema contract verification
+
+- Step: Added a reusable database schema contract verifier and wired it into database startup after migrations. Restored the previously-applied target-selection migration so historical migrations remain immutable; GMGN audit metadata is handled by the subsequent migration.
+- Files: `AGENTS.md`, `src/platform/db/schemaVerification.ts`, `src/platform/db/client.ts`, `src/platform/db/schema.ts`, `tests/schema.test.ts`.
+- Decision: Existing databases now fail fast with an actionable missing-table/column message instead of failing later during a write. New schema changes must be new migrations; already-applied migration bodies are not edited.
+- Agent: Codex.
+- Tests: `npm run build:server` passed; `node --test dist/tests/schema.test.js` passed (3/3); `npm run arch:check` passed (197 modules, 527 dependencies).
+- Unresolved: The full repository suite still contains unrelated failures from the broader dirty worktree; this change was validated with the focused schema tests and architecture check.
+- Next: Restart the dev server once so startup migrations and schema verification run against the local database.
+
+## 2026-09-05 — Current architecture health check
+
+- Step: Reviewed the recent workflow/refactoring history and ran the current structural validation.
+- Decision: The active direction is coherent: GMGN ingestion and selection are separated from Dune fetching, reusable state is extracted, and database drift is checked at startup.
+- Agent: Codex.
+- Tests: `npm run build:ui` passed; `npm run arch:check` passed. Focused schema tests remain 3/3 from the preceding check.
+- Unresolved: The worktree still contains broad intentional UI/data-workflow edits and deleted legacy modules; the full suite is not a clean baseline. The indexed Helius feasibility run remains pending a real API key and is separate from the production GMGN/Dune flow.
+- Next: Restart the dev server and run the focused workflow tests before committing the refactor as a cohesive change.
+
+## 2026-09-05 — Dune progress synchronization and compact status
+
+- Step: Consolidated the candidate-panel estimate/progress copy into one status card and added operation details. Persisted Dune audit progress during planning, batch start, Dune polling, and batch completion.
+- Files: `src/scripts/server.ts`, `ui/components/data/DataCandidateFetchPanel.tsx`, `ui/styles.css`.
+- Decision: The saved audit is now updated alongside the live state, so refreshes can show the same planned, submitted, stored, failed, and remaining target counts. The UI reports the active batch and current Dune phase without repeating the credit estimate.
+- Agent: Codex.
+- Tests: `npm run build:server` passed; `npm run build:ui` passed.
+- Unresolved: A currently running process must be restarted to load the new server code; its already-running request will continue under the old process state.
+- Next: Restart the dev server before starting the next Dune run.
+
+## 2026-09-05 — Prevent stale Dune completion status
+
+- Step: Fixed the client polling race that accepted an idle/completed response from the previous run while a new Dune POST was still starting.
+- Files: `ui/components/data/DataCandidateFetchPanel.tsx`.
+- Decision: A run can finish in the UI only after the returned status has a start time matching the locally initiated run. Successful completion no longer emits a generic warning banner; active Dune operation text remains the source of truth.
+- Agent: Codex.
+- Tests: `npm run build:ui` and `npm run build:server` passed.
+- Unresolved: Restart the dev server to load the updated client/server bundle; an already-running request is not retroactively changed.
+- Next: Start a fresh Dune fetch and verify the status card remains active until its matching run completes.
+
+## 2026-09-05 — Persisted Dune status fallback
+
+- Step: Fixed status visibility when a Dune fetch is owned by another server/HMR execution context.
+- Files: `src/scripts/server.ts`.
+- Decision: The status endpoint now reads active simulation runs from SQLite and reconstructs completed targets, failed targets, current batch, batch count, execution ID, Dune state, and remaining work. It no longer relies only on one process's in-memory progress object.
+- Agent: Codex.
+- Tests: `npm run build:server` passed.
+- Unresolved: The dev server must restart to serve this status fallback. The current run remains active and should not be started again.
+- Next: Refresh after restart; the active run should show its persisted batch and Dune execution progress.
+
+## 2026-09-05 — Close Dune lease race
+
+- Step: Diagnosed duplicate Dune starts: two `submitted` simulation rows were created seconds apart because lease acquisition deleted a fresh lease before the first batch row existed.
+- Files: `src/scripts/server.ts`.
+- Decision: The lease now remains authoritative during the startup gap, reclaims only leases older than ten minutes, and treats `timed_out` runs as active. This prevents a second request from starting during planning/submission.
+- Agent: Codex.
+- Tests: `npm run build:server` passed.
+- Unresolved: Two historical submitted rows already exist in the local database; they have no recorded Dune execution IDs yet and should be reconciled by the existing startup recovery rather than retried manually.
+- Next: Restart the server once, then verify only one active submitted/running simulation remains before starting another fetch.
+
+## 2026-09-05 — Show persisted Dune run when live state is stale
+
+- Step: Added a UI fallback that treats a running audit or submitted/running persisted simulation as active and derives the target total/start time from SQLite-backed status fields.
+- Files: `ui/components/data/DataCandidateFetchPanel.tsx`.
+- Decision: A stale `Idle` in-memory response can no longer render `Fetching Dune (0/0)` when the database proves a run is active.
+- Agent: Codex.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Restart the dev server to load the complete server and client fixes; existing duplicate submitted rows still need startup reconciliation.
+- Next: Restart, refresh, and confirm the active run displays its persisted target/batch progress.
+
+## 2026-09-05 — Attach to an existing Dune run after 409
+
+- Step: Updated the candidate panel's duplicate-run handling.
+- Files: `ui/components/data/DataCandidateFetchPanel.tsx`.
+- Decision: A 409 indicating an existing Dune/provider fetch no longer clears progress and shows only an error. The UI now reads the persisted status, attaches to that run, and continues polling it.
+- Agent: Codex.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Restart the dev server/client bundle to load this behavior; two legacy submitted rows remain for startup reconciliation.
+- Next: Restart once, refresh, and let reconciliation resolve the historical submitted rows before launching a new fetch.
+
+## 2026-09-05 — Diagnose orphaned Dune submissions
+
+- Step: Checked SQLite directly after the duplicate-run warning and confirmed two submitted rows (`2559`, `2560`) with no execution IDs or Dune status timestamps, plus a stale lease.
+- Decision: The current state is not healthy progress; it is orphaned pre-submit work, not a confirmed running Dune execution. Added a shared persisted-status reader and read-time stale-submission recovery in the canonical simulation status route.
+- Files: `src/copytrade/simulation/copySimulationStatus.ts`, `src/scripts/routes/simulationRoutes.ts`.
+- Agent: Codex.
+- Tests: `npm run build:server` and `npm run arch:check` passed (198 modules, 530 dependencies).
+- Unresolved: The currently running old dev server has not loaded the recovery code. Restart it; submissions older than ten minutes will be failed and the lease released.
+- Next: Verify zero active submitted/running rows, then start exactly one fresh Dune fetch.
+
+## 2026-09-05 — Reconcile completed Dune audit counters
+
+- Step: Checked the latest Dune status and corrected the durable audit for the completed 13,901-target fetch.
+- Decision: The fetch completed successfully: 13,901/13,901 targets, 93 batches, 0 failed. Audit `34` now records `complete`, with submitted/stored counters set to 13,901 and remaining set to 0.
+- Agent: Codex.
+- Tests: `npm run build:server` passed after adding audit progress writes for future runs.
+- Unresolved: Older duplicate submitted rows (`2559`, `2560`) remain stale until the new server reconciliation code runs.
+- Next: Restart the dev server so stale submissions are marked failed and the lease is released.
+
+## 2026-09-05 — Verify Dune results flow into Decision Lab
+
+- Step: Checked the completed Dune runs, indexed match rows, audit counters, and the read-only Decision Lab report endpoint.
+- Decision: The latest fetch is persisted and consumed by the Decision Lab report path. The database contains 244,594 indexed match rows (213,892 matched), with the latest rows written at the fetch completion time. GMGN/pre-Dune scores remain unchanged; only Dune coverage, copy outcomes, and downstream Winner Policy gates can change for wallets whose targets were fetched.
+- Agent: Codex.
+- Tests: Read-only SQLite inspection and `/api/copytrade/experimental-decision?limit=3` verification completed.
+- Unresolved: Unselected wallets still have pending Dune targets, so their decisions cannot improve until their targets are fetched. Older orphaned audit rows remain historical cleanup noise.
+- Next: Refresh Decision Lab; selected wallets should show lower pending counts and refreshed Dune evidence.
+
+## 2026-09-05 — Compare Decision Lab before and after today’s Dune fetch
+
+- Step: Compared persisted Decision Lab verdict snapshots immediately before and after the 13,901-target Dune run.
+- Decision: The fetch did affect decisions. Verdicts changed from 11 pass / 24 insufficient-evidence / 65 reject to 13 pass / 19 insufficient-evidence / 68 reject: two wallets became winners, five previously unproven wallets became rejected, and one rejected wallet became insufficient evidence.
+- Agent: Codex.
+- Tests: Read-only SQLite history comparison and current Decision Lab report verification.
+- Unresolved: The historical snapshot does not record a human-readable wallet name for every transition; addresses are persisted and sufficient for exact identification.
+- Next: Refresh Decision Lab to see the 13 current winners and the updated Dune evidence for fetched wallets.
+
+## 2026-09-05 — Simplify Decision Lab tooltips
+
+- Step: Reduced the policy tooltip to a compact decision summary and made tooltip cells visually discoverable.
+- Decision: Show only status/actionability, final score, portfolio result, Dune coverage, and one key reason; remove the long concatenated warning dump from the policy cell.
+- Agent: Codex.
+- Tests: `npx prettier --check ui/components/ExperimentalDecisionLab.tsx ui/styles.css`; `npm run build:ui`.
+- Unresolved: Other diagnostic tooltips remain available for deeper inspection when needed.
+- Next: Refresh Decision Lab and hover a dotted-underlined policy/evidence cell to see the compact summary.
+
+## 2026-09-05 — Explain UNPROVEN decisions in the tooltip
+
+- Step: Added a compact reason line to the Decision Lab policy summary.
+- Decision: UNPROVEN rows now show `Why unproven`, rejected rows show `Why rejected`, review rows show `Why review`, and passing rows show `Why it passed`, using the first applicable saved gate/reason.
+- Agent: Codex.
+- Tests: `npm run build:ui` passed after formatting.
+- Unresolved: The tooltip intentionally shows one primary reason; full gate diagnostics remain available in the detailed decision view.
+- Next: Refresh Decision Lab and hover an UNPROVEN policy cell to see the specific missing-evidence reason.
+
+## 2026-09-05 — Clarify pending versus unmatched Dune trades
+
+- Step: Corrected the partial-coverage explanation used by Decision Lab.
+- Decision: The status now distinguishes trades still pending a Dune query from trades that were queried but produced no usable match. A `0` pending count no longer implies that no trades are missing from the result.
+- Agent: Codex.
+- Tests: `npm run build:server` passed.
+- Unresolved: Existing saved reports retain their previous wording until the report is recalculated.
+- Next: Recalculate or refresh Decision Lab to see the corrected explanation.
+
+## 2026-09-05 — Identify the wallet in floating decision tooltips
+
+- Step: Added rank and shortened wallet address to the policy tooltip title.
+- Decision: Floating tooltips now make it clear which row they describe when positioned above the hovered cell.
+- Agent: Codex.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Tooltip placement can still overlap nearby rows by design, but its owner is now explicit.
+- Next: Refresh Decision Lab and hover the policy cell for any wallet.
+
+## 2026-09-05 — Show pending versus unmatched counts in review tooltips
+
+- Step: Updated the Decision Lab review tooltip to derive its explanation from saved coverage counts.
+- Decision: Review details now say how many trades are pending Dune and how many have no usable match, avoiding the ambiguous `0 trades still need Dune data` wording.
+- Agent: Codex.
+- Tests: `npm run build:ui` passed.
+- Unresolved: Older persisted warning text remains in raw historical records, but the current UI now presents the corrected interpretation.
+- Next: Refresh Decision Lab and hover `#14 Fixukb...` to see `0 pending Dune; 3,799 trades have no usable match`.
+
+## 2026-09-05 — Keep Decision Lab tooltips above the table
+
+- Step: Raised the stacking level of the portaled table tooltip.
+- Decision: Decision tooltips now render above sticky table headers and rows instead of appearing underneath them.
+- Agent: Codex.
+- Tests: `npx prettier --check ui/styles.css`; `npm run build:ui`.
+- Unresolved: Browser refresh is required to load the rebuilt stylesheet in an already-open tab.
+- Next: Refresh Decision Lab and hover a Dune evidence or policy cell.
+### 2026-09-05 20:55 -07:00 — Removed scrollbars from Decision Lab tooltips
+
+- Step: Updated the shared Decision Lab table-tooltip styling so tooltip overlays expand and wrap their content instead of becoming scroll containers.
+- Files changed: `ui/styles.css`.
+- Decision: Removed tooltip max-height/overflow scrolling and made the facts grid columns shrinkable with wrapped values, so neither vertical nor horizontal tooltip scrollbars appear.
+- Agent name and model: Codex.
+- Test result: `npm run build:ui` passed.
+- Errors or unresolved items: None.
+- Next step: None.
+
+## 2026-09-06 — Reviewed GMGN TX In handling
+
+- Step: Traced GMGN activity ingestion, stored event types, feature metrics, candidate screening, copy simulation, and Winner Policy behavior for incoming transfers.
+- Decision: No behavior changed. The current flow excludes non-buy/sell transfer rows from most analysis and excludes sells with missing/zero cost basis, but evaluator/feature code can accept an unpaired sell when its `buy_cost_usd` is positive; this is a cost-basis provenance gap requiring a shared lot/context fix.
+- Tests: Targeted persisted-report tests passed (51/51) plus browser-import/canonical-pairing tests (7/7); no explicit TX In scenario tests exist.
+- Unresolved: Transfer-in rows have no canonical event-type field or neutral/caution evidence field, and coverage inventory counts them in raw activity totals.
+- Next: Add a shared transfer-aware lot/cost-basis normalizer and the requested TX In scenario tests only after implementation is approved.
+
+## 2026-09-06 — Implemented transfer-aware GMGN accounting
+
+- Step: Added shared `TransferAwareInventory` accounting, canonicalized GMGN `transferIn` rows to `transfer_in` while preserving the raw payload, and enabled the production activity fetch to request transfer-in events.
+- Decision: Incoming transfers are neutral evidence. They never count as buys; sells are excluded from realized PnL, win rate, completed trades, concentration, and hold-time metrics while transfer inventory is unresolved. A positive `buy_cost_usd` is insufficient without prior buy provenance.
+- Files changed: `src/copytrade/accounting/transferInventory.ts`, GMGN fetch/storage, evaluation, wallet feature reader/engine, candidate scrutiny, historical consistency, live evaluation, representative sampling, copy simulation, and `tests/transfer-inventory.test.ts`.
+- Tests: Six transfer-focused tests passed; `npm run build` passed; `npm run arch:check` passed. Some older report fixtures intentionally model sell-only rows with positive `buy_cost_usd`; those now fail because the corrected contract excludes them until a buy is present.
+- Unresolved: Existing legacy rows stored under provider-specific transfer spellings are not rewritten; new ingestion and browser imports store canonical `transfer_in` rows. Re-fetching affected wallets is needed to apply the new canonical event type to old rows.
+
+- Follow-up: Added explicit incoming-transfer caution counts/notes to evaluation evidence and applied the same resolver to live and historical consistency calculations. Build and architecture checks still pass.
+
+## 2026-09-06 — Fixed tooltip overflow in the shared UI adapter
+
+- Step: Updated the shared Radix tooltip adapter and tooltip styles so tooltip overlays stay viewport-sized, wrap long fact values, and never become scroll containers.
+- Files changed: `ui/components/ui/tooltip.tsx`, `ui/styles.css`.
+- Tests: `npm run build:ui` passed; `npm run arch:check` passed.
+- Unresolved: None.

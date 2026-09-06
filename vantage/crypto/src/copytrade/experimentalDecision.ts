@@ -20,7 +20,10 @@ import {
   createHistoricalEvidenceContext,
   type HistoricalEvidenceContext,
 } from './evidence/historicalEvidenceContext.js';
-import { computeCopySimulationReport } from './simulation/copySimulation.js';
+import {
+  computeCopySimulationReport,
+  type FixedStakePortfolioTrade,
+} from './simulation/copySimulation.js';
 import {
   buildGmgnRiskBundleEvidence,
   buildWinnerPolicyEvidence,
@@ -31,6 +34,7 @@ import {
   WINNER_POLICY_VERSION,
   type WinnerPolicyResult,
 } from './winnerPolicy.js';
+import { evaluateGmgnScreenV1, type GmgnScreenResult } from './gmgnScreenV1.js';
 
 const NEUTRAL_DECISION_WEIGHTS = {
   edge: 0.25,
@@ -74,6 +78,7 @@ export type ExperimentalDecisionWallet = {
   tags: string[];
   evidence: { level: 'complete' | 'partial' | 'insufficient' | 'missing'; detail: string };
   candidateStatus: 'eligible' | 'rejected' | 'insufficient_evidence' | 'missing_evidence';
+  gmgnScreen: GmgnScreenResult;
   /** Authoritative winner classification; candidateStatus remains a legacy analytical label. */
   winnerPolicy: WinnerPolicyResult;
   scores: {
@@ -109,6 +114,8 @@ export type ExperimentalDecisionWallet = {
     matchedRoundTrips: number;
     roundTripsConsidered: number;
   };
+  /** Stored replay inputs for the browser-only Scenario Replay; never used by Winner Policy. */
+  scenarioReplayTrades: FixedStakePortfolioTrade[];
   scrutiny: {
     pass: number;
     fail: number;
@@ -654,17 +661,19 @@ export const computeExperimentalDecisionReport = (
   // Capture one evidence revision for both adaptive weights and rule penalties. Reading the
   // fingerprint separately can observe two different revisions while live ingestion is running,
   // causing one side to load a completed result while the other silently falls back to neutral.
-  const patternDiscoveryFingerprint = readPatternDiscoveryDataFingerprint(database);
-  const weighting = readExperimentalDecisionWeighting(
-    database,
-    patternDiscoveryFingerprint,
-    selectedPeriodDays,
-  );
-  const promotedRules = readExperimentalDecisionPromotedRules(
-    database,
-    patternDiscoveryFingerprint,
-    selectedPeriodDays,
-  );
+  const weighting: ExperimentalDecisionWeighting = {
+    mode: 'neutral-fallback',
+    weights: { ...NEUTRAL_DECISION_WEIGHTS },
+    detail:
+      'Fixed GMGN-only weights; Pattern Research is not part of the operational decision flow.',
+    supportingThresholds: [],
+    supportingWallets: 0,
+  };
+  const promotedRules: ExperimentalDecisionPromotedRules = {
+    hyperactivityThresholds: [],
+    hyperactivityCorrelations: [],
+    fastTradingCorrelations: [],
+  };
   const riskByWallet = new Map(
     readGmgnRiskResults(
       database,
@@ -682,6 +691,7 @@ export const computeExperimentalDecisionReport = (
     }).wallets.map((wallet) => [wallet.walletAddress, wallet]),
   );
   const wallets = screen.rows.map((row) => {
+    const gmgnScreen = evaluateGmgnScreenV1(row);
     const canonical = featureSnapshots.get(row.walletAddress)?.decisionMetrics;
     const medianReturnPercent = canonical?.medianReturnPercent ?? row.medianReturnPercent;
     const excludingBestTokenMedianReturnPercent =
@@ -842,6 +852,7 @@ export const computeExperimentalDecisionReport = (
       tags: row.gmgnTags ?? [],
       evidence,
       candidateStatus,
+      gmgnScreen,
       winnerPolicy,
       scores: { edge, consistency, robustness, copyability, overall: rawOverall },
       scoreDetails,
@@ -873,6 +884,7 @@ export const computeExperimentalDecisionReport = (
         matchedRoundTrips: delayedCopy?.copiedTrades ?? 0,
         roundTripsConsidered: delayedCopy?.roundTripsConsidered ?? 0,
       },
+      scenarioReplayTrades: delayedCopy?.replayTrades ?? [],
       scrutiny: null,
       riskDetails: {
         available: risk?.available === true,
@@ -905,21 +917,17 @@ export const computeExperimentalDecisionReport = (
     methodology: [
       'All available saved GMGN history is evaluated through the shared point-in-time wallet feature engine; recent observations receive more weight through the 45-day decay.',
       'Raw overall scores require all four selected-period activity components; thinner samples remain unavailable. Candidate status is descriptive only; authoritative winner status uses the Winner Policy gates.',
-      'Copyability is an execution-feasibility index, not a probability of success; its local activity inputs are hold duration, fast round trips, ultra-fast activity, supplementary promoted rules, and sample confidence.',
+      'Copyability is an execution-feasibility index, not a probability of success; its local GMGN inputs are hold duration, fast round trips, ultra-fast activity, and sample confidence.',
       'The hold contribution uses logarithmic interpolation from 15 seconds to an explicit four-hour cap so materially different execution speeds remain distinguishable.',
       `Direct Copyability penalties are ${COPYABILITY_CONFIG.fastRoundTripPenaltyPerPercent.toFixed(2)} points per fast-round-trip percentage point and ${COPYABILITY_CONFIG.under15SecondPenaltyPerPercent.toFixed(2)} points per under-15-second percentage point; ${COPYABILITY_CONFIG.minimumObservations} paired observations are required for a score.`,
       'Scores are exploratory, capped at 0–100, and missing inputs stay null.',
       'Profitability is a hard gate for final candidacy: the selected-period locally reconstructed median return must be positive, even when the raw weighted score is high.',
       weighting.detail,
-      promotedRules.hyperactivityThresholds.length > 0 ||
-      promotedRules.hyperactivityCorrelations.length > 0 ||
-      promotedRules.fastTradingCorrelations.length > 0
-        ? 'Promoted/stable Pattern Discovery rules provide supplementary Copyability adjustments; direct fast-round-trip and under-15-second penalties remain active even without promoted rules.'
-        : 'No cross-coverage promoted pattern supplied a supplementary Copyability adjustment; direct fast-round-trip and under-15-second penalties remain active.',
+      'Pattern Research is disabled for the operational decision flow; only explicit GMGN rules are applied.',
       'Profit concentration is neutral in Robustness; the score uses performance after removing the best token until stronger evidence supports a reward or penalty.',
       'This tab does not replace or modify the production decision engine.',
       `Winner Policy ${WINNER_POLICY_VERSION} is authoritative for WINNER/REJECTED/UNPROVEN status. Its hard gates are at least 20 completed copied-buy outcomes, profitable fixed-$100 chronological portfolio growth, actionable Dune evidence, and profitability that survives removal of sub-60-second trades. The recency-weighted median remains diagnostic only.`,
-      'Pattern Discovery and official GMGN aggregate snapshots are never used as Winner Policy proof.',
+      'Official GMGN aggregate snapshots are descriptive context and are never used as Winner Policy proof.',
     ],
     weighting,
     wallets,

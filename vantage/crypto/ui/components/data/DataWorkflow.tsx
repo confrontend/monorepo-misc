@@ -1,205 +1,100 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useDataWorkflowStore } from '../../stores/dataWorkflowStore.js';
-import { strings } from '../../strings.js';
-import { FormattedDate } from '../FormattedDate.js';
-import { StatusPill } from '../StatusPill.js';
-import { ActivityFetchProgressPanel } from './ActivityFetchProgressPanel.js';
-import { MetadataFetchProgressPanel } from './MetadataFetchProgressPanel.js';
-import { DuneOutcomeProgressPanel } from './DuneOutcomeProgressPanel.js';
-import {
-  DataHistoryCoveragePanel,
-  type DataHistoryCoverageResponse,
-} from './DataHistoryCoveragePanel.js';
-import {
-  DATA_WORKFLOW_STEP_DEFINITIONS,
-  DataWorkflowStep,
-  type DataWorkflowStepResponse,
-} from './DataWorkflowStep.js';
-import { DatasetReadinessPanel, type DatasetReadinessResponse } from './DatasetReadinessPanel.js';
-import { DataWorkflowWalletSelectionDialog } from './DataWorkflowWalletSelectionDialog.js';
-import type { DataWorkflowRosterResponse } from './dataWorkflowRosterTypes.js';
-import type {
-  DataWorkflowProps,
-  DataWorkflowRunStatus,
-  DataWorkflowStatusResponse,
-} from './dataWorkflowTypes.js';
-import { deriveDataWorkflowUiState } from './dataWorkflowUiState.js';
-export type {
-  DataWorkflowProps,
-  DataWorkflowRunStatus,
-  DataWorkflowStatusResponse,
-} from './dataWorkflowTypes.js';
+import { useCallback, useEffect, useState } from 'react';
+import type { ApiClient } from '../../httpClient.js';
+import { DataCandidateFetchPanel } from './DataCandidateFetchPanel.js';
+import { GmgnHistorySelectionPanel } from './GmgnHistorySelectionPanel.js';
 
-const BASE_ENDPOINT = '/api/copytrade/data-workflow';
-const POLL_INTERVAL_MS = 3000;
-
-const COPY = {
-  title: 'Data workflow',
-  description:
-    'One resumable pipeline for roster, wallet evidence, activity history, coverage verification, outcomes, and readiness.',
-  loading: 'Loading data workflow…',
-  statusError: 'Data workflow status could not be loaded.',
-  start: 'Create workflow run',
-  starting: 'Creating run…',
-  pause: 'Pause workflow',
-  pausing: 'Pausing…',
-  resume: 'Resume workflow',
-  resuming: 'Resuming…',
-  finish: strings.dataWorkflow.finish,
-  finishing: strings.dataWorkflow.finishing,
-  cancel: strings.dataWorkflow.cancel,
-  cancelling: strings.dataWorkflow.cancelling,
-  stopping: 'Stopping…',
-  refresh: 'Refresh status',
-  refreshing: 'Refreshing…',
-} as const;
-
-const numberFormatter = new Intl.NumberFormat('en-CA');
-
-const queryFor = (chain: string, targetDays: number, runId?: number): string => {
-  const query = new URLSearchParams({ chain, targetDays: String(targetDays) });
-  if (runId !== undefined) query.set('runId', String(runId));
-  return query.toString();
+type FetchStatus = {
+  status?: string;
+  running?: boolean;
+  traderLimit?: number;
+  walletTotal?: number;
+  walletDone?: number;
+  tradesFetched?: number;
+  error?: string | null;
+  runId?: number | null;
+  requestsMade?: number;
+  tradesDuplicate?: number;
+  pagesFetchedTotal?: number;
+  currentWalletAddress?: string | null;
+  currentWalletPages?: number | null;
+  currentWalletProgressPercent?: number | null;
+  elapsedSeconds?: number | null;
+  estimatedRemainingSeconds?: number | null;
+  rosterCapturedAt?: string | null;
+  phase?: string | null;
+  stalled?: boolean;
+  requestsStarted?: number;
+  requestsCompleted?: number;
+  expectedTradesTotal?: number | null;
+  storedTradesTotal?: number | null;
+  walletsWithNewData?: number;
+  walletsAlreadyCurrent?: number;
+  currentWalletExpectedTrades?: number | null;
+  currentWalletStoredTrades?: number | null;
+  estimateExceeded?: boolean;
+};
+type StatsStatus = {
+  running?: boolean;
+  status?: string;
+  walletDone?: number;
+  walletTotal?: number;
+  requestsMade?: number;
+  error?: string | null;
 };
 
-const actionError = (reason: unknown): string =>
-  reason instanceof Error ? reason.message : 'The data workflow request failed.';
+type DataWorkflowProps = { api: ApiClient; chain?: string };
+const ROSTER_LIMIT = 100;
 
-const phaseLabel = (phase: string): string => {
-  if (phase === 'ready_for_step') return 'Ready for next step';
-  if (phase === 'running_step') return 'Running';
-  return phase.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+const formatDuration = (seconds: number): string => {
+  const rounded = Math.max(0, Math.round(seconds));
+  if (rounded < 60) return `${rounded}s`;
+  const minutes = Math.floor(rounded / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  return `${minutes}m`;
 };
 
-const workflowLabel = (phase: string, status: DataWorkflowRunStatus | undefined): string => {
-  if (status === 'abandoned') return 'Cancelled';
-  if (status === 'completed_with_warnings') return 'Finished with warnings';
-  return phaseLabel(phase);
+const describeFetch = (status: FetchStatus | null): string => {
+  if (!status) return 'No GMGN fetch has been started.';
+  if (status.running) {
+    const done = status.walletDone ?? 0;
+    const total = status.walletTotal ?? status.traderLimit ?? ROSTER_LIMIT;
+    return `${status.stalled ? 'No progress detected' : 'Fetching GMGN history'} · ${done}/${total} wallets`;
+  }
+  if (status.error) return status.error;
+  if (status.status === 'completed') {
+    return `GMGN history is current${status.tradesFetched === undefined ? '' : ` · ${status.tradesFetched.toLocaleString()} trades saved`}.`;
+  }
+  return status.status ? `GMGN fetch ${status.status}.` : 'No GMGN fetch has been started.';
 };
 
-export function DataWorkflow({
-  api,
-  chain = 'sol',
-  initialTargetDays = 30,
-  traderLimit = 100,
-}: DataWorkflowProps) {
-  const {
-    targetDays,
-    statusResponse,
-    coverage,
-    readiness,
-    loadingStatus,
-    loadingCoverage,
-    loadingReadiness,
-    error,
-    coverageError,
-    readinessError,
-    rosterResponse,
-    loadingRoster,
-    rosterLoadError,
-    selectedWallets,
-    walletSelectionOpen,
-    busyAction,
-    rosterBusy,
-    rosterError,
-    retryingWallet,
-    reset,
-    setTargetDays,
-    setStatusResponse,
-    setCoverage,
-    setReadiness,
-    setLoadingStatus,
-    setLoadingCoverage,
-    setLoadingReadiness,
-    setError,
-    setCoverageError,
-    setReadinessError,
-    setRosterResponse,
-    setLoadingRoster,
-    setRosterLoadError,
-    setSelectedWallets,
-    toggleWallet,
-    setWalletSelectionOpen,
-    setBusyAction,
-    setRosterBusy,
-    setRosterError,
-    setRetryingWallet,
-  } = useDataWorkflowStore();
-  const statusPollInFlight = useRef(false);
-  useEffect(() => reset(initialTargetDays), [initialTargetDays, reset]);
-  const workflowRunId = statusResponse?.run?.id;
+export function DataWorkflow({ api, chain = 'sol' }: DataWorkflowProps) {
+  const [status, setStatus] = useState<FetchStatus | null>(null);
+  const [statsStatus, setStatsStatus] = useState<StatsStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<'import' | 'fetch' | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
 
   const loadStatus = useCallback(async () => {
-    const result = await api<DataWorkflowStatusResponse>(
-      `${BASE_ENDPOINT}/status?${queryFor(chain, targetDays)}`,
-    );
-    setStatusResponse(result);
-    if (result.targetDays === 30 || result.targetDays === 60 || result.targetDays === 90) {
-      setTargetDays(result.targetDays);
-    }
-    setError(null);
+    const result = await api<FetchStatus>('/api/copytrade/fetch/status');
+    setStatus(result);
+    const stats = await api<StatsStatus>('/api/copytrade/stats/status');
+    setStatsStatus(stats);
     return result;
-  }, [api, chain, targetDays]);
-
-  const loadCoverage = useCallback(async () => {
-    setLoadingCoverage(true);
-    try {
-      const result = await api<DataHistoryCoverageResponse>(
-        `${BASE_ENDPOINT}/coverage?${queryFor(chain, targetDays, workflowRunId)}`,
-      );
-      setCoverage(result);
-      setCoverageError(null);
-    } catch (reason: unknown) {
-      setCoverageError(actionError(reason));
-    } finally {
-      setLoadingCoverage(false);
-    }
-  }, [api, chain, targetDays, workflowRunId]);
-
-  const loadReadiness = useCallback(async () => {
-    setLoadingReadiness(true);
-    try {
-      const result = await api<DatasetReadinessResponse>(
-        `${BASE_ENDPOINT}/readiness?${queryFor(chain, targetDays, workflowRunId)}`,
-      );
-      setReadiness(result);
-      setReadinessError(null);
-    } catch (reason: unknown) {
-      setReadinessError(actionError(reason));
-    } finally {
-      setLoadingReadiness(false);
-    }
-  }, [api, chain, targetDays, workflowRunId]);
-
-  const loadRoster = useCallback(async () => {
-    setLoadingRoster(true);
-    try {
-      const result = await api<DataWorkflowRosterResponse>(
-        `${BASE_ENDPOINT}/roster?${new URLSearchParams({
-          chain,
-          limit: String(traderLimit),
-          periodDays: String(targetDays),
-        })}`,
-      );
-      setRosterResponse(result);
-      setSelectedWallets(new Set(result.wallets.map((wallet) => wallet.walletAddress)));
-      setRosterLoadError(null);
-    } catch (reason: unknown) {
-      setRosterLoadError(actionError(reason));
-    } finally {
-      setLoadingRoster(false);
-    }
-  }, [api, chain, targetDays, traderLimit]);
+  }, [api]);
 
   useEffect(() => {
     let disposed = false;
-    setLoadingStatus(true);
     void loadStatus()
-      .catch((reason: unknown) => {
-        if (!disposed) setError(actionError(reason));
+      .catch((error) => {
+        if (!disposed)
+          setMessage(error instanceof Error ? error.message : 'Could not read GMGN status.');
       })
       .finally(() => {
-        if (!disposed) setLoadingStatus(false);
+        if (!disposed) setLoading(false);
       });
     return () => {
       disposed = true;
@@ -207,550 +102,225 @@ export function DataWorkflow({
   }, [loadStatus]);
 
   useEffect(() => {
-    void loadRoster();
-  }, [loadRoster]);
-
-  useEffect(() => {
-    const activeTargetDays =
-      statusResponse?.run?.status === 'active' ? statusResponse.run.targetDays : null;
-    if (activeTargetDays !== null && activeTargetDays !== targetDays) {
-      setTargetDays(activeTargetDays);
-    }
-  }, [statusResponse?.run?.status, statusResponse?.run?.targetDays, targetDays]);
-
-  const { activeRun, phase, isActive, isPaused, linkedGmgnJob, externalGmgnJob, externalBlockers } =
-    deriveDataWorkflowUiState(statusResponse);
-  const activityProgress = linkedGmgnJob?.progress ?? null;
-  const startAction = statusResponse?.actions.start;
-  const pauseAction = statusResponse?.actions.pause;
-  const resumeAction = statusResponse?.actions.resume;
-  const finishAction = statusResponse?.actions.finish;
-  const cancelAction = statusResponse?.actions.cancel;
-  const startDisabledReason = startAction?.allowed === false ? startAction.message : null;
-  const pauseDisabledReason = pauseAction?.allowed === false ? pauseAction.message : null;
-  const resumeDisabledReason = resumeAction?.allowed === false ? resumeAction.message : null;
-  const finishDisabledReason = finishAction?.allowed === false ? finishAction.message : null;
-  const cancelDisabledReason = cancelAction?.allowed === false ? cancelAction.message : null;
-
-  useEffect(() => {
-    if (!statusResponse?.shouldPoll) return undefined;
+    // Stage 2 history fetches are started by the child panel. Keep polling while
+    // that panel reports a request in flight, even before the first status refresh
+    // has observed `status.running`.
+    if (!status?.running && !statsStatus?.running && !historyBusy) return undefined;
     const timer = window.setInterval(() => {
-      if (statusPollInFlight.current) return;
-      statusPollInFlight.current = true;
-      void loadStatus()
-        .catch((reason: unknown) => setError(actionError(reason)))
-        .finally(() => {
-          statusPollInFlight.current = false;
-        });
-    }, POLL_INTERVAL_MS);
+      void loadStatus().catch(() => undefined);
+    }, 1500);
+    void loadStatus().catch(() => undefined);
     return () => window.clearInterval(timer);
-  }, [statusResponse?.shouldPoll, loadStatus]);
+  }, [historyBusy, loadStatus, status?.running, statsStatus?.running]);
 
-  const runAction = async (action: 'start' | 'pause' | 'resume', walletAddresses?: string[]) => {
-    setBusyAction(action);
-    setError(null);
-    try {
-      const runId = activeRun?.id;
-      const init: RequestInit = {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          chain,
-          targetDays,
-          traderLimit,
-          ...(action === 'start' && walletAddresses ? { walletAddresses } : {}),
-          ...(runId === undefined ? {} : { runId }),
-        }),
-      };
-      await api<{ runId?: number; status?: DataWorkflowRunStatus }>(
-        `${BASE_ENDPOINT}/${action}`,
-        init,
-      );
-      const next = await loadStatus();
-      if (next.run?.id !== activeRun?.id || action !== 'pause') {
-        await Promise.all([loadCoverage(), loadReadiness()]);
-      }
-    } catch (reason: unknown) {
-      setError(actionError(reason));
-    } finally {
-      setBusyAction(null);
-    }
-  };
+  useEffect(() => {
+    if (historyBusy && status && !status.running) setHistoryBusy(false);
+  }, [historyBusy, status]);
 
-  const closeWorkflow = async (action: 'finish' | 'cancel') => {
-    if (!activeRun) return;
-    setBusyAction(action);
-    setError(null);
-    try {
-      await api<{ runId: number; status: DataWorkflowRunStatus }>(`${BASE_ENDPOINT}/${action}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ runId: activeRun.id }),
-      });
-      await loadStatus();
-      await Promise.all([loadCoverage(), loadReadiness()]);
-    } catch (reason: unknown) {
-      setError(actionError(reason));
-    } finally {
-      setBusyAction(null);
+  useEffect(() => {
+    if (
+      statsStatus &&
+      !statsStatus.running &&
+      message ===
+        'GMGN summary fetch started. Select wallets below when it finishes to fetch history.'
+    ) {
+      setMessage(null);
     }
-  };
-
-  const runStep = async (stepKey: DataWorkflowStepResponse['stepKey']) => {
-    if (!activeRun) return;
-    setBusyAction('step');
-    setError(null);
-    try {
-      await api(`${BASE_ENDPOINT}/step`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ runId: activeRun.id, stepKey }),
-      });
-      await Promise.all([loadStatus(), loadCoverage(), loadReadiness()]);
-    } catch (reason: unknown) {
-      setError(actionError(reason));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const refreshAll = async () => {
-    setBusyAction('refresh');
-    try {
-      await loadStatus();
-      await Promise.all([loadCoverage(), loadReadiness()]);
-    } catch (reason: unknown) {
-      setError(actionError(reason));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const refreshRoster = async () => {
-    setRosterBusy('refresh');
-    setRosterError(null);
-    try {
-      await api('/api/copytrade/roster/refresh', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chain, limit: traderLimit }),
-      });
-      await Promise.all([loadStatus(), loadRoster(), loadCoverage(), loadReadiness()]);
-    } catch (reason: unknown) {
-      setRosterError(actionError(reason));
-    } finally {
-      setRosterBusy(null);
-    }
-  };
+  }, [message, statsStatus]);
 
   const importRoster = async (file: File) => {
-    setRosterBusy('import');
-    setRosterError(null);
+    setBusy('import');
+    setMessage(null);
     try {
       await api('/api/copytrade/roster/import', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: file.name, content: await file.text() }),
       });
-      await Promise.all([loadStatus(), loadRoster(), loadCoverage(), loadReadiness()]);
-    } catch (reason: unknown) {
-      setRosterError(actionError(reason));
+      setMessage('Roster imported.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not import the roster.');
     } finally {
-      setRosterBusy(null);
+      setBusy(null);
     }
   };
 
-  const toggleWalletSelection = (walletAddress: string) => toggleWallet(walletAddress);
-
-  const retryWallet = async (walletAddress: string) => {
-    setRetryingWallet(walletAddress);
-    setCoverageError(null);
+  const refreshAndFetch = async () => {
+    setBusy('fetch');
+    setMessage(null);
     try {
-      await api<{ accepted: boolean }>(`${BASE_ENDPOINT}/coverage/retry`, {
+      await api('/api/copytrade/stats/fetch', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          chain,
-          targetDays,
-          walletAddress,
-          runId: activeRun?.id ?? null,
-        }),
+        body: JSON.stringify({ limit: ROSTER_LIMIT }),
       });
-      await Promise.all([loadStatus(), loadCoverage(), loadReadiness()]);
-    } catch (reason: unknown) {
-      setCoverageError(actionError(reason));
+      setMessage(
+        'GMGN summary fetch started. Select wallets below when it finishes to fetch history.',
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'GMGN summary fetch could not start.');
     } finally {
-      setRetryingWallet(null);
+      setBusy(null);
     }
   };
 
-  const stopExternalFetch = async () => {
-    setBusyAction('stop');
-    setError(null);
+  const stopGmgn = async () => {
+    setBusy('fetch');
     try {
       await api('/api/copytrade/fetch/stop', { method: 'POST' });
       await loadStatus();
-    } catch (reason: unknown) {
-      setError(actionError(reason));
     } finally {
-      setBusyAction(null);
+      setBusy(null);
     }
   };
 
-  const steps = useMemo(() => {
-    const byKey = new Map(statusResponse?.steps.map((step) => [step.stepKey, step]));
-    return DATA_WORKFLOW_STEP_DEFINITIONS.map((definition, index) => ({
-      definition,
-      step: (() => {
-        const step =
-          byKey.get(definition.key) ??
-          ({
-            stepKey: definition.key,
-            stepOrder: index + 1,
-            status: 'not_started',
-            startedAt: null,
-            updatedAt: statusResponse?.generatedAt ?? new Date(0).toISOString(),
-            completedAt: null,
-            lastSuccessAt: null,
-            underlyingRunId: null,
-            underlyingRunKind: null,
-            recordsTotal: 0,
-            recordsNew: 0,
-            walletsTotal: 0,
-            walletsDone: 0,
-            walletsFailed: 0,
-            warnings: [],
-            error: null,
-            action: {
-              allowed: false,
-              reasonCode: 'no_active_workflow',
-              message: 'Create a workflow run first.',
-            },
-          } satisfies DataWorkflowStepResponse);
-        // The activity step reports fetch execution progress. Coverage completion is a
-        // separate quality gate and belongs on the following verification step; using it here
-        // made a finished 25/25 fetch appear as only 17/25 complete.
-        return definition.key === 'activity_history' && activityProgress
-          ? {
-              ...step,
-              recordsTotal: activityProgress.walletsTotal,
-              walletsTotal: activityProgress.walletsTotal,
-              walletsDone: activityProgress.walletsDone,
-              walletsFailed: activityProgress.walletsFailed,
-            }
-          : step;
-      })(),
-    }));
-  }, [activeRun?.id, activityProgress, statusResponse]);
-
   return (
-    <section className="copytrade-research-route" aria-labelledby="data-workflow-title">
+    <section className="copytrade-research-route" aria-labelledby="gmgn-data-title">
       <div className="copytrade-results-meta">
         <div>
-          <p className="eyebrow">CENTRALIZED DATA</p>
-          <h2 id="data-workflow-title">{COPY.title}</h2>
-          <p>{COPY.description}</p>
+          <p className="eyebrow">GMGN DATA</p>
+          <h2 id="gmgn-data-title">Collect GMGN evidence</h2>
+          <p>
+            Import a roster, fetch lightweight GMGN summaries, then choose which wallets deserve
+            full history and Dune analysis.
+          </p>
+          <p className="copytrade-status-warning">
+            Stage 1 does not fetch full activity history. It only loads summary data for the saved
+            roster so you can choose the history workload.
+          </p>
         </div>
-        {activeRun && (
+        <span className="copytrade-workflow-status">
+          <strong>
+            {loading ? 'Loading…' : status?.running || statsStatus?.running ? 'Fetching' : 'Ready'}
+          </strong>
+        </span>
+      </div>
+      <div className="copytrade-workflow-actions">
+        <div className="copytrade-workflow-row">
           <div className="copytrade-workflow-status">
-            <strong>{workflowLabel(phase, activeRun.status)}</strong>
+            <strong>History depth: Maximum available</strong>
+            <small>GMGN fetches as far back as the provider makes available.</small>
             <small>
-              Run #{activeRun.id} · {activeRun.chain.toUpperCase()} ·{' '}
-              {numberFormatter.format(activeRun.rosterWallets.length)} wallets
+              Roster snapshot:{' '}
+              {status?.rosterCapturedAt
+                ? new Date(status.rosterCapturedAt).toLocaleString()
+                : 'No imported roster available'}
+            </small>
+          </div>
+          <div className="copytrade-workflow-inline-actions">
+            <label className="secondary copytrade-file-button">
+              {busy === 'import' ? 'Importing…' : 'Import roster JSON'}
+              <input
+                type="file"
+                accept="application/json,.json"
+                disabled={
+                  busy !== null || status?.running === true || statsStatus?.running === true
+                }
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = '';
+                  if (file) void importRoster(file);
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void refreshAndFetch()}
+              disabled={busy !== null || status?.running === true || statsStatus?.running === true}
+            >
+              {busy === 'fetch' ? 'Fetching GMGN summaries…' : 'Fetch GMGN summaries'}
+            </button>
+            {status?.running && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void stopGmgn()}
+                disabled={busy !== null}
+              >
+                Stop
+              </button>
+            )}
+          </div>
+        </div>
+        <p className="copytrade-fetch-status" role="status">
+          {statsStatus?.running
+            ? `Fetching GMGN summaries · ${statsStatus.walletDone ?? 0}/${statsStatus.walletTotal ?? ROSTER_LIMIT} wallets`
+            : statsStatus?.status === 'failed'
+              ? (statsStatus.error ?? 'GMGN summary fetch failed.')
+              : status?.running || !status?.runId
+                ? describeFetch(status)
+                : 'Ready'}
+        </p>
+        {status?.running && (
+          <div className="copytrade-fetch-detail" role="status" aria-label="GMGN fetch progress">
+            <div className="copytrade-fetch-detail-header">
+              <strong>
+                Wallet {Math.min((status.walletDone ?? 0) + 1, status.walletTotal ?? 0)} /{' '}
+                {status.walletTotal ?? 0}
+              </strong>
+              <span>
+                {status.currentWalletProgressPercent == null
+                  ? 'Progress from saved rows'
+                  : `${status.currentWalletProgressPercent.toFixed(0)}% current wallet`}
+              </span>
+            </div>
+            <progress max={status.walletTotal || 1} value={status.walletDone ?? 0} />
+            <small>
+              {status.currentWalletAddress
+                ? `Current: ${status.currentWalletAddress.slice(0, 8)}…${status.currentWalletAddress.slice(-6)} · `
+                : ''}
+              {status.currentWalletPages ?? 0} pages ·{' '}
+              {status.requestsCompleted ?? status.requestsMade ?? 0}/
+              {status.requestsStarted ?? status.requestsMade ?? 0} GMGN requests ·{' '}
+              {(status.tradesFetched ?? 0).toLocaleString()} new ·{' '}
+              {(status.tradesDuplicate ?? 0).toLocaleString()} duplicates skipped ·{' '}
+              {(status.storedTradesTotal ?? 0).toLocaleString()} total saved
+              {status.phase ? ` · ${status.phase.replaceAll('_', ' ')}` : ''}
+            </small>
+            <small>
+              Workload estimate:{' '}
+              {status.expectedTradesTotal == null
+                ? 'unavailable'
+                : `${status.expectedTradesTotal.toLocaleString()} trades across ${status.walletTotal ?? 0} wallets`}
+              {status.estimateExceeded
+                ? ' (estimate already exceeded; remaining count is not reliable)'
+                : ''}
+              {status.currentWalletExpectedTrades != null
+                ? ` · current wallet estimate ${status.currentWalletExpectedTrades.toLocaleString()}, stored ${status.currentWalletStoredTrades?.toLocaleString() ?? '0'}`
+                : ''}
+            </small>
+            <small>
+              {status.elapsedSeconds == null
+                ? ''
+                : `Elapsed ${formatDuration(status.elapsedSeconds)}`}
+              {status.estimatedRemainingSeconds == null
+                ? ''
+                : ` · about ${formatDuration(status.estimatedRemainingSeconds)} remaining`}
             </small>
           </div>
         )}
+        {status?.runId && !status.running && status.status !== 'idle' && (
+          <p className="copytrade-fetch-status" role="status">
+            Last history fetch: {(status.status ?? 'finished').trim()} ·{' '}
+            {status.requestsCompleted ?? status.requestsMade ?? 0} requests ·{' '}
+            {(status.tradesFetched ?? 0).toLocaleString()} new ·{' '}
+            {(status.tradesDuplicate ?? 0).toLocaleString()} duplicates skipped.
+          </p>
+        )}
+        {message && (
+          <p className="copytrade-status-warning" role="status">
+            {message}
+          </p>
+        )}
       </div>
-
-      <div className="copytrade-workflow-actions">
-        <div className="copytrade-workflow-row">
-          <div className="copytrade-workflow-label">
-            <div>
-              <strong>Requested history window</strong>
-              <small>Choose the depth this run must verify for each wallet.</small>
-            </div>
-          </div>
-          <div className="copytrade-workflow-status">
-            <strong>History depth: Maximum available</strong>
-            <small>30/60/90-day milestones remain diagnostic only.</small>
-          </div>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => setWalletSelectionOpen(true)}
-            disabled={
-              loadingStatus || loadingRoster || busyAction !== null || Boolean(startDisabledReason)
-            }
-            title={startDisabledReason ?? undefined}
-          >
-            {busyAction === 'start' ? COPY.starting : COPY.start}
-          </button>
-          {startDisabledReason && <small>Disabled: {startDisabledReason}</small>}
-        </div>
-
-        <div className="copytrade-workflow-row">
-          <div className="copytrade-workflow-label">
-            <div>
-              <strong>Workflow controls</strong>
-              <small>Pause keeps completed pages and resume continues from saved cursors.</small>
-            </div>
-          </div>
-          <div className="copytrade-workflow-status">
-            <StatusBadge status={phase} />
-            {activeRun?.updatedAt && (
-              <small>
-                Updated <FormattedDate value={activeRun.updatedAt} />
-              </small>
-            )}
-          </div>
-          <div>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void runAction('pause')}
-              disabled={busyAction !== null || Boolean(pauseDisabledReason)}
-              title={pauseDisabledReason ?? undefined}
-            >
-              {busyAction === 'pause' ? COPY.pausing : COPY.pause}
-            </button>{' '}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void runAction('resume')}
-              disabled={busyAction !== null || Boolean(resumeDisabledReason)}
-              title={resumeDisabledReason ?? undefined}
-            >
-              {busyAction === 'resume' ? COPY.resuming : COPY.resume}
-            </button>{' '}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void closeWorkflow('finish')}
-              disabled={busyAction !== null || Boolean(finishDisabledReason)}
-              title={finishDisabledReason ?? strings.dataWorkflow.finishHelp}
-            >
-              {busyAction === 'finish' ? COPY.finishing : COPY.finish}
-            </button>{' '}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void closeWorkflow('cancel')}
-              disabled={busyAction !== null || Boolean(cancelDisabledReason)}
-              title={cancelDisabledReason ?? strings.dataWorkflow.cancelHelp}
-            >
-              {busyAction === 'cancel' ? COPY.cancelling : COPY.cancel}
-            </button>
-          </div>
-          {(pauseDisabledReason ||
-            resumeDisabledReason ||
-            finishDisabledReason ||
-            cancelDisabledReason) && (
-            <small>
-              {pauseDisabledReason && <>Pause disabled: {pauseDisabledReason} </>}
-              {resumeDisabledReason && <>Resume disabled: {resumeDisabledReason} </>}
-              {finishDisabledReason && <>Finish disabled: {finishDisabledReason} </>}
-              {cancelDisabledReason && <>Cancel disabled: {cancelDisabledReason}</>}
-            </small>
-          )}
-        </div>
-      </div>
-
-      {loadingStatus && !statusResponse && (
-        <p className="muted" role="status">
-          {COPY.loading}
-        </p>
-      )}
-      {error && (
-        <p className="error-message" role="alert">
-          {error || COPY.statusError}
-        </p>
-      )}
-      {externalBlockers.length > 0 && (
-        <div className="copytrade-workflow-external-blocker" role="status">
-          <strong>Another production job is running</strong>
-          {externalBlockers.map((job) => (
-            <span key={`${job.kind}-${job.jobRunId}`}>{job.label}</span>
-          ))}
-          {externalGmgnJob?.progress && (
-            <ActivityFetchProgressPanel progress={externalGmgnJob.progress} />
-          )}
-          <small>
-            {externalGmgnJob && !externalGmgnJob.progress
-              ? 'This GMGN activity fetch is not linked to a Data workflow, so its progress and stop control are not available on this page.'
-              : 'This page is monitoring the shared lock. Its progress and stop control belong to the tab or workflow that started that job.'}
-          </small>
-          {externalGmgnJob?.stoppable && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void stopExternalFetch()}
-              disabled={busyAction !== null}
-            >
-              {busyAction === 'stop' ? COPY.stopping : 'Stop active GMGN fetch'}
-            </button>
-          )}
-        </div>
-      )}
-
-      <div className="copytrade-workflow-actions" aria-label="Data workflow steps">
-        {steps.map(({ definition, step }) => (
-          <DataWorkflowStep
-            key={definition.key}
-            definition={definition}
-            step={step}
-            action={step.action}
-            onAction={() => void runStep(step.stepKey)}
-            actionLabel={busyAction === 'step' ? 'Running…' : 'Run step'}
-            actionDisabled={busyAction !== null}
-          >
-            {definition.key === 'roster' && (
-              <div className="copytrade-workflow-inline-actions">
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => void refreshRoster()}
-                  disabled={rosterBusy !== null || Boolean(isActive)}
-                >
-                  {rosterBusy === 'refresh' ? 'Refreshing roster…' : 'Refresh GMGN roster'}
-                </button>
-                <label className="secondary copytrade-file-button">
-                  {rosterBusy === 'import' ? 'Importing roster…' : 'Import roster JSON'}
-                  <input
-                    type="file"
-                    accept="application/json,.json"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      event.target.value = '';
-                      if (file) void importRoster(file);
-                    }}
-                    disabled={rosterBusy !== null || Boolean(isActive)}
-                  />
-                </label>
-                {rosterError && (
-                  <small className="error-message" role="alert">
-                    {rosterError}
-                  </small>
-                )}
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setWalletSelectionOpen(true)}
-                  disabled={
-                    loadingRoster ||
-                    rosterBusy !== null ||
-                    Boolean(isActive) ||
-                    (rosterResponse?.wallets.length ?? 0) === 0
-                  }
-                >
-                  {loadingRoster
-                    ? 'Loading wallets…'
-                    : `Choose wallets${rosterResponse ? ` (${selectedWallets.size}/${rosterResponse.wallets.length})` : ''}`}
-                </button>
-                {rosterLoadError && <small className="error-message">{rosterLoadError}</small>}
-              </div>
-            )}
-            {definition.key === 'wallet_metadata' && (
-              <MetadataFetchProgressPanel progress={statusResponse?.metadataProgress ?? null} />
-            )}
-            {definition.key === 'activity_history' && (
-              <ActivityFetchProgressPanel progress={activityProgress} />
-            )}
-            {definition.key === 'coverage_verification' && (
-              <DataHistoryCoveragePanel
-                response={coverage}
-                loading={loadingCoverage}
-                error={coverageError}
-                onRetryWallet={(walletAddress) => void retryWallet(walletAddress)}
-                retryingWalletAddress={retryingWallet}
-              />
-            )}
-            {definition.key === 'dune_outcomes' && (
-              <>
-                <DuneOutcomeProgressPanel
-                  progress={statusResponse?.duneProgress ?? null}
-                  step={step}
-                />
-                {activeRun?.depthMode === 'requested' &&
-                  !step.action.allowed &&
-                  step.status !== 'running' && (
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={async () => {
-                        setBusyAction('step');
-                        setError(null);
-                        try {
-                          await api(`${BASE_ENDPOINT}/dune`, {
-                            method: 'POST',
-                            headers: { 'content-type': 'application/json' },
-                            body: JSON.stringify({ runId: activeRun.id, allowPartialDepth: true }),
-                          });
-                          await Promise.all([loadStatus(), loadCoverage(), loadReadiness()]);
-                        } catch (reason: unknown) {
-                          setError(actionError(reason));
-                        } finally {
-                          setBusyAction(null);
-                        }
-                      }}
-                      disabled={busyAction !== null}
-                    >
-                      Fetch available Dune outcomes anyway
-                    </button>
-                  )}
-              </>
-            )}
-            {definition.key === 'readiness' && (
-              <DatasetReadinessPanel
-                response={readiness}
-                loading={loadingReadiness}
-                error={readinessError}
-              />
-            )}
-          </DataWorkflowStep>
-        ))}
-      </div>
-
-      {activeRun?.error && (
-        <p className="error-message" role="alert">
-          {activeRun.error}
-        </p>
-      )}
-      {walletSelectionOpen && rosterResponse && (
-        <DataWorkflowWalletSelectionDialog
-          wallets={rosterResponse.wallets}
-          selectedWallets={selectedWallets}
-          onToggleWallet={toggleWalletSelection}
-          onSetSelectedWallets={(walletAddresses) => setSelectedWallets(new Set(walletAddresses))}
-          onClose={() => setWalletSelectionOpen(false)}
-          periodDays={targetDays}
-          chain={chain}
-          api={api}
-          onConfirm={() => {
-            setWalletSelectionOpen(false);
-            void runAction('start', [...selectedWallets]);
-          }}
-        />
-      )}
-      <div className="copytrade-workflow-utility">
-        <span>
-          Last status generated: <FormattedDate value={statusResponse?.generatedAt ?? null} />
-        </span>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => void refreshAll()}
-          disabled={busyAction !== null}
-        >
-          {busyAction === 'refresh' ? COPY.refreshing : COPY.refresh}
-        </button>
-      </div>
+      <GmgnHistorySelectionPanel
+        api={api}
+        busy={historyBusy || status?.running === true}
+        completed={status?.status === 'completed' && status.running !== true}
+        onBusyChange={setHistoryBusy}
+      />
+      <DataCandidateFetchPanel api={api} />
     </section>
   );
-}
-
-type StatusBadgeProps = { status: string };
-
-function StatusBadge({ status }: StatusBadgeProps) {
-  const normalized = status === 'not_started' ? 'missing' : status;
-  return <StatusPill status={normalized}>{phaseLabel(status)}</StatusPill>;
 }

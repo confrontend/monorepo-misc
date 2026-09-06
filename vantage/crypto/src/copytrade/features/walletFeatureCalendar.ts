@@ -94,7 +94,7 @@ export const readWalletFeatureSourceRevisionsAtCutoff = (
         `SELECT wallet_address AS walletAddress, MAX(id) AS sourceDataRevision
          FROM copytrade_trades
          WHERE chain = ? AND wallet_address IN (${placeholders})
-           AND event_type IN ('buy', 'sell') AND observed_timestamp < ?
+           AND event_type IN ('buy', 'sell', 'transfer_in') AND observed_timestamp < ?
          GROUP BY wallet_address`,
       )
       .all(chain, ...walletGroup, cutoffSeconds) as unknown as Array<{

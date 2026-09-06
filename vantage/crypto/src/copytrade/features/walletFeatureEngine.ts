@@ -1,3 +1,8 @@
+import {
+  canonicalizeActivityType,
+  TransferAwareInventory,
+} from '../accounting/transferInventory.js';
+
 export type WalletFeatureTrade = {
   id: number;
   eventType: string;
@@ -5,6 +10,7 @@ export type WalletFeatureTrade = {
   observedTimestamp: number;
   costUsd: string | null;
   buyCostUsd: string | null;
+  tokenAmount?: string | null;
   launchpadPlatform?: string | null;
 };
 
@@ -174,9 +180,9 @@ type ReturnObservation = {
 /**
  * Canonical ordered GMGN activity accumulator.
  *
- * This intentionally preserves Pattern Discovery's established compatibility semantics:
- * sell returns use cost_usd/buy_cost_usd and hold time uses the latest prior buy per token.
- * Semantic changes belong in a new engine version, not in this extraction.
+ * Sell returns still use cost_usd/buy_cost_usd, but only when the shared inventory resolver
+ * proves a purchase and finds no unresolved transfer-in inventory. Hold time retains the latest
+ * prior-buy approximation for compatible metrics.
  */
 export class WalletFeatureAccumulator {
   private tradeCount = 0;
@@ -207,22 +213,43 @@ export class WalletFeatureAccumulator {
   private readonly profitByDay = new Map<string, number>();
   private readonly returnMedian = new StreamingMedian();
   private readonly holdMedian = new StreamingMedian();
+  private readonly inventory = new TransferAwareInventory();
 
   /** Seed only state needed to pair an in-window sell without counting older activity. */
   applyPreWindowContext(row: WalletFeatureTrade): void {
-    if (row.eventType === 'buy') {
+    this.inventory.apply({
+      id: row.id,
+      eventType: row.eventType,
+      tokenAddress: row.tokenAddress,
+      observedTimestamp: row.observedTimestamp,
+      tokenAmount: row.tokenAmount ?? null,
+      costUsd: row.costUsd,
+      buyCostUsd: row.buyCostUsd,
+    });
+    if (canonicalizeActivityType(row.eventType) === 'buy') {
       this.lastBuyByToken.set(row.tokenAddress, row.observedTimestamp);
     }
   }
 
   apply(row: WalletFeatureTrade): void {
+    const canonicalType = canonicalizeActivityType(row.eventType);
+    const resolved = this.inventory.apply({
+      id: row.id,
+      eventType: row.eventType,
+      tokenAddress: row.tokenAddress,
+      observedTimestamp: row.observedTimestamp,
+      tokenAmount: row.tokenAmount ?? null,
+      costUsd: row.costUsd,
+      buyCostUsd: row.buyCostUsd,
+    });
+    if (canonicalType !== 'buy' && canonicalType !== 'sell') return;
     this.tradeCount += 1;
     this.tokenTradeCount.set(
       row.tokenAddress,
       (this.tokenTradeCount.get(row.tokenAddress) ?? 0) + 1,
     );
     this.activeDays.add(new Date(row.observedTimestamp * 1000).toISOString().slice(0, 10));
-    if (row.eventType === 'buy') {
+    if (canonicalType === 'buy') {
       this.buyCount += 1;
       this.buyVolume += numericAmount(row.costUsd) ?? 0;
       this.tokenBuyCount.set(row.tokenAddress, (this.tokenBuyCount.get(row.tokenAddress) ?? 0) + 1);
@@ -244,7 +271,7 @@ export class WalletFeatureAccumulator {
       (this.tokenSellVolume.get(row.tokenAddress) ?? 0) + (numericAmount(row.costUsd) ?? 0),
     );
     const boughtAt = this.lastBuyByToken.get(row.tokenAddress);
-    if (boughtAt !== undefined) {
+    if (resolved?.eligible === true && boughtAt !== undefined) {
       const hold = Math.max(0, row.observedTimestamp - boughtAt);
       this.holdMedian.add(hold);
       this.holds.push(hold);
@@ -254,7 +281,7 @@ export class WalletFeatureAccumulator {
 
     const proceeds = numericAmount(row.costUsd);
     const costBasis = numericAmount(row.buyCostUsd);
-    if (proceeds === null || costBasis === null || costBasis <= 0) {
+    if (resolved?.eligible !== true || proceeds === null || costBasis === null || costBasis <= 0) {
       this.excludedReturnCount += 1;
       return;
     }

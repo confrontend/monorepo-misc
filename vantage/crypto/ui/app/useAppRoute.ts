@@ -7,7 +7,6 @@ export const parseCopyTradeRoute = (route: string): { menu: string; subTab: Copy
   const [rawMenu, rawSubTab] = route.split('/');
   const subTab: CopyTradeSubTab =
     rawSubTab === 'data' ||
-    rawSubTab === 'pattern-discovery' ||
     rawSubTab === 'api-reference' ||
     rawSubTab === 'experimental-decision' ||
     rawSubTab === 'live-evaluation' ||

@@ -10,7 +10,6 @@ type AppNavigationProps = {
 
 const tabs: Array<{ key: CopyTradeSubTab; label: string }> = [
   { key: 'data', label: 'Data' },
-  { key: 'pattern-discovery', label: 'Pattern Research' },
   { key: 'experimental-decision', label: 'Decision Engine' },
   { key: 'live-evaluation', label: 'Live Evaluation' },
   { key: 'solana-benchmark', label: 'Solana Benchmark' },

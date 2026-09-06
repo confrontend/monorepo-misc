@@ -161,10 +161,10 @@ export const readPreEventFeatures = (
   const rows = database
     .prepare(
       `SELECT id, event_type AS eventType, token_address AS tokenAddress,
-              observed_timestamp AS observedTimestamp, cost_usd AS costUsd,
+              observed_timestamp AS observedTimestamp, token_amount AS tokenAmount, cost_usd AS costUsd,
               buy_cost_usd AS buyCostUsd
        FROM copytrade_trades
-       WHERE chain = 'sol' AND wallet_address = ? AND event_type IN ('buy', 'sell')
+       WHERE chain = 'sol' AND wallet_address = ? AND event_type IN ('buy', 'sell', 'transfer_in')
          AND (observed_timestamp < ? OR (observed_timestamp = ? AND id < ?))
        ORDER BY observed_timestamp ASC, id ASC`,
     )
@@ -233,11 +233,11 @@ export const readPreEventFeatureSnapshotsBatch = (
       .prepare(
         `SELECT id, wallet_address AS walletAddress, event_type AS eventType,
                 token_address AS tokenAddress, observed_timestamp AS observedTimestamp,
-                cost_usd AS costUsd, buy_cost_usd AS buyCostUsd,
+                token_amount AS tokenAmount, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd,
                 launchpad_platform AS launchpadPlatform
          FROM copytrade_trades
          WHERE chain = ? AND wallet_address IN (${placeholders})
-           AND event_type IN ('buy', 'sell')
+           AND event_type IN ('buy', 'sell', 'transfer_in')
          ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
       )
       .all(chain, ...walletGroup) as unknown as Array<
@@ -322,7 +322,7 @@ export const readWalletFeatureSnapshotsBatch = (
     const predicates = [
       `chain = ?`,
       `wallet_address IN (${placeholders})`,
-      `event_type IN ('buy', 'sell')`,
+      `event_type IN ('buy', 'sell', 'transfer_in')`,
     ];
     const parameters: Array<string | number> = [chain, ...walletGroup];
     if (windowEnd !== null) {
@@ -337,6 +337,7 @@ export const readWalletFeatureSnapshotsBatch = (
       .prepare(
         `SELECT id, wallet_address AS walletAddress, event_type AS eventType,
                 token_address AS tokenAddress, observed_timestamp AS observedTimestamp,
+                token_amount AS tokenAmount,
                 cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
          FROM copytrade_trades
          WHERE ${predicates.join(' AND ')}

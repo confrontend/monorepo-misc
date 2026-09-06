@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { applyMigrations } from './schema.js';
+import { verifyDatabaseSchema } from './schemaVerification.js';
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 // Walk from src/dist/src/platform/db back to the crypto project root. Keeping
@@ -27,5 +28,6 @@ export const openDatabase = (databasePath = defaultDatabasePath): DatabaseSync =
   database.exec('PRAGMA busy_timeout = 5000;');
   database.exec('PRAGMA synchronous = FULL;');
   applyMigrations(database);
+  verifyDatabaseSchema(database);
   return database;
 };

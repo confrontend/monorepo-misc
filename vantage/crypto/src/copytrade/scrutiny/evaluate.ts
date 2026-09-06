@@ -11,6 +11,10 @@ import {
   REPRESENTATIVE_SAMPLE_METHOD,
   selectRepresentativeTrades,
 } from './representativeSample.js';
+import {
+  canonicalizeActivityType,
+  TransferAwareInventory,
+} from '../accounting/transferInventory.js';
 
 /**
  * Turns stored trade history into the one answer this feature exists to give:
@@ -21,9 +25,9 @@ import {
  * - **Median is the headline statistic, not average.** A single outlier once made a group here
  *   show +111% average against a -44% median. Both are reported; only the median gates the
  *   verdict.
- * - **A sell is the unit of analysis.** GMGN supplies `buy_cost_usd` on each sell — the cost
- *   basis of exactly what was sold — so return is computed per completed round trip rather
- *   than by trying to re-pair buys and sells ourselves.
+ * - **A sell is the unit of analysis.** GMGN supplies `buy_cost_usd` on each sell, but it is
+ *   accepted only after the shared inventory resolver proves a prior purchase and finds no
+ *   unresolved transfer-in contamination.
  * - **Missing is never zero.** A sell without a usable cost basis is excluded and counted, not
  *   treated as a 0% trade, which would silently drag every statistic toward the middle.
  *
@@ -228,6 +232,9 @@ export type RiskEvidence = {
   pairedTradeCount?: number;
   /** Sells of tokens with no recorded purchase — transferred in rather than bought. */
   noCostBasisPercent: number | null;
+  /** Incoming transfers are neutral/caution evidence, never buys. */
+  transferInCount?: number;
+  transferInPercent?: number | null;
   /** Typical gap between buying and selling, in seconds. */
   medianHoldSeconds: number | null;
   /** Where the wallet's first funding came from, per GMGN. */
@@ -605,6 +612,7 @@ type TradeRow = {
   observedTimestamp: number;
   eventType: string;
   tokenAddress: string;
+  tokenAmount?: string | null;
   tokenSymbol?: string | null;
   costUsd: string | null;
   buyCostUsd: string | null;
@@ -618,15 +626,26 @@ type TradeRow = {
  */
 export const holdSecondsPerSell = (rows: TradeRow[]): number[] => {
   const lastBuyByToken = new Map<string, number>();
+  const inventory = new TransferAwareInventory();
   const holds: number[] = [];
   // Rows arrive oldest-first per wallet, so a buy is always seen before the sell it precedes.
   for (const row of rows) {
+    const resolved = inventory.apply({
+      id: row.id,
+      eventType: row.eventType,
+      tokenAddress: row.tokenAddress,
+      observedTimestamp: row.observedTimestamp,
+      tokenAmount: row.tokenAmount ?? null,
+      costUsd: row.costUsd,
+      buyCostUsd: row.buyCostUsd,
+    });
     const key = row.tokenAddress;
-    if (row.eventType === 'buy') {
+    if (canonicalizeActivityType(row.eventType) === 'buy') {
       lastBuyByToken.set(key, row.observedTimestamp);
       continue;
     }
-    if (row.eventType !== 'sell') continue;
+    if (canonicalizeActivityType(row.eventType) !== 'sell') continue;
+    if (resolved?.eligible !== true) continue;
     const boughtAt = lastBuyByToken.get(key);
     if (boughtAt === undefined) continue;
     holds.push(Math.max(0, row.observedTimestamp - boughtAt));
@@ -648,6 +667,11 @@ export const buildRiskNotes = (evidence: RiskEvidence, riskFlags: string[]): str
   if (evidence.noCostBasisPercent !== null && evidence.noCostBasisPercent >= 10) {
     notes.push(
       `${evidence.noCostBasisPercent}% of sells were tokens with no recorded purchase — received, not bought.`,
+    );
+  }
+  if ((evidence.transferInCount ?? 0) > 0) {
+    notes.push(
+      `${evidence.transferInCount} incoming transfer${evidence.transferInCount === 1 ? '' : 's'} observed; treated as caution, not buys.`,
     );
   }
   if (evidence.medianHoldSeconds !== null) {
@@ -724,10 +748,10 @@ export const computeCopyTradeReport = (
     .prepare(
       `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
             event_type AS eventType, token_address AS tokenAddress,
-            token_symbol AS tokenSymbol,
+            token_symbol AS tokenSymbol, token_amount AS tokenAmount,
             cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
      FROM copytrade_trades
-     WHERE chain = ? AND event_type IN ('buy', 'sell')
+     WHERE chain = ? AND event_type IN ('buy', 'sell', 'transfer_in')
        AND (? IS NULL OR observed_timestamp >= ?)
      ORDER BY wallet_address ASC, observed_timestamp ASC, id ASC`,
     )
@@ -778,24 +802,38 @@ export const computeCopyTradeReport = (
     completed: CompletedTrade[];
     excluded: number;
     sells: number;
+    transferIns: number;
     rows: TradeRow[];
   };
   const byWallet = new Map<string, WalletEntry>();
+  const inventoryByWallet = new Map<string, TransferAwareInventory>();
   for (const row of rows) {
     let entry = byWallet.get(row.walletAddress);
     if (!entry) {
-      entry = { completed: [], excluded: 0, sells: 0, rows: [] };
+      entry = { completed: [], excluded: 0, sells: 0, transferIns: 0, rows: [] };
       byWallet.set(row.walletAddress, entry);
     }
     entry.rows.push(row);
-    if (row.eventType !== 'sell') continue;
+    const inventory = inventoryByWallet.get(row.walletAddress) ?? new TransferAwareInventory();
+    inventoryByWallet.set(row.walletAddress, inventory);
+    const resolved = inventory.apply({
+      id: row.id,
+      eventType: row.eventType,
+      tokenAddress: row.tokenAddress,
+      observedTimestamp: row.observedTimestamp,
+      tokenAmount: row.tokenAmount ?? null,
+      costUsd: row.costUsd,
+      buyCostUsd: row.buyCostUsd,
+    });
+    if (canonicalizeActivityType(row.eventType) === 'transfer_in') entry.transferIns += 1;
+    if (canonicalizeActivityType(row.eventType) !== 'sell') continue;
 
     entry.sells += 1;
     const proceeds = parseAmount(row.costUsd);
     const costBasis = parseAmount(row.buyCostUsd);
     // A sell of tokens that were transferred in rather than bought has no cost basis, so its
     // return is genuinely unknowable from this data. Excluded and counted — never zeroed.
-    if (proceeds === null || costBasis === null || costBasis <= 0) {
+    if (resolved?.eligible !== true || proceeds === null || costBasis === null || costBasis <= 0) {
       entry.excluded += 1;
       continue;
     }
@@ -888,6 +926,9 @@ export const computeCopyTradeReport = (
       under15SecondsCount: holds.filter((seconds) => seconds <= UNDER_15_SECONDS).length,
       pairedTradeCount: holds.length,
       noCostBasisPercent: entry.sells === 0 ? null : round((entry.excluded / entry.sells) * 100, 1),
+      transferInCount: entry.transferIns,
+      transferInPercent:
+        entry.rows.length === 0 ? null : round((entry.transferIns / entry.rows.length) * 100, 1),
       medianHoldSeconds: medianHold === null ? null : Math.round(medianHold),
       fundedByAddress: stats?.fundFromAddress ?? null,
       walletAgeDays: stats?.createdAtTs

@@ -3,7 +3,6 @@ import { formatTime, type ApiClient } from '../httpClient.js';
 import { DataTable } from './DataTable.js';
 import { Collapsible } from './Collapsible.js';
 import { PanelHeading } from './PanelHeading.js';
-import { DataStatusSummary } from './data/DataStatusSummary.js';
 import {
   PatternDiscoveryRuleDialog,
   type PatternDiscoveryRule,
@@ -87,12 +86,6 @@ export function PatternDiscoverySection({
         eyebrow="GMGN COPYTRADE · SHARED ENGINE EXPORT"
         title="Pattern Discovery"
         tag="POINT-IN-TIME FEATURES"
-      />
-      <DataStatusSummary
-        api={api}
-        targetDays={periodDays}
-        onGoToData={onGoToData}
-        onAvailabilityChange={onAvailabilityChange}
       />
       <div className="copytrade-coverage-controls">
         <label>

@@ -4,7 +4,6 @@ import { DataTable } from './DataTable.js';
 import { FormattedDate } from './FormattedDate.js';
 import { GmgnTag } from './GmgnTag.js';
 import { StatusPill } from './StatusPill.js';
-import { DataStatusSummary } from './data/DataStatusSummary.js';
 
 type LiveEvaluationCategory =
   'historicalProfitability' | 'consistency' | 'robustness' | 'copyability';
@@ -247,7 +246,6 @@ export function LiveEvaluation({
           <h2>{copy.subtitle}</h2>
         </div>
       </div>
-      <DataStatusSummary api={api} />
       <p className="live-evaluation-disclaimer">{copy.disclaimer}</p>
       <div className="live-evaluation-form">
         <label>

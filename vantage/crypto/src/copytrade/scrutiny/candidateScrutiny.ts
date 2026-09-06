@@ -1,4 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
+import {
+  canonicalizeActivityType,
+  TransferAwareInventory,
+} from '../accounting/transferInventory.js';
 import { median, type CopyTradeRow } from './evaluate.js';
 import {
   DORMANT_AFTER_DAYS,
@@ -92,6 +96,7 @@ type RawTradeRow = {
   observedTimestamp: number;
   eventType: string;
   tokenAddress: string;
+  tokenAmount: string | null;
   costUsd: string | null;
   buyCostUsd: string | null;
 };
@@ -106,7 +111,8 @@ const parseAmount = (value: string | null): number | null => {
  * A single wallet's raw buy/sell rows, optionally scoped to a cutoff. evaluate.ts's own reader is
  * folded into one whole-roster report and is not usable standalone for a single wallet on demand,
  * so this mirrors its exact parsing rule (a sell needs a positive cost basis to become a
- * completed trade; missing is excluded, never zeroed) rather than duplicating the whole report.
+ * completed trade must have a proven buy inventory and positive basis; missing or transfer-
+ * contaminated inventory is excluded, never zeroed) rather than duplicating the whole report.
  */
 const readWalletTrades = (
   database: DatabaseSync,
@@ -123,16 +129,18 @@ const readWalletTrades = (
     ? database
         .prepare(
           `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
-              event_type AS eventType, token_address AS tokenAddress, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
-       FROM copytrade_trades WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell')
+              event_type AS eventType, token_address AS tokenAddress, token_amount AS tokenAmount,
+              cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
+       FROM copytrade_trades WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell', 'transfer_in')
        ORDER BY observed_timestamp ASC, id ASC`,
         )
         .all(chain, walletAddress)
     : database
         .prepare(
           `SELECT id, wallet_address AS walletAddress, observed_timestamp AS observedTimestamp,
-              event_type AS eventType, token_address AS tokenAddress, cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
-       FROM copytrade_trades WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell') AND observed_timestamp >= ?
+              event_type AS eventType, token_address AS tokenAddress, token_amount AS tokenAmount,
+              cost_usd AS costUsd, buy_cost_usd AS buyCostUsd
+       FROM copytrade_trades WHERE chain = ? AND wallet_address = ? AND event_type IN ('buy', 'sell', 'transfer_in') AND observed_timestamp >= ?
        ORDER BY observed_timestamp ASC, id ASC`,
         )
         .all(chain, walletAddress, cutoffSeconds)) as unknown as RawTradeRow[];
@@ -141,16 +149,18 @@ const readWalletTrades = (
   let buyCount = 0;
   let sellCount = 0;
   let excludedNoCostBasis = 0;
+  const inventory = new TransferAwareInventory();
   for (const row of rows) {
-    if (row.eventType === 'buy') {
+    const resolved = inventory.apply(row);
+    if (canonicalizeActivityType(row.eventType) === 'buy') {
       buyCount += 1;
       continue;
     }
-    if (row.eventType !== 'sell') continue;
+    if (canonicalizeActivityType(row.eventType) !== 'sell') continue;
     sellCount += 1;
     const proceeds = parseAmount(row.costUsd);
     const costBasis = parseAmount(row.buyCostUsd);
-    if (proceeds === null || costBasis === null || costBasis <= 0) {
+    if (resolved?.eligible !== true || proceeds === null || costBasis === null || costBasis <= 0) {
       excludedNoCostBasis += 1;
       continue;
     }

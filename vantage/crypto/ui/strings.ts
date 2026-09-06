@@ -140,19 +140,12 @@ export const strings = {
     walletFilterPlaceholder: 'Filter wallet or name',
     exportAllWithDetails: 'Export all with details',
     exportWinnersData: 'Export winners data',
+    scenarioReplay: {
+      startingBankroll: 'Starting bankroll ($)',
+      copyAmount: 'Copy amount per buy ($)',
+      noDune: 'Replays stored delayed-copy prices. Changing values makes no Dune request.',
+    },
     generatedAt: (date: string) => `Report generated ${date}.`,
-  },
-  dataWorkflow: {
-    finish: 'Finish with warnings',
-    finishing: 'Finishing…',
-    cancel: 'Cancel workflow',
-    cancelling: 'Cancelling…',
-    finishHelp:
-      'Closes this incomplete run, keeps saved evidence, and marks unrun steps as incomplete.',
-    cancelHelp: 'Closes this run without deleting any saved evidence.',
-    closeUnsafe: 'Wait for the current workflow step to stop before closing this workflow.',
-    alreadyFinished: 'This workflow is already finished.',
-    closed: 'This workflow was closed; create a new workflow run.',
   },
   common: {
     signalTypeLabels: {
@@ -1248,8 +1241,8 @@ export const strings = {
     waitingForRosterStep: 'Waiting for the roster step.',
     gmgnSummaryProgress: (walletDone: number, walletTotal: number, requestsMade: number) =>
       `${walletDone} / ${walletTotal} wallets · ${requestsMade} requests`,
-    gmgnSummaryComplete: (skippedFresh: number) =>
-      `Complete · ${skippedFresh} saved summaries reused.`,
+    gmgnSummaryComplete: (skippedExisting: number) =>
+      `Complete · ${skippedExisting} saved summaries reused.`,
     startingGmgnSummaryFetch: 'Starting the GMGN summary fetch…',
     waitingForGmgnHistory: 'Waiting for GMGN history.',
     duneFetchProgress: (processed: number, total: number, remaining: number) =>

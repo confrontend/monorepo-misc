@@ -51,6 +51,12 @@ type DataTableProps<Row> = {
   /** Replaces the body rows with a single error row; takes priority over isLoading. */
   isError?: boolean;
   errorMessage?: ReactNode;
+  /** Adds a standard select-all checkbox column and controlled row selection. */
+  selection?: {
+    selectedKeys: Set<Key>;
+    onChange: (keys: Set<Key>) => void;
+    disabled?: boolean;
+  };
 };
 
 const csvText = (value: ReactNode): string => {
@@ -98,6 +104,7 @@ export function DataTable<Row>({
   loadingMessage = 'Loading…',
   isError = false,
   errorMessage = 'Something went wrong.',
+  selection,
 }: DataTableProps<Row>) {
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<string[]>([]);
   const [sort, setSort] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -125,6 +132,17 @@ export function DataTable<Row>({
     () => columns.filter((column) => !column.hidden && !hiddenColumnKeys.includes(column.key)),
     [columns, hiddenColumnKeys],
   );
+  const allRowsSelected = Boolean(
+    selection &&
+    rows.length > 0 &&
+    rows.every((row, index) => selection.selectedKeys.has(getRowKey(row, index))),
+  );
+  const toggleAllRows = (checked: boolean) => {
+    if (!selection) return;
+    selection.onChange(
+      checked ? new Set(rows.map((row, index) => getRowKey(row, index))) : new Set(),
+    );
+  };
   const sortedRows = useMemo(() => {
     if (!sort) return rows;
     const column = columns.find((candidate) => candidate.key === sort.key);
@@ -211,6 +229,16 @@ export function DataTable<Row>({
       <table className={tableClassName}>
         <thead>
           <tr>
+            {selection && (
+              <th>
+                <Checkbox
+                  aria-label="Select or deselect all visible rows"
+                  checked={allRowsSelected}
+                  disabled={selection.disabled || rows.length === 0}
+                  onChange={(event) => toggleAllRows(event.currentTarget.checked)}
+                />
+              </th>
+            )}
             {visibleColumns.map((column) => (
               <th
                 key={column.key}
@@ -246,13 +274,19 @@ export function DataTable<Row>({
         <tbody>
           {isError ? (
             <tr>
-              <td colSpan={visibleColumns.length} className="muted data-table-error-cell">
+              <td
+                colSpan={visibleColumns.length + (selection ? 1 : 0)}
+                className="muted data-table-error-cell"
+              >
                 {errorMessage}
               </td>
             </tr>
           ) : isLoading ? (
             <tr>
-              <td colSpan={visibleColumns.length} className="muted data-table-loading-cell">
+              <td
+                colSpan={visibleColumns.length + (selection ? 1 : 0)}
+                className="muted data-table-loading-cell"
+              >
                 <span className="loading-spinner" aria-hidden="true" /> {loadingMessage}
               </td>
             </tr>
@@ -260,6 +294,22 @@ export function DataTable<Row>({
             <>
               {sortedRows.map((row, index) => (
                 <tr key={getRowKey(row, index)} {...rowProps?.(row, index)}>
+                  {selection && (
+                    <td>
+                      <Checkbox
+                        aria-label="Select row"
+                        checked={selection.selectedKeys.has(getRowKey(row, index))}
+                        disabled={selection.disabled}
+                        onChange={(event) => {
+                          const key = getRowKey(row, index);
+                          const next = new Set(selection.selectedKeys);
+                          if (event.currentTarget.checked) next.add(key);
+                          else next.delete(key);
+                          selection.onChange(next);
+                        }}
+                      />
+                    </td>
+                  )}
                   {visibleColumns.map((column) => (
                     <td key={column.key} {...column.cellProps?.(row, index)}>
                       {column.render(row, index)}
@@ -269,7 +319,7 @@ export function DataTable<Row>({
               ))}
               {rows.length === 0 && emptyMessage !== undefined && (
                 <tr>
-                  <td colSpan={visibleColumns.length} className="muted">
+                  <td colSpan={visibleColumns.length + (selection ? 1 : 0)} className="muted">
                     {emptyMessage}
                   </td>
                 </tr>
