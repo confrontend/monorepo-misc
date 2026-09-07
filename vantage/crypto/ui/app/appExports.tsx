@@ -1,10 +1,19 @@
-export const copyAddress = async (address: string): Promise<void> => {
+export const copyText = async (value: string): Promise<boolean> => {
   try {
-    await navigator.clipboard.writeText(address);
+    if (!navigator.clipboard?.writeText) return false;
+    await navigator.clipboard.writeText(value);
+    return true;
   } catch {
-    // Clipboard access is optional.
+    return false;
   }
 };
+
+export const copyAddress = async (address: string): Promise<void> => {
+  await copyText(address);
+};
+
+export const copyJson = async (value: unknown): Promise<boolean> =>
+  copyText(JSON.stringify(value, null, 2));
 
 export const saveJson = (value: unknown, filename: string): void => {
   const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });

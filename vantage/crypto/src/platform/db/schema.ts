@@ -1868,6 +1868,102 @@ migrations.push({
   },
 });
 
+migrations.push({
+  description: 'Persist versioned minimum-capital replay results',
+  up: (database) => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_minimum_capital_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_address TEXT NOT NULL,
+        chain TEXT NOT NULL,
+        calculation_version TEXT NOT NULL,
+        gmgn_data_fingerprint TEXT NOT NULL,
+        dune_history_fingerprint TEXT NOT NULL,
+        fee_model_version TEXT NOT NULL,
+        minimum_capital_rule_version TEXT NOT NULL,
+        recommended_starting_capital_usd REAL NOT NULL,
+        recommended_copy_amount_usd REAL NOT NULL,
+        technical_minimum_starting_capital_usd REAL,
+        technical_minimum_copy_amount_usd REAL,
+        executed_trade_count INTEGER NOT NULL,
+        skipped_trade_count INTEGER NOT NULL,
+        insufficient_cash_skips INTEGER NOT NULL,
+        max_concurrent_capital_usd REAL NOT NULL,
+        total_capital_deployed_usd REAL NOT NULL,
+        fees_usd REAL NOT NULL,
+        gross_pnl_usd REAL NOT NULL,
+        net_pnl_usd REAL NOT NULL,
+        ending_capital_usd REAL NOT NULL,
+        return_pct REAL NOT NULL,
+        tested_configurations TEXT NOT NULL,
+        calculated_at TEXT NOT NULL,
+        UNIQUE(
+          wallet_address,
+          chain,
+          calculation_version,
+          gmgn_data_fingerprint,
+          dune_history_fingerprint,
+          fee_model_version,
+          minimum_capital_rule_version
+        )
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_minimum_capital_results_wallet
+        ON copytrade_minimum_capital_results(wallet_address, chain, calculated_at DESC);
+      CREATE TABLE IF NOT EXISTS copytrade_minimum_capital_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        status TEXT NOT NULL,
+        wallet_addresses TEXT NOT NULL,
+        wallet_total INTEGER NOT NULL DEFAULT 0,
+        wallet_done INTEGER NOT NULL DEFAULT 0,
+        current_wallet_address TEXT,
+        results_json TEXT NOT NULL DEFAULT '[]',
+        error TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_minimum_capital_runs_latest
+        ON copytrade_minimum_capital_runs(id DESC);
+    `);
+  },
+});
+
+migrations.push({
+  description: 'Persist local Winner minimum-capital planning results and progress',
+  up: (database) => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS copytrade_minimum_capital_calculations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_address TEXT NOT NULL,
+        chain TEXT NOT NULL,
+        calculation_version TEXT NOT NULL,
+        gmgn_data_fingerprint TEXT NOT NULL,
+        dune_history_fingerprint TEXT NOT NULL,
+        fee_model_version TEXT NOT NULL,
+        minimum_capital_rule_version TEXT NOT NULL,
+        recommended_starting_capital REAL,
+        recommended_copy_amount REAL,
+        technically_possible_minimum_capital REAL,
+        executed_trade_count INTEGER NOT NULL DEFAULT 0,
+        skipped_trade_count INTEGER NOT NULL DEFAULT 0,
+        executed_trade_rate REAL NOT NULL DEFAULT 0,
+        insufficient_cash_skips INTEGER NOT NULL DEFAULT 0,
+        max_concurrent_capital REAL NOT NULL DEFAULT 0,
+        total_capital_deployed REAL NOT NULL DEFAULT 0,
+        fees REAL,
+        gross_pnl REAL NOT NULL DEFAULT 0,
+        net_pnl REAL NOT NULL DEFAULT 0,
+        ending_capital REAL,
+        return_pct REAL,
+        tested_configurations TEXT NOT NULL,
+        calculated_at TEXT NOT NULL,
+        UNIQUE(wallet_address, chain)
+      );
+      CREATE INDEX IF NOT EXISTS idx_copytrade_minimum_capital_wallet
+        ON copytrade_minimum_capital_calculations(wallet_address, chain);
+    `);
+  },
+});
+
 export const latestSchemaVersion = migrations.length;
 
 export const applyMigrations = (database: DatabaseSync): void => {

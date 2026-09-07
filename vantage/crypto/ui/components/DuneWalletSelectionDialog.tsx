@@ -3,6 +3,7 @@ import { DataTable } from './DataTable.js';
 import { Modal } from './Modal.js';
 import type { CopyTradeRow } from '../types.js';
 import { UI_STRINGS } from '../strings.js';
+import { gmgnWalletUrl } from '../app/appLinks.js';
 
 type DuneWalletSelectionDialogProps = {
   rows: CopyTradeRow[];
@@ -19,9 +20,6 @@ type DuneWalletSelectionDialogProps = {
 
 const formatTradeCount = (trades: number | null): string =>
   trades === null ? '—' : new Intl.NumberFormat().format(trades);
-const gmgnWalletUrl = (walletAddress: string): string =>
-  `https://gmgn.ai/sol/address/${encodeURIComponent(walletAddress)}`;
-
 export const DuneWalletSelectionDialog = ({
   rows,
   selectedWallets,

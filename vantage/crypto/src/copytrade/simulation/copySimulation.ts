@@ -1006,6 +1006,8 @@ export const computeCopySimulationReport = (
     gasPriorityFeeSolPerTx?: number;
     /** Optional local scenario. Omitted callers retain the canonical $100/$10 baseline. */
     scenario?: CopySimulationScenario;
+    /** Maximum simultaneous positions for this replay. Omit for the canonical GMGN baseline. */
+    maxOpenPositions?: number;
     now?: Date;
     onMatchIndexProgress?: (progress: {
       completedRuns: number;
@@ -1020,6 +1022,7 @@ export const computeCopySimulationReport = (
   const feeBps = options.feeBps ?? DEFAULT_FEE_BPS;
   const slippageBps = options.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
   const gasPriorityFeeSolPerTx = options.gasPriorityFeeSolPerTx ?? DEFAULT_GAS_PRIORITY_FEE_SOL;
+  const maxOpenPositions = options.maxOpenPositions ?? COPY_PORTFOLIO_MAX_OPEN_POSITIONS;
   const startingCapitalUsd =
     options.scenario?.startingBankrollUsd ?? COPY_PORTFOLIO_STARTING_CAPITAL_USD;
   const stakePerTradeUsd = options.scenario?.copyAmountUsd ?? COPY_PORTFOLIO_STAKE_USD;
@@ -1423,11 +1426,12 @@ export const computeCopySimulationReport = (
     const portfolio = simulateFixedStakePortfolio(portfolioTrades, {
       startingCapitalUsd,
       stakePerTradeUsd,
+      maxOpenPositions,
     });
     const portfolioWithoutBestTradeEndingCapitalUsd = bestCanonicalOutcome
       ? simulateFixedStakePortfolio(
           portfolioTrades.filter((trade) => trade.positionId !== bestCanonicalOutcome.buyTradeId),
-          { startingCapitalUsd, stakePerTradeUsd },
+          { startingCapitalUsd, stakePerTradeUsd, maxOpenPositions },
         ).endingCapitalUsd
       : null;
     const uncopyableTradeIds = new Set(
@@ -1443,7 +1447,7 @@ export const computeCopySimulationReport = (
     );
     const portfolioWithoutUncopyableTradesEndingCapitalUsd = simulateFixedStakePortfolio(
       portfolioTrades.filter((trade) => !uncopyableTradeIds.has(trade.id)),
-      { startingCapitalUsd, stakePerTradeUsd },
+      { startingCapitalUsd, stakePerTradeUsd, maxOpenPositions },
     ).endingCapitalUsd;
     const portfolioProfitUsd = portfolio.endingCapitalUsd - portfolio.startingCapitalUsd;
     const uncopyableProfitDependencyPercent =
@@ -1528,7 +1532,7 @@ export const computeCopySimulationReport = (
       ...(options.periodDays ? { periodDays: options.periodDays } : {}),
       startingCapitalUsd,
       stakePerTradeUsd,
-      maxOpenPositions: COPY_PORTFOLIO_MAX_OPEN_POSITIONS,
+      maxOpenPositions,
     },
     ...(options.scenario ? { scenario: options.scenario } : {}),
     wallets,

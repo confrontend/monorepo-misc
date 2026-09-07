@@ -7,6 +7,7 @@ import {
   saveDuneCandidateFilters,
   saveDuneCandidateSelection,
 } from '../../state/duneCandidatePreferences.js';
+import { gmgnWalletUrl } from '../../app/appLinks.js';
 
 type Candidate = {
   walletAddress: string;
@@ -55,8 +56,6 @@ type FetchStatus = {
   } | null;
 };
 
-const gmgnWalletUrl = (walletAddress: string): string =>
-  `https://gmgn.ai/sol/address/${encodeURIComponent(walletAddress)}`;
 const shortWalletAddress = (walletAddress: string): string =>
   walletAddress.length > 14
     ? `${walletAddress.slice(0, 7)}…${walletAddress.slice(-5)}`

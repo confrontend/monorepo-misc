@@ -32,6 +32,8 @@ export type FixedStakePortfolioReport = {
   maxOpenPositions: number;
   endingCapitalUsd: number;
   realizedPnlUsd: number;
+  /** Profit before fixed gas/fee deductions for accepted exits and marked open positions. */
+  grossPnlUsd?: number;
   markToMarketPnlUsd?: number;
   openPositionsMarked?: number;
   openPositionsUnpriced?: number;
@@ -88,6 +90,7 @@ export const simulateFixedStakePortfolio = (
       maxOpenPositions,
       endingCapitalUsd: startingCapitalUsd,
       realizedPnlUsd: 0,
+      grossPnlUsd: 0,
       markToMarketPnlUsd: 0,
       openPositionsMarked: 0,
       openPositionsUnpriced: 0,
@@ -162,6 +165,7 @@ export const simulateFixedStakePortfolio = (
   let maxConcurrentCapitalUsd = 0;
   let totalCapitalDeployedUsd = 0;
   let gasFeeSol = 0;
+  let grossPnlUsd = 0;
   let gasFeeUsd = 0;
   let gasCostComplete = true;
   const open = new Map<string, number>();
@@ -207,6 +211,7 @@ export const simulateFixedStakePortfolio = (
       open.set(event.positionKey, Math.max(0, remaining - stakeUsd));
       if (open.get(event.positionKey) === 0) open.delete(event.positionKey);
       copiedTrades += 1;
+      grossPnlUsd += stakeUsd * event.trade.returnRatio;
       if (event.trade.exitGasFeeSol !== undefined) {
         gasFeeSol += event.trade.exitGasFeeSol;
         if (event.trade.exitGasFeeUsd == null) gasCostComplete = false;
@@ -246,6 +251,7 @@ export const simulateFixedStakePortfolio = (
     }
     cash += remainingStake * Math.max(0, 1 + entry.cutoffReturnRatio);
     markToMarketPnlUsd += remainingStake * entry.cutoffReturnRatio;
+    grossPnlUsd += remainingStake * entry.cutoffReturnRatio;
     open.delete(positionKey);
     openPositionsMarked += 1;
   }
@@ -256,6 +262,7 @@ export const simulateFixedStakePortfolio = (
     maxOpenPositions,
     endingCapitalUsd,
     realizedPnlUsd: round(endingCapitalUsd - startingCapitalUsd - markToMarketPnlUsd, 2),
+    grossPnlUsd: round(grossPnlUsd, 2),
     markToMarketPnlUsd: round(markToMarketPnlUsd, 2),
     openPositionsMarked,
     openPositionsUnpriced,

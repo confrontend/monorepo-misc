@@ -8,7 +8,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip.js';
 import { strings } from '../strings.js';
 import type { ApiClient } from '../httpClient.js';
 import { ScenarioReplayPanel } from './ScenarioReplayPanel.js';
+import { MinimumCapitalCalculator } from './MinimumCapitalCalculator.js';
 import type { FixedStakePortfolioTrade } from '../../src/copytrade/simulation/fixedStakePortfolio.js';
+import { gmgnWalletUrl } from '../app/appLinks.js';
 
 type LabWallet = {
   walletAddress: string;
@@ -343,7 +345,6 @@ const candidateStatusLabel = (status: LabWallet['candidateStatus']) =>
     missing_evidence: 'Missing evidence',
   })[status];
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
-const gmgnUrl = (address: string) => `https://gmgn.ai/sol/address/${encodeURIComponent(address)}`;
 type CopyingRisk = 'unknown' | 'low' | 'watch' | 'high';
 const copyingRisk = (wallet: LabWallet): CopyingRisk => {
   const bands = wallet.liquidityBands;
@@ -611,17 +612,20 @@ const compareWallets = (left: LabWallet, right: LabWallet, key: LabSortKey) => {
     );
   return (left.tags ?? []).join(',').localeCompare((right.tags ?? []).join(','));
 };
-const exportDecisionLab = (response: LabResponse, winnersOnly: boolean) => {
+const exportDecisionLab = (
+  response: LabResponse,
+  winnersOnly: boolean,
+  selectedWalletKeys: Set<string>,
+) => {
+  const selected = response.wallets.filter((wallet) => selectedWalletKeys.has(wallet.walletAddress));
   const wallets = winnersOnly
-    ? response.wallets.filter(
-        (wallet) =>
-          wallet.winnerPolicy.status === 'WINNER' && wallet.winnerPolicy.actionability !== 'REVIEW',
-      )
-    : response.wallets;
+    ? selected.filter((wallet) => wallet.winnerPolicy.status === 'WINNER')
+    : selected;
+  if (!wallets.length) return;
   const payload = {
     format: 'vantage-crypto-decision-lab-v1',
     exportedAt: new Date().toISOString(),
-    exportScope: winnersOnly ? 'winners' : 'all',
+    exportScope: winnersOnly ? 'selected-winners' : 'selected',
     ...response,
     wallets,
   };
@@ -633,7 +637,7 @@ const exportDecisionLab = (response: LabResponse, winnersOnly: boolean) => {
   link.href = url;
   const policyVersion =
     wallets[0]?.winnerPolicy.policyVersion.replace('winner-policy-', '') ?? 'v4';
-  link.download = `decision-lab-${winnersOnly ? 'winners' : 'all-history'}-${policyVersion}-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `decision-lab-${winnersOnly ? 'selected-winners' : 'selected'}-${policyVersion}-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
 };
@@ -647,6 +651,20 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   const [scoringInfoOpen, setScoringInfoOpen] = useState(false);
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [walletFilter, setWalletFilter] = useState('');
+  const [selectedWalletKeys, setSelectedWalletKeys] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const saved = window.localStorage.getItem('vantage-decision-lab-minimum-capital-selection');
+      const parsed = saved ? (JSON.parse(saved) as unknown) : [];
+      return new Set(
+        Array.isArray(parsed)
+          ? parsed.filter((value): value is string => typeof value === 'string')
+          : [],
+      );
+    } catch {
+      return new Set();
+    }
+  });
   const load = (refresh = false, showPageLoading = true) => {
     if (showPageLoading) setLoading(true);
     setError(null);
@@ -664,6 +682,16 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   useEffect(() => {
     load();
   }, [api]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        'vantage-decision-lab-minimum-capital-selection',
+        JSON.stringify([...selectedWalletKeys]),
+      );
+    } catch {
+      // Local storage is a convenience; selection remains usable when it is unavailable.
+    }
+  }, [selectedWalletKeys]);
   const sortedWallets = response
     ? [...response.wallets].sort((left, right) => {
         const leftHasValue = hasSortableValue(left, sort.key);
@@ -679,9 +707,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
   const displayedWallets = (
     winnersOnly
       ? sortedWallets.filter(
-          (wallet) =>
-            wallet.winnerPolicy.status === 'WINNER' &&
-            wallet.winnerPolicy.actionability !== 'REVIEW',
+          (wallet) => wallet.winnerPolicy.status === 'WINNER',
         )
       : sortedWallets
   ).filter((wallet) => {
@@ -692,6 +718,9 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
       (wallet.name?.toLowerCase().includes(query) ?? false)
     );
   });
+  const selectedWalletCount = sortedWallets.filter((wallet) =>
+    selectedWalletKeys.has(wallet.walletAddress),
+  ).length;
   const toggleSort = (key: LabSortKey) =>
     setSort((current) =>
       current.key === key
@@ -799,6 +828,13 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
               </small>
             </Modal>
           )}
+          <MinimumCapitalCalculator
+            api={api}
+            wallets={sortedWallets
+              .filter((wallet) => wallet.winnerPolicy.status === 'WINNER')
+              .map(({ walletAddress, name, rank }) => ({ walletAddress, name, rank }))}
+            selectedKeys={selectedWalletKeys}
+          />
           <div className="experimental-table-toolbar">
             <div className="experimental-table-controls">
               <label className="experimental-wallet-filter">
@@ -825,12 +861,12 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                 <button
                   type="button"
                   className="secondary experimental-export-table-button"
-                  onClick={() => exportDecisionLab(response, winnersOnly)}
-                  disabled={loading}
+                  onClick={() => exportDecisionLab(response, winnersOnly, selectedWalletKeys)}
+                  disabled={loading || selectedWalletCount === 0}
                 >
                   {winnersOnly
-                    ? strings.decisionLab.exportWinnersData
-                    : strings.decisionLab.exportAllWithDetails}
+                    ? strings.decisionLab.exportSelectedWinnersData
+                    : strings.decisionLab.exportSelectedWithDetails}
                 </button>
               )}
             </div>
@@ -862,7 +898,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                   <TableTooltip label="Wallet address" detail={wallet.walletAddress}>
                     <a
                       className="gmgn-wallet-link"
-                      href={gmgnUrl(wallet.walletAddress)}
+                      href={gmgnWalletUrl(wallet.walletAddress)}
                       target="_blank"
                       rel="noreferrer"
                       onClick={(event) => event.stopPropagation()}
@@ -1009,6 +1045,11 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
               },
             ]}
             emptyMessage="No saved wallet evidence is available yet."
+            selection={{
+              selectedKeys: selectedWalletKeys,
+              onChange: setSelectedWalletKeys,
+              isRowSelectable: (wallet) => wallet.winnerPolicy.status === 'WINNER',
+            }}
           />
           {selectedWallet && (
             <Modal
@@ -1022,7 +1063,7 @@ export function ExperimentalDecisionLab({ api }: { api: ApiClient }) {
                   <h3>{selectedWallet.name?.trim() || short(selectedWallet.walletAddress)}</h3>
                   <a
                     className="gmgn-wallet-link"
-                    href={gmgnUrl(selectedWallet.walletAddress)}
+                    href={gmgnWalletUrl(selectedWallet.walletAddress)}
                     target="_blank"
                     rel="noreferrer"
                   >

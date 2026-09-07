@@ -33,6 +33,22 @@ const requiredTables: Record<string, RequiredTable> = {
   copytrade_copy_simulation_matches: {
     columns: ['trade_id', 'status'],
   },
+  copytrade_minimum_capital_results: {
+    columns: [
+      'wallet_address',
+      'chain',
+      'calculation_version',
+      'gmgn_data_fingerprint',
+      'dune_history_fingerprint',
+      'fee_model_version',
+      'minimum_capital_rule_version',
+      'tested_configurations',
+      'calculated_at',
+    ],
+  },
+  copytrade_minimum_capital_runs: {
+    columns: ['id', 'status', 'wallet_addresses', 'wallet_total', 'wallet_done', 'results_json'],
+  },
 };
 
 const tableColumns = (database: DatabaseSync, tableName: string): Set<string> =>

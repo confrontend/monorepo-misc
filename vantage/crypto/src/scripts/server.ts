@@ -132,6 +132,7 @@ import { createFeatureRoutes } from './routes/featureRoutes.js';
 import { createSimulationRoutes } from './routes/simulationRoutes.js';
 import { createDecisionLabRoutes } from './routes/decisionLabRoutes.js';
 import { createSolanaBenchmarkRoutes } from './routes/solanaBenchmarkRoutes.js';
+import { createMinimumCapitalRoutes } from './routes/minimumCapitalRoutes.js';
 import {
   attachClientDisconnectLogging,
   logRequestComplete,
@@ -198,6 +199,7 @@ const featureRoutes = createFeatureRoutes();
 const simulationRoutes = createSimulationRoutes();
 const decisionLabRoutes = createDecisionLabRoutes();
 const solanaBenchmarkRoutes = createSolanaBenchmarkRoutes();
+const minimumCapitalRoutes = createMinimumCapitalRoutes();
 const port = Number(process.env.CRYPTO_RESEARCH_PORT ?? 4173);
 
 // Short-TTL cache for the robust pattern report (see its route below) — this endpoint runs a
@@ -674,6 +676,20 @@ const handle = async (request: IncomingMessage, response: ServerResponse): Promi
         return;
     }
     for (const route of solanaBenchmarkRoutes) {
+      if (
+        await route(
+          {
+            method: request.method,
+            url: requestUrl,
+            request,
+            readJsonBody: () => readJsonBody(request),
+          },
+          { database, respond },
+        )
+      )
+        return;
+    }
+    for (const route of minimumCapitalRoutes) {
       if (
         await route(
           {

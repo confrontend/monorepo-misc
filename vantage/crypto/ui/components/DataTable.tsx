@@ -56,6 +56,8 @@ type DataTableProps<Row> = {
     selectedKeys: Set<Key>;
     onChange: (keys: Set<Key>) => void;
     disabled?: boolean;
+    /** Optional row-level selection gate for tables that only select a subset of rows. */
+    isRowSelectable?: (row: Row, index: number) => boolean;
   };
 };
 
@@ -132,16 +134,38 @@ export function DataTable<Row>({
     () => columns.filter((column) => !column.hidden && !hiddenColumnKeys.includes(column.key)),
     [columns, hiddenColumnKeys],
   );
+  const selectableRows = selection
+    ? rows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row, index }) => selection.isRowSelectable?.(row, index) ?? true)
+    : [];
   const allRowsSelected = Boolean(
     selection &&
-    rows.length > 0 &&
-    rows.every((row, index) => selection.selectedKeys.has(getRowKey(row, index))),
+    selectableRows.length > 0 &&
+    selectableRows.every(({ row, index }) => selection.selectedKeys.has(getRowKey(row, index))),
   );
+  const selectedVisibleCount = selection
+    ? rows.reduce(
+        (count, row, index) =>
+          count +
+          ((selection.isRowSelectable?.(row, index) ?? true) &&
+          selection.selectedKeys.has(getRowKey(row, index))
+            ? 1
+            : 0),
+        0,
+      )
+    : 0;
+  const someRowsSelected = Boolean(selection && selectedVisibleCount > 0 && !allRowsSelected);
   const toggleAllRows = (checked: boolean) => {
     if (!selection) return;
-    selection.onChange(
-      checked ? new Set(rows.map((row, index) => getRowKey(row, index))) : new Set(),
-    );
+    const next = new Set(selection.selectedKeys);
+    rows.forEach((row, index) => {
+      if (!(selection.isRowSelectable?.(row, index) ?? true)) return;
+      const key = getRowKey(row, index);
+      if (checked) next.add(key);
+      else next.delete(key);
+    });
+    selection.onChange(next);
   };
   const sortedRows = useMemo(() => {
     if (!sort) return rows;
@@ -234,7 +258,9 @@ export function DataTable<Row>({
                 <Checkbox
                   aria-label="Select or deselect all visible rows"
                   checked={allRowsSelected}
-                  disabled={selection.disabled || rows.length === 0}
+                  indeterminate={someRowsSelected}
+                  disabled={selection.disabled || selectableRows.length === 0}
+                  onClick={(event) => event.stopPropagation()}
                   onChange={(event) => toggleAllRows(event.currentTarget.checked)}
                 />
               </th>
@@ -299,7 +325,10 @@ export function DataTable<Row>({
                       <Checkbox
                         aria-label="Select row"
                         checked={selection.selectedKeys.has(getRowKey(row, index))}
-                        disabled={selection.disabled}
+                        disabled={
+                          selection.disabled || !(selection.isRowSelectable?.(row, index) ?? true)
+                        }
+                        onClick={(event) => event.stopPropagation()}
                         onChange={(event) => {
                           const key = getRowKey(row, index);
                           const next = new Set(selection.selectedKeys);
