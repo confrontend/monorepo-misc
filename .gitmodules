@@ -1,0 +1,3 @@
+[submodule "vantage"]
+	path = vantage
+	url = https://github.com/confrontend/vantage.git
