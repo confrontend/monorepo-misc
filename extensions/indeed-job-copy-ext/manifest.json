@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Indeed Job Copier",
-  "version": "1.0.6",
+  "version": "1.0.9",
   "description": "Save Indeed job descriptions and move through a search list with one click.",
   "background": {
     "service_worker": "background.js"

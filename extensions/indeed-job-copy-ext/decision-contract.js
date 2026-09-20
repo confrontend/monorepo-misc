@@ -7,6 +7,7 @@
   let applyingBadges = false;
   let applyScheduled = false;
   let lastDebugSignature = '';
+  const detectApplicationStatus = root => { const labels = Array.from(root.querySelectorAll('button, a, [role="button"]')).filter(el => !el.closest('#indeed-copy-panel-v1, #jca-import-overlay')).map(el => `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.innerText || ''}`.trim()); if (labels.some(label => /\bapplied\b/i.test(label))) return 'applied'; if (labels.some(label => /\bapply\b/i.test(label))) return 'not_applied'; return 'unknown'; };
 
   const readDecisions = () => {
     try { return JSON.parse(localStorage.getItem(DECISIONS_KEY) || '{}'); }
@@ -34,6 +35,7 @@
       title: '',
       company: '',
       location: '',
+      applicationStatus: 'unknown',
       url,
       description: match ? raw.slice(0, match.index).trim() : raw,
       collectedAt: new Date().toISOString()
@@ -44,7 +46,10 @@
     const id = job.jobId.slice(`${PLATFORM}:`.length);
     const link = Array.from(document.querySelectorAll('.jcs-JobTitle[data-jk]')).find(item => item.dataset.jk === id);
     const card = link?.closest('.result, li');
-    if (!card) return job;
+    const currentJobId = new URLSearchParams(location.search).get('vjk') || new URLSearchParams(location.search).get('jk');
+    if (!card) { if (id === currentJobId) job.applicationStatus = detectApplicationStatus(document); return job; }
+    job.applicationStatus = detectApplicationStatus(card);
+    if (job.applicationStatus === 'unknown' && id === currentJobId) job.applicationStatus = detectApplicationStatus(document);
     job.title = link.innerText.trim();
     job.company = card.querySelector('[data-testid="company-name"]')?.innerText?.trim() || '';
     job.location = card.querySelector('[data-testid="text-location"]')?.innerText?.trim() || '';

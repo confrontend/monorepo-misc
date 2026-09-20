@@ -9,9 +9,6 @@
     ];
 
     const panelAlreadyExists = !!document.getElementById(PANEL_ID);
-    if (!panelAlreadyExists) {
-        localStorage.removeItem(STORAGE_KEY);
-    }
 
     let isAutopilot = false;
     let autoTimer = null;
@@ -78,6 +75,24 @@
         }
     };
 
+    const AUTOPILOT_RESUME_KEY = 'job_copier_autopilot_resume_v1';
+    const nextPageControl = () => Array.from(document.querySelectorAll('a, button')).find(el => {
+        if (el.closest('#indeed-copy-panel-v1, #jca-import-overlay')) return false;
+        const label = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.innerText || ''}`.trim();
+        const isNext = /\bnext\s+page\b/i.test(label) || (/^\s*next\s*$/i.test(label) && !!el.closest('nav, [class*="pagination"], [data-testid*="pagination"]'));
+        const style = getComputedStyle(el);
+        return isNext && !el.disabled && el.getAttribute('aria-disabled') !== 'true' && style.display !== 'none' && style.visibility !== 'hidden';
+    });
+    const navigateToNextPage = () => {
+        const control = nextPageControl();
+        if (!control) { toast('• No safe next-page control found. Autopilot stopped.', 'rgb(239,108,0)'); return false; }
+        try { sessionStorage.setItem(AUTOPILOT_RESUME_KEY, String(Date.now())); } catch {}
+        control.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => control.click(), 250);
+        toast('↪ Moving to the next results page…', 'rgb(21,101,192)');
+        return true;
+    };
+
     const goToNext = () => {
         const currentJk = new URLSearchParams(window.location.search).get('vjk');
         const allLinks = getValidLinks();
@@ -93,8 +108,7 @@
         }
 
         if (!nextLink) {
-            toast('• End of page. Go to next page.', 'rgb(239,108,0)');
-            return false;
+            return navigateToNextPage();
         }
 
         nextLink.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -130,11 +144,13 @@
         isAutopilot = !isAutopilot;
         
         if (isAutopilot) {
+            try { sessionStorage.removeItem(AUTOPILOT_RESUME_KEY); } catch {}
             btn.textContent = 'Stop Autopilot ⏹';
             btn.style.background = 'rgb(198,40,40)';
             toast('Autopilot started! Hands off mouse.', 'rgb(21,101,192)'); 
             autoLoop();
         } else {
+            try { sessionStorage.removeItem(AUTOPILOT_RESUME_KEY); } catch {}
             btn.textContent = 'Start Autopilot 🤖';
             btn.style.background = 'rgb(21,101,192)';
             clearTimeout(autoTimer);
@@ -235,6 +251,13 @@
     
     createPanel();
     updateCount();
+    try {
+        const pendingAt = Number(sessionStorage.getItem(AUTOPILOT_RESUME_KEY));
+        if (pendingAt && Date.now() - pendingAt < 30000) {
+            sessionStorage.removeItem(AUTOPILOT_RESUME_KEY);
+            setTimeout(() => { if (!isAutopilot) { document.getElementById('jm-auto')?.click(); } }, 2500);
+        }
+    } catch {}
 
     chrome.runtime.onMessage.addListener(message => {
         if (message?.type !== 'open-job-copier-panel') return;

@@ -9,11 +9,14 @@
   let lastDebugSignature = '';
   const readDecisions = () => { try { return JSON.parse(localStorage.getItem(DECISIONS_KEY) || '{}'); } catch { return {}; } };
   const stableFallbackId = value => { let hash = 2166136261; for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619); return `fallback-${(hash >>> 0).toString(16)}`; };
-  const storedJob = (value, index) => { const raw = String(value); const match = raw.match(/\n\nURL: (https?:\/\/\S+)$/); const url = match?.[1] || ''; let id = ''; try { const parsed = new URL(url || location.href); id = parsed.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] || parsed.searchParams.get('currentJobId') || ''; } catch {} return { jobId: `${PLATFORM}:${id || stableFallbackId(`${url}|${raw}|${index}`)}`, source: PLATFORM, title: '', company: '', location: '', url, description: match ? raw.slice(0, match.index).trim() : raw, collectedAt: new Date().toISOString() }; };
+  const detectApplicationStatus = root => { const labels = Array.from(root.querySelectorAll('button, a, [role="button"]')).filter(el => !el.closest('#job-copy-panel-v6, #jca-import-overlay')).map(el => `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.innerText || ''}`.trim()); if (labels.some(label => /\bapplied\b/i.test(label))) return 'applied'; if (labels.some(label => /\bapply\b/i.test(label))) return 'not_applied'; return 'unknown'; };
+  const storedJob = (value, index) => { const raw = String(value); const match = raw.match(/\n\nURL: (https?:\/\/\S+)$/); const url = match?.[1] || ''; let id = ''; try { const parsed = new URL(url || location.href); id = parsed.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] || parsed.searchParams.get('currentJobId') || ''; } catch {} return { jobId: `${PLATFORM}:${id || stableFallbackId(`${url}|${raw}|${index}`)}`, source: PLATFORM, title: '', company: '', location: '', applicationStatus: 'unknown', url, description: match ? raw.slice(0, match.index).trim() : raw, collectedAt: new Date().toISOString() }; };
   const enrichFromCard = job => {
     const id = job.jobId.slice(`${PLATFORM}:`.length);
     const card = document.querySelector(`[data-job-id="${id}"], [componentkey="job-card-component-ref-${id}"]`);
-    if (!card) return job;
+    if (!card) { if (id === new URLSearchParams(location.search).get('currentJobId')) job.applicationStatus = detectApplicationStatus(document); return job; }
+    job.applicationStatus = detectApplicationStatus(card);
+    if (job.applicationStatus === 'unknown' && id === new URLSearchParams(location.search).get('currentJobId')) job.applicationStatus = detectApplicationStatus(document);
     const lines = card.innerText.split('\n').map(line => line.trim()).filter(Boolean);
     job.title = card.querySelector('h3, a[href*="/jobs/view/"], [class*="job-card-list__title"]')?.innerText?.trim() || lines[0] || '';
     job.company = card.querySelector('.artdeco-entity-lockup__subtitle, [data-testid="company-name"]')?.innerText?.trim() || lines[1] || '';
