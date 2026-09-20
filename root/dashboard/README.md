@@ -105,6 +105,15 @@ Open your browser and go to:
 4. Subtitles are parsed from XML/JSON format and returned as text
 5. Frontend displays the extracted text with copy functionality
 
+The YouTube Subtitles page also accepts a saved YouTube channel playlists HTML
+file. It extracts unique playlist URLs, discovers the videos in each playlist,
+processes them sequentially, and streams playlist/video progress to the UI.
+Each completed video is also streamed into a live transcript, which can be
+downloaded before the full import finishes. The final combined subtitles can
+be copied or downloaded as a `.txt` file. The backend also persists each run
+under `python-api/subtitle_output/<run-id>/`, including per-video files, per-
+playlist files, and `ALL_SUBTITLES.txt`.
+
 ### Instagram Reel Downloader Workflow
 
 **Step 1: Extract Top Reels from Instagram HTML**

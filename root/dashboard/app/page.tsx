@@ -1,7 +1,6 @@
 "use client";
 
 import AppCard from "@/components/AppCard";
-import { logoutPasskey } from "@/lib/authedFetch";
 
 const apps = [
   {
@@ -31,12 +30,6 @@ export default function HomePage() {
     <main className="container mx-auto p-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">My App Dashboard</h1>
-        <button
-          onClick={logoutPasskey}
-          className="text-sm text-gray-600 underline hover:text-black"
-        >
-          Logout
-        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {apps.map((app) => (

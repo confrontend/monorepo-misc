@@ -1,6 +1,5 @@
 "use client";
 
-import { authedFetch, logoutPasskey } from "@/lib/authedFetch";
 import { useState } from "react";
 
 type ApiResponse = {
@@ -25,7 +24,7 @@ export default function Home() {
         .map((s) => s.trim())
         .filter(Boolean);
 
-      const res = await authedFetch("/api/reddit", {
+      const res = await fetch("/api/reddit", {
         method: "POST",
         headers: { "Content-Type": "application/json" }, // will be merged
         body: JSON.stringify({ urls: cleaned }),

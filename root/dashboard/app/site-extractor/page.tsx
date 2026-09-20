@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { authedFetch } from "@/lib/authedFetch";
 
 export default function SiteExtractor() {
   const [urls, setUrls] = useState("");
@@ -14,7 +13,7 @@ export default function SiteExtractor() {
     const urlList = urls.split("\n").map(u => u.trim()).filter(Boolean);
     
     try {
-      const res = await authedFetch("/api/site-extractor", {
+      const res = await fetch("/api/site-extractor", {
         method: "POST",
         body: JSON.stringify({ urls: urlList }),
       });

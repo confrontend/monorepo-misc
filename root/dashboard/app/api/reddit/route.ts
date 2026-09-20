@@ -202,16 +202,6 @@ async function fetchThread(u: string): Promise<ThreadResult> {
 // ------------------ Route ------------------
 
 export async function POST(req: Request) {
-  // (optional) passkey guard — keep if you added the gate
-  const PASSKEY = process.env.SITE_PASSKEY;
-  if (PASSKEY) {
-    const provided =
-      req.headers.get("x-passkey") || new URL(req.url).searchParams.get("key");
-    if (provided !== PASSKEY) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
-
   const body = (await req.json()) as Input;
   const urls = (body?.urls ?? []).map((s) => s.trim()).filter(Boolean);
   if (!urls.length) {
