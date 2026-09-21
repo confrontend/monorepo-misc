@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
+import asyncio
 import html
 import json
 import logging
@@ -45,6 +46,7 @@ PLAYLIST_URL_PATTERN = re.compile(
     r"(?:(?:https?:)?//(?:www\.)?youtube\.com)?/playlist\?list=([A-Za-z0-9_-]+)",
     re.IGNORECASE,
 )
+YOUTUBE_ACCESS_DELAY_SECONDS = 1.0
 
 
 def clean_filename(name: str, max_length: int = 100) -> str:
@@ -169,6 +171,7 @@ def metadata_options() -> dict[str, Any]:
         "extract_flat": True,
         "skip_download": True,
         "ignoreerrors": True,
+        "sleep_interval_requests": YOUTUBE_ACCESS_DELAY_SECONDS,
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
         "referer": "https://www.youtube.com/",
     }
@@ -185,6 +188,8 @@ def subtitle_options(output_dir: Path) -> dict[str, Any]:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "sleep_interval_requests": YOUTUBE_ACCESS_DELAY_SECONDS,
+        "sleep_interval_subtitles": 1,
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
         "referer": "https://www.youtube.com/",
     }
@@ -244,6 +249,7 @@ async def generate_progress(
         playlists: list[dict[str, Any]] = []
 
         for playlist_index, playlist_url in enumerate(source_urls, 1):
+            await asyncio.sleep(YOUTUBE_ACCESS_DELAY_SECONDS)
             yield stream_event(
                 "discovery",
                 phase="playlist",
@@ -335,6 +341,7 @@ async def generate_progress(
                     continue
 
                 for video_index, video_url in enumerate(videos, 1):
+                    await asyncio.sleep(YOUTUBE_ACCESS_DELAY_SECONDS)
                     title = f"Video {video_index}"
                     partial_text = ""
                     base_progress = {
@@ -369,6 +376,7 @@ async def generate_progress(
                                 message=f"Downloading subtitles: {title[:80]}",
                                 **{**base_progress, "title": title},
                             )
+                            await asyncio.sleep(YOUTUBE_ACCESS_DELAY_SECONDS)
                             ydl.download([video_url])
 
                         candidates = [

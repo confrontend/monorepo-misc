@@ -1,0 +1,7 @@
+================================================================================
+PLAYLIST: ICT Trade Executions
+VIDEO: Algorithmic High Frequency Trading \ January 25, 2024
+URL: https://www.youtube.com/watch?v=E_xS2AruCYg
+================================================================================
+
+so I mentioned on the live stream uh yesterday that every 15 minutes there is a scout that you can take and uh I'm going to show you here what one of them might look like um going along and an inversion Fair valuea stop loss will be here it's not a lot because it's a 5-second chart so every candle stick represents 5 seconds in duration do you see these relative equal highs here that is where the algorithm is going to reprice to and not just there it's going to spike up above this high right here so I have that sitting there like that and I'm keying off of the 1050 to 1110 macro Gap volume of balance it start running higher here I'll add five more minor buy side here it should accelerate once it gets above here and then reach real aggressive above here and here [Music] okay risk and costs are covered 5sec chart folks 5c chart how many think uh the market offers a a pretty good supply of these types of setups throughout the day oh Robins you have no idea what's coming

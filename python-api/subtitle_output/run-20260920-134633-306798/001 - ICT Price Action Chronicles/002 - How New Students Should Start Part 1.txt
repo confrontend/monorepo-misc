@@ -1,0 +1,7 @@
+================================================================================
+PLAYLIST: ICT Price Action Chronicles
+VIDEO: How New Students Should Start Part 1
+URL: https://www.youtube.com/watch?v=BWEPtHZ1Y2Y
+================================================================================
+
+[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

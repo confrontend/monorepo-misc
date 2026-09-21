@@ -114,6 +114,9 @@ be copied or downloaded as a `.txt` file. The backend also persists each run
 under `python-api/subtitle_output/<run-id>/`, including per-video files, per-
 playlist files, and `ALL_SUBTITLES.txt`.
 
+YouTube accesses are serialized with a one-second delay between application-level
+playlist/video operations and yt-dlp extraction/subtitle requests.
+
 ### Instagram Reel Downloader Workflow
 
 **Step 1: Extract Top Reels from Instagram HTML**

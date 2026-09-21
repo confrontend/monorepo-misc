@@ -1,0 +1,7 @@
+================================================================================
+PLAYLIST: ICT Price Action Chronicles
+VIDEO: Video 12
+URL: https://www.youtube.com/watch?v=g2QvEkLbjZI
+================================================================================
+
+[Error: [0;31mERROR:[0m [youtube] g2QvEkLbjZI: This video is unavailable]
