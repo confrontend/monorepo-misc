@@ -1,0 +1,7 @@
+================================================================================
+PLAYLIST: TRADING SECRETS YOU MUST KNOW!
+VIDEO: Ultimate Fibonacci Trading Course (Retracement, Extension, Expansion)
+URL: https://www.youtube.com/watch?v=oVMeymdZwWI
+================================================================================
+
+[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

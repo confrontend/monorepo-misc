@@ -1,0 +1,7 @@
+================================================================================
+PLAYLIST: PRICE ACTION SERIES [In Order]
+VIDEO: Ultimate Fibonacci Extension Trading Strategy (Dangerously Effective!)
+URL: https://www.youtube.com/watch?v=yMXzpf4thyY
+================================================================================
+
+[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

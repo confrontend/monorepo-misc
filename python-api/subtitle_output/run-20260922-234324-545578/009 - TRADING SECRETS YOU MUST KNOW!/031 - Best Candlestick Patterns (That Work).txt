@@ -1,0 +1,7 @@
+================================================================================
+PLAYLIST: TRADING SECRETS YOU MUST KNOW!
+VIDEO: Best Candlestick Patterns (That Work)
+URL: https://www.youtube.com/watch?v=W3PCTl5kxe0
+================================================================================
+
+[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]
