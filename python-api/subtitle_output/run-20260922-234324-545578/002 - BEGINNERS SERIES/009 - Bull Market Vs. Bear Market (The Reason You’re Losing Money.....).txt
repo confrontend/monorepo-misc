@@ -1,7 +1,0 @@
-================================================================================
-PLAYLIST: BEGINNERS SERIES
-VIDEO: Bull Market Vs. Bear Market (The Reason You’re Losing Money.....)
-URL: https://www.youtube.com/watch?v=5pJzByyBFYI
-================================================================================
-
-[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

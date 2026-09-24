@@ -13,7 +13,6 @@ import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from datetime import datetime
 
 import yt_dlp
 
@@ -55,13 +54,12 @@ def clean_filename(name: str, max_length: int = 100) -> str:
     return (cleaned[:max_length] or "untitled").strip(" .")
 
 
-def create_run_directory() -> Path:
-    default_root = Path(__file__).resolve().parent / "subtitle_output"
+def create_channel_directory(channel_name: str) -> Path:
+    default_root = Path(__file__).resolve().parent.parent / "vantage" / "articles"
     output_root = Path(os.environ.get("SUBTITLE_OUTPUT_DIR", str(default_root)))
-    run_name = datetime.now().astimezone().strftime("run-%Y%m%d-%H%M%S-%f")
-    run_directory = output_root / run_name
-    run_directory.mkdir(parents=True, exist_ok=False)
-    return run_directory
+    channel_directory = output_root / clean_filename(channel_name)
+    channel_directory.mkdir(parents=True, exist_ok=True)
+    return channel_directory
 
 
 def stream_event(event_type: str, **payload: Any) -> str:
@@ -195,14 +193,22 @@ def subtitle_options(output_dir: Path) -> dict[str, Any]:
     }
 
 
-def playlist_entries(url: str) -> tuple[str, list[str], Optional[str]]:
-    """Return title, video URLs, and an optional extraction error."""
+def playlist_entries(
+    url: str,
+) -> tuple[str, list[str], str, bool, Optional[str]]:
+    """Return title, video URLs, channel name, playlist flag, and an error."""
     try:
         with yt_dlp.YoutubeDL(metadata_options()) as ydl:
             info = ydl.extract_info(url, download=False)
 
         if not info:
-            return "Unknown playlist", [], "No metadata returned by yt-dlp"
+            return (
+                "Unknown playlist",
+                [],
+                "Unknown channel",
+                True,
+                "No metadata returned by yt-dlp",
+            )
 
         entries = [entry for entry in (info.get("entries") or []) if entry]
         if info.get("_type") == "playlist" or entries:
@@ -211,15 +217,37 @@ def playlist_entries(url: str) -> tuple[str, list[str], Optional[str]]:
                 for entry in entries
                 if (video_url := entry_to_video_url(entry))
             ]
-            return info.get("title") or "Untitled playlist", videos, None
+            entries_channel = next(
+                (
+                    entry.get("channel") or entry.get("uploader")
+                    for entry in entries
+                    if entry.get("channel") or entry.get("uploader")
+                ),
+                None,
+            )
+            channel = info.get("channel") or info.get("uploader") or entries_channel
+            return (
+                info.get("title") or "Untitled playlist",
+                videos,
+                channel or "Unknown channel",
+                True,
+                None,
+            )
 
         video_url = entry_to_video_url(info)
         if not video_url:
-            return info.get("title") or "Unknown video", [], "No video URL returned"
-        return info.get("title") or "Single video", [video_url], None
+            return (
+                info.get("title") or "Unknown video",
+                [],
+                "Unknown channel",
+                False,
+                "No video URL returned",
+            )
+        channel = info.get("channel") or info.get("uploader") or "Unknown channel"
+        return info.get("title") or "Single video", [video_url], channel, False, None
     except Exception as exc:
         logger.exception("Could not inspect %s", url)
-        return "Unavailable playlist", [], str(exc)
+        return "Unavailable playlist", [], "Unknown channel", True, str(exc)
 
 
 async def generate_progress(
@@ -261,10 +289,12 @@ async def generate_progress(
                 playlist_url=playlist_url,
             )
 
-            title, videos, error = playlist_entries(playlist_url)
+            title, videos, channel, is_playlist, error = playlist_entries(playlist_url)
             playlists.append(
                 {
                     "title": title,
+                    "channel": channel,
+                    "is_playlist": is_playlist,
                     "url": playlist_url,
                     "videos": videos,
                     "error": error,
@@ -297,10 +327,18 @@ async def generate_progress(
             errors = [playlist["error"] for playlist in playlists if playlist["error"]]
             raise ValueError(errors[0] if errors else "No videos were found")
 
-        run_directory = create_run_directory()
+        output_root = Path(
+            os.environ.get(
+                "SUBTITLE_OUTPUT_DIR",
+                str(Path(__file__).resolve().parent.parent / "vantage" / "articles"),
+            )
+        )
+        output_root.mkdir(parents=True, exist_ok=True)
         processed_videos = 0
         successful_videos = 0
         all_subtitles: list[str] = []
+        channel_subtitles: dict[str, list[str]] = {}
+        channel_directories: dict[str, Path] = {}
 
         with tempfile.TemporaryDirectory(prefix="youtube-subtitles-") as temp_dir:
             output_dir = Path(temp_dir)
@@ -308,10 +346,13 @@ async def generate_progress(
             for playlist_index, playlist in enumerate(playlists, 1):
                 playlist_title = playlist["title"]
                 videos = playlist["videos"]
-                playlist_directory = run_directory / (
-                    f"{playlist_index:03d} - {clean_filename(playlist_title)}"
-                )
-                playlist_directory.mkdir(parents=True, exist_ok=True)
+                channel_name = playlist["channel"] or "Unknown channel"
+                playlist_directory = channel_directories.get(channel_name)
+                if channel_name != "Unknown channel":
+                    playlist_directory = channel_directories.setdefault(
+                        channel_name, create_channel_directory(channel_name)
+                    )
+                    channel_subtitles.setdefault(channel_name, [])
                 playlist_subtitles: list[str] = []
 
                 yield stream_event(
@@ -369,6 +410,14 @@ async def generate_progress(
                             if info:
                                 title = info.get("title") or title
                                 video_id = info.get("id")
+                                video_channel = info.get("channel") or info.get("uploader")
+                                if video_channel and channel_name == "Unknown channel":
+                                    channel_name = video_channel
+                                    playlist_directory = channel_directories.setdefault(
+                                        channel_name,
+                                        create_channel_directory(channel_name),
+                                    )
+                                    channel_subtitles.setdefault(channel_name, [])
 
                             yield stream_event(
                                 "progress",
@@ -417,17 +466,24 @@ async def generate_progress(
                             if path.is_file():
                                 path.unlink(missing_ok=True)
 
+                    if playlist_directory is None:
+                        playlist_directory = channel_directories.setdefault(
+                            channel_name, create_channel_directory(channel_name)
+                        )
+                        channel_subtitles.setdefault(channel_name, [])
+
                     video_file = playlist_directory / (
-                        f"{video_index:03d} - {clean_filename(title)}.txt"
+                        f"{clean_filename(title, max_length=180)}.txt"
                     )
                     video_file.write_text(
                         partial_text.strip() + "\n", encoding="utf-8"
                     )
                     playlist_subtitles.append(partial_text)
+                    channel_subtitles[channel_name].append(partial_text)
                     processed_videos += 1
-                    aggregate_file = run_directory / "ALL_SUBTITLES.txt"
+                    aggregate_file = playlist_directory / "ALL_SUBTITLES.txt"
                     aggregate_file.write_text(
-                        "\n".join(all_subtitles).strip() + "\n",
+                        "\n".join(channel_subtitles[channel_name]).strip() + "\n",
                         encoding="utf-8",
                     )
                     yield stream_event(
@@ -439,7 +495,7 @@ async def generate_progress(
                         video_count=processed_videos,
                         successful_video_count=successful_videos,
                         saved_file=str(video_file),
-                        output_directory=str(run_directory),
+                        output_directory=str(playlist_directory),
                         **{
                             **base_progress,
                             "overall_current": processed_videos,
@@ -456,13 +512,15 @@ async def generate_progress(
                         },
                     )
 
-                playlist_file = run_directory / (
-                    f"{playlist_index:03d} - {clean_filename(playlist_title)}.txt"
-                )
-                playlist_file.write_text(
-                    "\n".join(playlist_subtitles).strip() + "\n",
-                    encoding="utf-8",
-                )
+                playlist_file = None
+                if playlist["is_playlist"] and playlist_subtitles:
+                    playlist_file = playlist_directory / (
+                        f"{clean_filename(playlist_title)}.txt"
+                    )
+                    playlist_file.write_text(
+                        "\n".join(playlist_subtitles).strip() + "\n",
+                        encoding="utf-8",
+                    )
 
                 yield stream_event(
                     "playlist_complete",
@@ -475,8 +533,8 @@ async def generate_progress(
                     overall_current=processed_videos,
                     overall_total=total_videos,
                     status="complete",
-                    saved_file=str(playlist_file),
-                    output_directory=str(run_directory),
+                    saved_file=str(playlist_file) if playlist_file else None,
+                    output_directory=str(playlist_directory or output_root),
                 )
 
         if html_content:
@@ -487,8 +545,13 @@ async def generate_progress(
             result_title = f"YouTube import: {len(playlists)} playlists"
 
         combined_text = "\n".join(all_subtitles).strip()
-        aggregate_file = run_directory / "ALL_SUBTITLES.txt"
-        aggregate_file.write_text(combined_text + "\n", encoding="utf-8")
+        aggregate_files = []
+        for channel_name, subtitles in channel_subtitles.items():
+            aggregate_file = channel_directories[channel_name] / "ALL_SUBTITLES.txt"
+            aggregate_file.write_text(
+                "\n".join(subtitles).strip() + "\n", encoding="utf-8"
+            )
+            aggregate_files.append(aggregate_file)
 
         yield stream_event(
             "complete",
@@ -499,8 +562,12 @@ async def generate_progress(
             playlist_count=len(playlists),
             successful_video_count=successful_videos,
             message=f"Completed {processed_videos} video(s) across {len(playlists)} playlist(s)",
-            output_directory=str(run_directory),
-            aggregate_file=str(aggregate_file),
+            output_directory=(
+                str(next(iter(channel_directories.values())))
+                if len(channel_directories) == 1
+                else str(output_root)
+            ),
+            aggregate_file=str(aggregate_files[0]) if len(aggregate_files) == 1 else None,
         )
     except Exception as exc:
         logger.exception("Subtitle extraction failed")

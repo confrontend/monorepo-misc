@@ -1,7 +1,0 @@
-================================================================================
-PLAYLIST: SUPPORT & RESISTANCE
-VIDEO: ULTIMATE Forex Trading Beginners Course (This Is All You Need)
-URL: https://www.youtube.com/watch?v=aZq1EHjYgZs
-================================================================================
-
-[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

@@ -1,7 +1,0 @@
-================================================================================
-PLAYLIST: PRICE ACTION SERIES [In Order]
-VIDEO: Supply & Demand Trading Strategy Banks Don’t Want You To Know About
-URL: https://www.youtube.com/watch?v=P0VomcX8DGM
-================================================================================
-
-[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

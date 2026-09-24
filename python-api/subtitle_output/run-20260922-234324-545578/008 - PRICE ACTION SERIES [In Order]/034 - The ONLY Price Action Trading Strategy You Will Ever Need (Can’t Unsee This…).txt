@@ -1,7 +1,0 @@
-================================================================================
-PLAYLIST: PRICE ACTION SERIES [In Order]
-VIDEO: The ONLY Price Action Trading Strategy You Will Ever Need (Can’t Unsee This…)
-URL: https://www.youtube.com/watch?v=l1UcIBxL14k
-================================================================================
-
-[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]

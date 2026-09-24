@@ -1,7 +1,0 @@
-================================================================================
-PLAYLIST: BEGINNERS SERIES
-VIDEO: Short Selling Explained (How Fortunes Are Made)
-URL: https://www.youtube.com/watch?v=Cry-9ArcOqY
-================================================================================
-
-[Error: [0;31mERROR:[0m Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests]
